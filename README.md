@@ -20,7 +20,7 @@ Needs Python 3.10+ and an authenticated [`gh`](https://cli.github.com/).
 
     python3 cockpit.py --repo OWNER/REPO [--project N] [--steer]
 
-Open the printed `http://127.0.0.1:PORT/?t=TOKEN` URL. Optional: `--modules` (JSON `{modules:[{id,name}], assign:[{path,module}]}`), `--git` (local clone), `--code DIR`.
+Open the printed `http://127.0.0.1:PORT/?t=TOKEN` URL. Optional: `--token-file PATH` (keep the token across restarts), `--modules` (JSON `{modules:[{id,name}], assign:[{path,module}]}`), `--git` (local clone), `--code DIR`.
 
 Modules come from the Project field `Module` or `module:<name>` labels. The Code tab reads `DIR/metrics.json` plus optional `erd|dataflow|deps|js.svg`; without them it shows "not wired". Contract: see `code_view` in `logic.py`.
 

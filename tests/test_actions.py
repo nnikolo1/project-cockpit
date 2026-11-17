@@ -160,3 +160,11 @@ def test_do_act_status_codes(monkeypatch):
     assert C.do_act(dict(action="take", n=2), run=ran.append, state=S)[0] == 403
     def boom(op): raise RuntimeError("gh down")
     assert C.do_act(dict(action="cancel", n=1), run=boom, state=S)[0] == 502
+
+
+def test_token_file_is_created_private_and_reused(tmp_path):
+    p = tmp_path / "sub" / "token"
+    t = C.load_token(str(p))
+    assert t and C.load_token(str(p)) == t
+    assert oct(p.stat().st_mode & 0o777) == "0o600"
+    assert C.load_token() != C.load_token()

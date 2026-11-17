@@ -4,6 +4,7 @@ Every action is exactly one GitHub operation (labels, sub-issues, dependencies, 
 import argparse
 import json
 import logging
+import os
 import pathlib
 import secrets
 import subprocess
@@ -408,6 +409,20 @@ class H(BaseHTTPRequestHandler):
         self.send(*do_act(form))
 
 
+def load_token(path=None):
+    """A fresh random token, or the one kept in `path` (created mode 0600 if missing)."""
+    if not path:
+        return secrets.token_urlsafe(16)
+    p = pathlib.Path(path).expanduser()
+    if not p.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(secrets.token_urlsafe(16))
+        log.info("created token file %s", p)
+    return p.read_text().strip()
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--repo", required=True, help="OWNER/REPO")
@@ -419,6 +434,7 @@ def main():
     ap.add_argument("--modules", help="JSON {modules:[{id,name,docs?}], assign:[{path,module}]}")
     ap.add_argument("--phases", help="extra timeline.json ({module, events:[...]}) merged into the timeline")
     ap.add_argument("--code", help="code snapshot directory: metrics.json and erd|dataflow|deps|js.svg (see README)")
+    ap.add_argument("--token-file", help="keep the access token in this file (created 0600 if missing), so the URL survives restarts")
     ap.add_argument("--steer", action="store_true", help="enable actions (default: read-only)")
     ap.add_argument("--simulate-orchestrator", action="store_true", help="demo buttons: 'takes it' and 'completes it'")
     a = ap.parse_args()
@@ -429,11 +445,11 @@ def main():
     log.info("repo=%s project=%s mode=%s", a.repo, a.project, "STEERING" if steer else "READ-ONLY")
     if steer and gh_user() != CFG["manager"]:
         log.warning("gh is logged in as %s but the Manager is %s: protected labels set now would be flagged unauthorised", gh_user(), CFG["manager"])
-    H.token = secrets.token_urlsafe(16)
+    H.token = load_token(a.token_file)
     host = "0.0.0.0" if a.lan else "127.0.0.1"
     if a.lan:
         log.warning("--lan: plain HTTP, the token travels unencrypted; trusted network only")
-    log.info("open http://%s:%d/?t=%s  (acting as the gh user; manager=%s)", host, a.port, H.token, CFG["manager"])
+    log.info("open http://%s:%d/?t=%s  (acting as the gh user; manager=%s)", host, a.port, "<token file>" if a.token_file else H.token, CFG["manager"])
     ThreadingHTTPServer((host, a.port), H).serve_forever()
 
 
