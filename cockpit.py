@@ -114,6 +114,8 @@ def build_state():
         (issues, events), project, deadlines = fi.result(), fp.result(), fd.result()
     cfgm = load_modules()
     tasks, mods = L.derive(issues, events, project, CFG["manager"], (cfgm or {}).get("modules", []), grow=not cfgm)
+    for t in tasks:
+        t["modDl"] = L.module_deadline(deadlines, t["module"])  # (date, module it is set on): the sub-module's, else the module's
     for m in mods:
         m["gaps"], m["ndocs"] = L.module_facts(L.module_dir(CFG["git"], m)) if CFG["git"] and not m.get("virtual") else (None, None)
     keys = {i["number"]: L.split_title(i["title"], i["number"])[0] for i in issues}

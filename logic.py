@@ -116,19 +116,72 @@ def short_name(name):
     return re.split(r" / | \(", name)[0]
 
 
+SUBID = re.compile(r"[a-z0-9-]+(/[a-z0-9-]+)+")
+
+
+def parent_id(mid):
+    """Module ids are slash paths: 'alpha/one' lives under 'alpha'. -> the parent id, or None for a top-level module."""
+    return mid.rpartition("/")[0] or None
+
+
+def top_id(mid):
+    return mid.partition("/")[0]
+
+
+def chain(mid):
+    """'alpha/one' -> ['alpha/one', 'alpha']: the module, then its ancestors."""
+    out = [mid]
+    while parent_id(out[-1]):
+        out.append(parent_id(out[-1]))
+    return out
+
+
 def resolve_module(raw, mods, grow=False):
-    """Project-field / label spelling -> module id. Matches an id, or the start of a module name
+    """Project-field / label spelling -> module id. Matches an id, or the start of a top-level module name
     ('Alpha' -> 'alpha' for 'Alpha / core'). With grow=True an unknown name becomes a new module."""
     n = (raw or "").strip().lower()
     if not n:
         return "unassigned"
     for m in mods:
-        if n == m["id"] or m["name"].lower().startswith(n):
+        if n == m["id"] or (not parent_id(m["id"]) and m["name"].lower().startswith(n)):
             return m["id"]
     if grow:
-        mods.append(dict(id=re.sub(r"[^a-z0-9]+", "-", n).strip("-"), name=raw.strip()))
+        mods.append(dict(id=n if SUBID.fullmatch(n) else re.sub(r"[^a-z0-9]+", "-", n).strip("-"), name=raw.strip()))
         return mods[-1]["id"]
     return "unassigned"
+
+
+def task_module(field, labels):
+    """Module path of a task. field: top-level id from the Project field ('' = none); labels: ids from its `module:` labels.
+    A sub-module label wins when its top level equals the field (or there is no field); otherwise the field wins."""
+    sub = next((l for l in labels if "/" in l and (not field or top_id(l) == field)), None)
+    return sub or field or next(iter(labels), "unassigned")
+
+
+def with_parents(mods):
+    """Appends every missing ancestor of a listed module (in place)."""
+    seen = {m["id"] for m in mods}
+    for m in list(mods):
+        for p in chain(m["id"])[1:]:
+            if p not in seen:
+                seen.add(p)
+                mods.append(dict(id=p, name=p.rpartition("/")[2].capitalize()))
+
+
+def add_tree(mods, tasks):
+    """Adds parent, children (direct), counts (tasks at the node itself) and rollup (node plus all descendants) per stage, in place."""
+    for m in mods:
+        m["parent"] = parent_id(m["id"])
+        m["children"] = [c["id"] for c in mods if parent_id(c["id"]) == m["id"]]
+        m["counts"] = {s: sum(1 for t in tasks if t["module"] == m["id"] and t["stage"] == s) for s in STAGES}
+    for m in mods:
+        under = [x["counts"] for x in mods if x["id"] == m["id"] or x["id"].startswith(m["id"] + "/")]
+        m["rollup"] = {s: sum(c[s] for c in under) for s in STAGES}
+
+
+def module_deadline(deadlines, mid):
+    """-> (date, id of the module it is set on): the module's own deadline, else the nearest ancestor's; (None, None) if none."""
+    return next(((deadlines[i], i) for i in chain(mid) if deadlines.get(i)), (None, None))
 
 
 # ---------- derivation ----------
@@ -149,10 +202,10 @@ def derive(issues, events, project, manager, mods, grow):
         eff, bad = pol[i["number"]]
         key, title = split_title(i["title"], i["number"])
         p = project.get(i["number"], {})
-        mname = p.get("module") or _prefixed(i["labels"], "module:")
-        mid = resolve_module(mname, mods, grow)
-        if p.get("module") and mid != "unassigned":
-            pnames.setdefault(mid, p["module"])
+        field = resolve_module(p["module"], mods, grow) if p.get("module") else ""
+        mid = task_module(field, [resolve_module(l[7:], mods, grow) for l in i["labels"] if l.startswith("module:")])
+        if field and field != "unassigned":
+            pnames.setdefault(field, p["module"])
         prio = next((int(x[1]) for x in PRIO if x in eff), None)
         dues = [d for d in parse_due(eff)]
         due = max(dues, key=lambda d: latest_t.get((i["number"], f"due:{d}"), "")) if dues else None
@@ -168,10 +221,12 @@ def derive(issues, events, project, manager, mods, grow):
             status=p.get("status", ""), created=i["created_at"], closed=i.get("closed_at"), author=i.get("author"),
             desc=body.split("**Evidence**")[0].strip()[:700], evidence=[dict(text=t, url=u) for t, u in LINK.findall(body)][:6],
             labels=i["labels"], flags=[f"unauthorised: {n} set by {a}" for n, a in sorted(bad.items())], bad=sorted(bad)))
+    with_parents(mods)
     for m in mods:
         m["short"] = pnames.get(m["id"]) or short_name(m["name"])
     if any(t["module"] == "unassigned" for t in tasks) and not any(m["id"] == "unassigned" for m in mods):
         mods.append(dict(id="unassigned", name="Not mapped to a module", short="Unassigned", virtual=True))
+    add_tree(mods, tasks)
     return tasks, mods
 
 
