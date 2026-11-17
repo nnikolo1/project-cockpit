@@ -1,0 +1,9 @@
+# Memos
+
+Short, dated notes that are not decisions: background, known shortcuts, open items. Decisions are in [docs/adr](../adr/README.md).
+
+| Date | Memo |
+|---|---|
+| 2026-11-17 | [Roles and identity](2026.11.17-roles-and-identity.md) |
+| 2026-11-17 | [Phase 1 shortcuts](2026.11.17-phase-1-shortcuts.md) |
+| 2026-11-17 | [Roadmap (open items)](2026.11.17-roadmap.md) |
