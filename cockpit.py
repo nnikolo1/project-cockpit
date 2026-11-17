@@ -83,7 +83,14 @@ def cached(key, fn, ttl):
     with _lock:
         t, v = _cache.get(key, (0, None))
         if time.time() - t > ttl:
-            v = fn()
+            try:
+                v = fn()
+            except Exception:
+                if v is None:
+                    raise
+                log.warning("%s: refresh failed, serving the last good copy (%.0f s old)", key, time.time() - t)
+                _cache[key] = (time.time() - ttl + 15, v)  # try again in about 15 s, not on every request
+                return v
             _cache[key] = (time.time(), v)
         return v
 
@@ -118,9 +125,9 @@ def build_state():
 
 
 def get_state(fresh=False):
-    if fresh:
-        _cache.pop("state", None)
-    return cached("state", build_state, 5)
+    if fresh and "state" in _cache:
+        _cache["state"] = (0, _cache["state"][1])  # force a refresh but keep the old copy for a failed one
+    return cached("state", build_state, 20)
 
 
 # ---------- actions: plan (pure) -> execute ----------

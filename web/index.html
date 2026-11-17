@@ -466,6 +466,6 @@ document.addEventListener('submit',async function(e){
     if(await post({action:'new',title:title,desc:fd.get('desc'),module:fd.get('module'),type:fd.get('type'),cls:fd.get('cls'),parent:fd.get('parent')||''})){
       const nt=D.tasks.filter(x=>x.title===title).sort((a,b)=>b.number-a.number)[0];UI.drawer=nt?{mode:'task',key:nt.key}:null;UI.route='backlog';UI.filter='all';render();}}
 });
-setInterval(()=>{if(document.visibilityState==='visible'&&!UI.drawer&&D)reload(false);},60000);
+setInterval(()=>{if(document.visibilityState==='visible'&&!UI.drawer&&D)reload(false);},90000);
 reload(false);
 </script>
