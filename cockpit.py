@@ -30,7 +30,10 @@ SVGS = {"erd": "erd.svg", "dataflow": "dataflow.svg", "deps": "deps.svg", "js": 
 def run_gh(args):
     """Run `gh <args>` and return stdout; raises RuntimeError with gh's message on failure."""
     log.info("gh %s", " ".join(a if len(a) < 60 else a[:57] + "..." for a in args))
-    r = subprocess.run(["gh", *args], capture_output=True, text=True)
+    try:
+        r = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("gh timed out")
     if r.returncode:
         raise RuntimeError(r.stderr.strip() or f"gh exited {r.returncode}")
     return r.stdout
@@ -314,6 +317,34 @@ def do_act(form, run=run_gh, state=None):
     return 200, dict(ok=True, msg=msg)
 
 
+# ---------- rules ----------
+def run_git(args, timeout=30):
+    """Run `git -C <clone> <args>` (list-based, bounded) and return stdout."""
+    return subprocess.run(["git", "-C", CFG["git"], *args], capture_output=True, text=True, check=True, timeout=timeout).stdout
+
+
+def build_rules():
+    rc = L.rules_config(load_modules())
+    if not rc or not CFG["git"]:
+        return dict(configured=False)
+    t0, gs, spec = time.time(), rc["groups"], L.rule_pathspecs(rc["groups"])
+    fmt = ["log", "--no-renames", f"--format={L.LOG_FMT}"]
+    changes = L.parse_rule_changes(run_git(fmt + ["--since=90.days.ago", "--numstat", "--", *spec]), run_git(fmt + ["--since=90.days.ago", "-p", "-U0", "--", *spec]), gs, rc["managers"])
+    last = L.parse_last_changes(run_git(fmt + ["--name-only", "--", *spec]), gs)
+    files = L.rule_files([p for p in run_git(["ls-files", "-z", "--", *spec]).split("\0") if p], last, gs)
+    try:
+        pending = L.pending_rule_prs(json.loads(run_gh(["pr", "list", "-R", CFG["repo"], "--state", "open", "--json", "number,title,author,files,url,createdAt"])), gs)
+    except (RuntimeError, ValueError) as ex:
+        log.warning("rules: open pull requests unavailable (%s)", str(ex)[:80])
+        pending = []
+    log.info("rules: %d files, %d changes, %d pending PRs in %.1fs", len(files), len(changes), len(pending), time.time() - t0)
+    return dict(configured=True, groups=[g["name"] for g in gs], files=files, changes=changes, pending=pending, repo=CFG["repo"])
+
+
+def get_rules():
+    return cached("rules", build_rules, 120)
+
+
 # ---------- timeline / code ----------
 def load_commits():
     if CFG.get("git"):
@@ -337,6 +368,10 @@ def build_timeline(S):
         for m in S["modules"]:
             if not m.get("virtual"):
                 feed += L.static_entries(L.module_dir(CFG["git"], m), m["id"], CFG["repo"])
+    try:
+        feed += L.rule_feed(get_rules().get("changes", []), CFG["repo"])
+    except Exception as ex:  # the timeline must not break because the rule view could not be built
+        log.warning("timeline: rule changes unavailable (%s)", str(ex)[:80])
     if CFG["phases"]:
         pj = json.load(open(CFG["phases"]))
         feed += [dict(d=e["date"], type=e["type"], mod=pj.get("module", "unassigned"), text=e["text"], links=[l for l in (L.ref_link(r, CFG["repo"]) for r in e.get("refs", []))]) for e in pj["events"]]
@@ -402,6 +437,8 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, get_state(fresh=bool(q.get("fresh"))))
             if u.path == "/api/timeline":
                 return self.send(200, build_timeline(get_state()))
+            if u.path == "/api/rules":
+                return self.send(200, get_rules())
             if u.path == "/api/code":
                 return self.send(200, code_snapshot())
             name = u.path.removeprefix("/code/").removesuffix(".svg")
