@@ -130,7 +130,7 @@ def build_state():
 def get_state(fresh=False):
     if fresh and "state" in _cache:
         _cache["state"] = (0, _cache["state"][1])  # force a refresh but keep the old copy for a failed one
-    return cached("state", build_state, 20)
+    return cached("state", build_state, 120)
 
 
 # ---------- actions: plan (pure) -> execute ----------
