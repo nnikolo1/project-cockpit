@@ -1,0 +1,19 @@
+name: Task
+description: A task (or sub-task) to formulate
+title: "[task] "
+body:
+  - type: textarea
+    id: description
+    attributes: {label: Description, description: What and why. Acceptance criteria if any.}
+    validations: {required: true}
+  - type: input
+    id: module
+    attributes: {label: Parent module, description: "Module issue number, e.g. #16 (linked as sub-issue afterwards)"}
+  - type: dropdown
+    id: type
+    attributes: {label: Type, options: [feature, bug, decision, research, doc, devops, test]}
+    validations: {required: true}
+  - type: dropdown
+    id: class
+    attributes: {label: Class, options: [must, nice]}
+    validations: {required: true}

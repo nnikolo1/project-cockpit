@@ -1,0 +1,9 @@
+name: Module
+description: An uber-task - a folder for sub-tasks
+title: "[module] "
+labels: [module]
+body:
+  - type: textarea
+    id: goal
+    attributes: {label: Goal, description: What this module delivers when all its tasks are done.}
+    validations: {required: true}
