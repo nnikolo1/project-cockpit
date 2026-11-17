@@ -14,3 +14,4 @@ Short records of why the cockpit is the way it is. One decision per file, one sc
 | [0008](0008-code-intelligence-from-a-snapshot.md) | Code intelligence is consumed from a snapshot, not computed | accepted |
 | [0009](0009-stdlib-only-small-code-pure-tests.md) | Stdlib only, small code, pure-logic tests | accepted |
 | [0010](0010-rate-limit-resilience.md) | Rate-limit resilience: cache, stale-on-error, one call | accepted |
+| [0011](0011-deployment-and-role-separation.md) | Deployment: one cockpit per repo, role separation by identity and credentials | accepted |
