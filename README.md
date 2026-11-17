@@ -44,6 +44,9 @@ A change is flagged when it carries a Co-Authored-By trailer or bot author, or i
 - Relies on GitHub sub-issues, issue dependencies, Projects and Actions variables.
 - Reads the last 100 label events and 10 comments per issue.
 
+## Deployment
+Running it as a service and separating Manager, Orchestrator and Worker, with what is and is not enforced: [docs/deployment.md](docs/deployment.md).
+
 ## Decisions and notes
 - Architecture decisions: [docs/adr](docs/adr/README.md).
 - Memos (roles, shortcuts, roadmap): [docs/memos](docs/memos/README.md).
