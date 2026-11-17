@@ -26,6 +26,11 @@ Modules come from the Project field `Module` or `module:<name>` labels. The Code
 
 GitHub setup: `kit/` holds labels (`kit/setup.sh OWNER/REPO`), issue forms and the policy Action. Copy `kit/.github` to `.github` and `kit/policy.py` to `kit/policy.py` in the target repo, then `gh variable set MANAGER --body LOGIN`.
 
+## Rules tab
+Optional `rules` key in the `--modules` JSON: `{"rules": {"groups": [{"name": "Instructions", "paths": ["CLAUDE.md", "**/CLAUDE.md"]}], "managers": ["Name or e-mail"]}}`. Globs are repo-relative; `**/` spans directories (or none), `*` and `?` stay within one path segment.
+Needs `--git` (a local clone). The tab lists the rule files and their last change, the last 90 days of changes with a diff excerpt, and open pull requests touching them.
+A change is flagged when it carries a Co-Authored-By trailer or bot author, or is not by a listed Manager. Review marks stay in the browser (localStorage); nothing is stored server-side.
+
 ## How it works
 - GitHub is the store; labels carry the protected state (`released`, `P1`-`P3`, `due:DATE`, `cancelled`), counted only if the Manager set them.
 - One `gh` call per action. Read-only unless `--steer`.
