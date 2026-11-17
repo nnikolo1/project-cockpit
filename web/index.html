@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Project cockpit</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+/* Layout: a calm working surface. One top bar, one content column, a slide-over for any single task.
+   Colour: teal is the only accent and always means "act"; priority and blocker colours are semantic and never reused for decoration. */
+:root{
+  --bg:#f7f7f4;--surface:#ffffff;--line:#e2e0d8;--ink:#1d1d1a;--muted:#666560;
+  --accent:#0f766e;--accent-ink:#ffffff;--accent-tint:#e3f1ee;
+  --p1:#b42318;--p1-ink:#ffffff;--p2:#f7d9bf;--p2-ink:#7d3503;--p3:#e6ecf5;--p3-ink:#2f4a73;
+  --danger:#b42318;--danger-tint:#fdecea;--warn:#fbf0d9;--warn-ink:#724d00;
+  --s-embryo:#bdbbb0;--s-released:#7fbfb6;--s-progress:#0f766e;--s-done:#3b3a36;
+  --edge:#8b8a82;--font:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#151513;--surface:#1e1e1b;--line:#34342f;--ink:#ecebe6;--muted:#a09f97;
+  --accent:#3fb5a8;--accent-ink:#0b1f1c;--accent-tint:#17332f;
+  --p1:#e5645a;--p1-ink:#1a0503;--p2:#5a3a1c;--p2-ink:#f5d5b5;--p3:#26354d;--p3-ink:#cfdcf0;
+  --danger:#f17b72;--danger-tint:#3a1a17;--warn:#3a2f12;--warn-ink:#f0cf84;
+  --s-embryo:#55554d;--s-released:#2e6f67;--s-progress:#3fb5a8;--s-done:#bdbbb0;--edge:#77766e;color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#151513;--surface:#1e1e1b;--line:#34342f;--ink:#ecebe6;--muted:#a09f97;
+  --accent:#3fb5a8;--accent-ink:#0b1f1c;--accent-tint:#17332f;
+  --p1:#e5645a;--p1-ink:#1a0503;--p2:#5a3a1c;--p2-ink:#f5d5b5;--p3:#26354d;--p3-ink:#cfdcf0;
+  --danger:#f17b72;--danger-tint:#3a1a17;--warn:#3a2f12;--warn-ink:#f0cf84;
+  --s-embryo:#55554d;--s-released:#2e6f67;--s-progress:#3fb5a8;--s-done:#bdbbb0;--edge:#77766e;color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:14px/1.45 var(--font);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 48px}
+.wrap{max-width:1180px;margin:0 auto}
+a{color:var(--accent)}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+h1{font-size:22px;margin:0;font-weight:600}h2{font-size:15px;margin:0;font-weight:600}
+.muted{color:var(--muted)}.mono{font-family:var(--mono);font-size:12.5px}
+.top{display:flex;align-items:center;gap:20px;flex-wrap:wrap;padding:14px 0;border-bottom:1px solid var(--line)}
+.brand{font-weight:600;font-size:16px}
+.nav{display:flex;gap:4px}
+.nav button{background:none;border:0;padding:8px 12px;border-radius:8px;cursor:pointer;color:var(--muted);font-weight:500}
+.nav button[aria-current="page"]{color:var(--ink);background:var(--accent-tint)}
+.proto{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px}
+.pill{border-radius:999px;padding:2px 10px;background:var(--warn);color:var(--warn-ink);font-size:12px;font-weight:600}
+.pill.on{background:var(--accent-tint);color:var(--accent)}.pill.bad{background:var(--danger-tint);color:var(--danger)}
+.btn{min-height:38px;padding:0 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);cursor:pointer;font-weight:500}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.danger{border-color:var(--danger);color:var(--danger);background:var(--surface)}
+.btn.small{min-height:30px;padding:0 10px;font-size:13px}
+.btn:disabled{opacity:.5;cursor:default}
+.page{display:flex;flex-direction:column;gap:18px;padding-top:20px}
+.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.spread{justify-content:space-between}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px}
+.strip{display:flex;gap:20px;align-items:center;flex-wrap:wrap}
+.strip b{font-variant-numeric:tabular-nums}
+.label{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.chip{display:inline-block;border-radius:6px;padding:1px 8px;font-size:12px;background:var(--line);white-space:nowrap}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.p1{background:var(--p1);color:var(--p1-ink);font-weight:600}.p2{background:var(--p2);color:var(--p2-ink);font-weight:600}.p3{background:var(--p3);color:var(--p3-ink);font-weight:600}
+.p0{background:none;border:1px dashed var(--s-embryo);color:var(--muted)}
+.blk{background:var(--surface);border:1px solid var(--danger);color:var(--danger);font-weight:500}
+.blocks{background:var(--warn);color:var(--warn-ink)}
+.bar{display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--line)}
+.bar i{display:block;height:100%}
+.facts{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0}
+.facts dt{color:var(--muted)}.facts dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+.filters{display:flex;gap:8px;flex-wrap:wrap}
+.f{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 12px;cursor:pointer;font-size:13px}
+.f[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.tblbox{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%;min-width:860px}
+th{text-align:left;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;padding:10px 12px;border-bottom:1px solid var(--line)}
+td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+tr.blocked{background:var(--danger-tint)}tr.blocked td:first-child{box-shadow:inset 3px 0 0 var(--danger)}
+.linkbtn{background:none;border:0;padding:0;text-align:left;cursor:pointer;color:var(--ink)}
+.linkbtn:hover{text-decoration:underline}
+.inh{font-style:italic;color:var(--muted)}
+.warnline{color:var(--danger);font-size:12px}
+.feed{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+.feed .e{display:grid;grid-template-columns:96px 84px 104px 1fr;gap:12px;padding:11px 14px;border-bottom:1px solid var(--line);align-items:baseline}
+.feed .e:last-child{border-bottom:0}
+.seg{display:flex;position:relative;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin:0;padding:0}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg label{flex:1;text-align:center;padding:9px 0;cursor:pointer;font-weight:600;background:var(--surface);border-left:1px solid var(--line)}
+.seg label:first-of-type{border-left:0}
+.seg input:checked+label{box-shadow:inset 0 0 0 2px currentColor}
+.seg input:focus-visible+label{outline:2px solid var(--accent);outline-offset:-2px}
+.seg .l1{color:var(--p1);background:var(--danger-tint)}.seg .l2{color:var(--p2-ink);background:var(--p2)}.seg .l3{color:var(--p3-ink);background:var(--p3)}
+.field{display:flex;flex-direction:column;gap:5px}
+.field input[type=text],.field input[type=date],.field textarea,.field select{border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:9px 11px;min-height:40px}
+.field textarea{min-height:90px;resize:vertical}
+.drawer-bg{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:20}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(520px,100%);background:var(--bg);z-index:21;overflow-y:auto;border-left:1px solid var(--line);padding:16px max(16px,env(safe-area-inset-right,0px)) 40px 16px;display:flex;flex-direction:column;gap:14px}
+.proposal{background:var(--warn);color:var(--warn-ink);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.tile{display:flex;flex-direction:column;gap:3px}
+.tile .v{font-size:24px;font-weight:600;font-variant-numeric:tabular-nums}
+.tile.nw{border-style:dashed}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:8px;z-index:30;font-size:13px}
+.dg{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;overflow:auto;max-height:78vh}
+.dg svg{display:block;margin:0 auto}.dg.fit svg{width:100%;height:auto;min-width:0}
+.wf{display:block;width:100%;min-width:720px;height:auto}
+.wf text{fill:var(--ink);font-family:var(--font);font-size:13px}
+.wf .sm{font-size:12px;fill:var(--muted)}.wf .lh{font-size:13px;font-weight:600;fill:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.wf .lane{fill:var(--bg);stroke:var(--line)}
+.wf .box,.wf .dia{fill:var(--surface);stroke:var(--edge);stroke-width:1.3}
+.wf .m{fill:var(--accent-tint);stroke:var(--accent)}.wf .w{fill:var(--p3);stroke:var(--p3-ink)}
+.wf .st{fill:var(--line);stroke:none}.wf .note{fill:none;stroke:var(--edge);stroke-dasharray:4 3}
+.wf path.ar{fill:none;stroke:var(--edge);stroke-width:1.5}.wf marker path{fill:var(--edge);stroke:none}
+.page .page{padding-top:0}
+.tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+.tabs button{background:none;border:0;border-bottom:2px solid transparent;padding:8px 12px;cursor:pointer;color:var(--muted);font-weight:500}
+.tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+.legend{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--muted);align-items:center}
+@media (max-width:640px){
+  .feed .e{grid-template-columns:1fr;gap:4px}
+  .proto{margin-left:0}
+}
+@media (prefers-reduced-motion:no-preference){.drawer{animation:in .15s ease-out}@keyframes in{from{transform:translateX(24px);opacity:0}to{transform:none;opacity:1}}}
+</style>
+</style>
+
+<div class="wrap" id="app"></div>
+<script>
+//LOGIC-START
+let TODAY='';
+const STAGES=['embryo','released','in_progress','completed','cancelled'];
+const STAGE_LABEL={embryo:'embryo',released:'released',in_progress:'in progress',completed:'completed',cancelled:'cancelled'};
+const TYPES=['feature','bug','decision','research','doc','devops','test'];
+function byKey(d,k){return d.tasks.find(t=>t.key===k);}
+function modOf(d,t){return MODULES.find(m=>m.id===t.module)||{id:'unassigned',short:'Unassigned'};}
+function eff(d,t){
+  if(t.deadline)return {d:t.deadline,inh:false};
+  const p=t.parent&&byKey(d,t.parent);
+  if(p){const e=eff(d,p);if(e.d)return {d:e.d,inh:true,src:p.key};}
+  const md=d.modDeadline[t.module];
+  if(md)return {d:md,inh:true,src:modOf(d,t).short};
+  return {d:null,inh:false};
+}
+function days(a,b){const f=s=>{const x=s.split('-');return Date.UTC(+x[0],+x[1]-1,+x[2]);};return Math.round((f(b)-f(a))/864e5);}
+function isOpen(t){return t.stage!=='completed'&&t.stage!=='cancelled';}
+function unfinished(d,t){return t.blockedBy.map(k=>byKey(d,k)).filter(b=>b&&b.stage!=='completed');}
+function isBlocked(d,t){return (t.stage==='embryo'||t.stage==='released')&&unfinished(d,t).length>0;}
+function blocksCount(d,t){return d.tasks.filter(x=>isOpen(x)&&x.blockedBy.includes(t.key)).length;}
+function conflict(d,t){
+  const me=eff(d,t).d;if(!me)return null;
+  for(const b of unfinished(d,t)){const e=eff(d,b).d;if(e&&e>me)return b;}
+  return null;
+}
+function cmp(d){return (a,b)=>
+  ((a.prio||9)-(b.prio||9))||((eff(d,a).d||'9999').localeCompare(eff(d,b).d||'9999'))||(blocksCount(d,b)-blocksCount(d,a))||
+  ((a.cls===b.cls)?0:(a.cls==='must'?-1:1))||a.key.localeCompare(b.key);}
+function ranked(d){return d.tasks.filter(t=>t.stage==='released'&&unfinished(d,t).length===0).sort(cmp(d));}
+function overdue(d,t){const e=eff(d,t).d;return isOpen(t)&&e&&e<TODAY;}
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function tok(n){return n==null?'':(n>=1000?Math.round(n/1000)+'k':String(n));}
+function prioChip(t){return t.prio?'<span class="chip p'+t.prio+'">P'+t.prio+'</span>':'<span class="chip p0">none yet</span>';}
+function dlHtml(t){const e=eff(D,t);if(!e.d)return '<span class="muted">—</span>';
+  const n=days(TODAY,e.d);const rel=n<0?'overdue '+(-n)+' d':(n===0?'today':'in '+n+' d');
+  const late=overdue(D,t);
+  if(e.inh)return '<span class="inh">↳ '+e.d+'</span> <span class="muted" style="font-size:12px">'+esc(e.src)+'</span>'+(late?' <span class="warnline">'+rel+'</span>':'');
+  return '<b>'+e.d+'</b> <span class="'+(late?'warnline':'muted')+'" style="font-size:12px">'+rel+'</span>';}
+function blockHtml(t){
+  const u=unfinished(D,t);const bc=blocksCount(D,t);let h='';
+  if(isOpen(t)&&u.length){h+=u.map(b=>'<span class="chip blk">blocked by '+esc(b.key)+'</span>').join(' ');
+    const c=conflict(D,t);if(c)h+='<div class="warnline">'+esc(c.key)+' is due '+eff(D,c).d+', after this</div>';}
+  if(bc&&isOpen(t))h+=' <span class="chip blocks">blocks '+bc+'</span>';
+  return h;}
+function stageHtml(t){return t.stage==='in_progress'?'<b>in progress</b>':(t.stage==='embryo'||t.stage==='cancelled'?'<span class="muted">'+STAGE_LABEL[t.stage]+'</span>':STAGE_LABEL[t.stage]);}
+function sortKey(t){return STAGES.indexOf(t.stage)===2?0:(t.stage==='released'?1:(t.stage==='embryo'?2:3));}
+
+
+/* Data layer: everything comes from the backend (/api/state, /api/timeline, /api/code). Nothing is stored in the browser. */
+let D=null,CODE={wired:false,modules:{}},FEED=[],MODULES=[];
+const SVGC={};
+const UI={route:'cockpit',filter:'all',mod:'all',drawer:null,tlMod:'all',tlType:'all',codeMod:'unassigned',codeTab:'quality',fit:{deps:true,erd:true,js:true,flow:false},toast:'',err:''};
+const ST=()=>!!(D&&D.source.steering);
+const SIM=()=>!!(D&&D.source.simulate);
+const nd=(v,f)=>v==null?'<span class="muted">no data</span>':(f?f(v):v);
+const modShort=id=>{const m=MODULES.find(x=>x.id===id);return m?m.short:(id==='all'?'All':'Unassigned');};
+async function api(path,opt){const r=await fetch(path,opt);let j={};try{j=await r.json();}catch(e){}if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j;}
+async function reload(fresh){
+  try{
+    const [s,f,c]=await Promise.all([api('/api/state'+(fresh?'?fresh=1':'')),api('/api/timeline'),api('/api/code')]);
+    D=s;TODAY=D.today;MODULES=D.modules;FEED=f.entries;CODE=c;UI.err='';
+    if(!CODE.modules[UI.codeMod]){const k=MODULES.find(m=>!m.virtual);UI.codeMod=CODE.modules[k&&k.id]?k.id:'unassigned';}
+  }catch(e){UI.err=String(e.message||e);}
+  render();
+}
+async function post(body){
+  try{const j=await api('/api/act',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    await reload(true);say(j.msg);return true;}
+  catch(e){say('Refused: '+e.message,6000);return false;}
+}
+
+/* ---------- views ---------- */
+function vCockpit(){
+  const open=D.proposals.filter(p=>p.open);
+  const emb=D.tasks.filter(t=>t.stage==='embryo').length;
+  const od=D.tasks.filter(t=>overdue(D,t)).length;
+  const blocked=D.tasks.filter(t=>isBlocked(D,t)).length;
+  const r=ranked(D);const nx=r[0];
+  const running=D.tasks.filter(t=>t.stage==='in_progress');
+  let h='<div class="page"><div class="card strip"><span class="label" style="color:var(--accent)">Needs you</span>'
+   +'<span><b>'+emb+'</b> embryos waiting for release</span><span><b>'+open.length+'</b> change proposals</span>'
+   +'<span><b>'+od+'</b> overdue</span><span><b>'+blocked+'</b> blocked</span><span class="'+(D.unauthorised?'warnline':'muted')+'"><b>'+D.unauthorised+'</b> unauthorised changes</span>'
+   +'<button class="btn primary" data-act="go" data-r="backlog" style="margin-left:auto">Open backlog</button></div>';
+  h+='<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))"><div class="card"><div class="row spread"><h2>Orchestrator queue</h2><span class="muted">running: '+running.length+'</span></div>';
+  h+=nx?'<p style="margin:10px 0 6px">Next: <button class="linkbtn" data-act="open" data-k="'+nx.key+'"><b>'+esc(nx.key)+'</b> '+esc(nx.title)+'</button></p><p class="muted" style="margin:0 0 10px;font-size:13px">'
+    +(nx.prio?'P'+nx.prio:'no priority')+' · '+(eff(D,nx).d?'due '+eff(D,nx).d:'no deadline')+' · unblocks '+blocksCount(D,nx)+' · '+nx.cls+'</p>'+(SIM()?'<button class="btn small" data-act="take" data-k="'+nx.key+'">Simulate: Orchestrator takes it</button>':'')
+    :'<p class="muted" style="margin:10px 0 0">Nothing released and unblocked. Release a task in the backlog.</p>';
+  h+='<p class="muted" style="font-size:12px;margin:12px 0 0">Ranking: your priority, then deadline, then tasks that unblock the most, then must before nice.</p></div>';
+  h+='</div>';
+  h+='<div class="grid">';
+  MODULES.filter(m=>!m.virtual).forEach(m=>{
+    const ts=D.tasks.filter(t=>t.module===m.id);const c=(CODE.modules||{})[m.id]||{};
+    const cnt={};STAGES.forEach(s=>cnt[s]=ts.filter(t=>t.stage===s).length);
+    const col={embryo:'var(--s-embryo)',released:'var(--s-released)',in_progress:'var(--s-progress)',completed:'var(--s-done)'};
+    const bar=ts.length?STAGES.slice(0,4).map(s=>cnt[s]?'<i style="width:'+(cnt[s]/ts.length*100)+'%;background:'+col[s]+'"></i>':'').join(''):'';
+    const txt=ts.length?STAGES.filter(s=>cnt[s]).map(s=>cnt[s]+' '+STAGE_LABEL[s]).join(' · '):'Nothing filed yet';
+    const md=D.modDeadline[m.id]||'';
+    const feed=FEED.filter(f=>f.mod===m.id).slice(0,3);
+    h+='<div class="card" style="display:flex;flex-direction:column;gap:12px"><div class="row spread"><button class="linkbtn" data-act="mod" data-m="'+m.id+'"><h2>'+esc(m.name)+'</h2></button><span class="muted">'+(ts.length?ts.length+' tasks':'no tasks')+'</span></div>'
+     +'<div class="bar" aria-hidden="true">'+bar+'</div><span class="muted" style="font-size:13px">'+txt+'</span>'
+     +'<dl class="facts"><dt>Open gaps</dt><dd>'+(m.gaps==null?'<span class="muted">no data</span>':m.gaps)+'</dd><dt>Documents</dt><dd>'+(m.ndocs==null?'<span class="muted">no data</span>':m.ndocs)+'</dd>'
+     +'<dt>Code lines</dt><dd>'+nd(c.code,x=>x.toLocaleString('en-US'))+'</dd><dt>Worst complexity</dt><dd>'+nd(c.cc)+'</dd><dt>Import cycles</dt><dd>'+nd(c.cyc,x=>x+' files')+'</dd></dl>'
+     +(!ST()?'<div class="row"><span class="muted" style="font-size:13px">Module deadline</span><b>'+(md||'—')+'</b></div>':'<form data-form="moddl" data-m="'+m.id+'" class="row"><label class="muted" for="md-'+m.id+'" style="font-size:13px">Module deadline</label><input id="md-'+m.id+'" type="date" name="d" value="'+md+'" style="border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:5px 8px;min-height:34px"><button class="btn small">Set</button></form>')
+     +'<div style="border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:5px;font-size:13px">'
+     +(feed.length?feed.map(f=>'<span><span class="mono muted">'+f.d.slice(5,10)+'</span> '+esc(f.text)+'</span>').join(''):'<span class="muted">Not documented yet.</span>')
+     +'</div><button class="btn small" data-act="code" data-m="'+m.id+'" style="align-self:flex-start">Code quality</button></div>';
+  });
+  const u=(CODE.modules||{}).unassigned;const un=D.tasks.filter(t=>t.module==='unassigned').length;
+  h+='<div class="card" style="border-style:dashed;display:flex;flex-direction:column;gap:10px"><h2>Not mapped to a module</h2><p class="muted" style="margin:0">'
+   +(u?u.code.toLocaleString('en-US')+' code lines, '+(u.churn==null?'some':u.churn)+' recent commits touch files that no module claims. Mapping them is your decision.':'No code snapshot wired.')
+   +(un?' '+un+' tasks have no module.':'')+'</p><button class="btn small" data-act="code" data-m="unassigned" style="align-self:flex-start">Code quality</button></div>';
+  return h+'</div></div>';
+}
+
+function vBacklog(){
+  const f=UI.filter;let ts=D.tasks.slice();
+  if(UI.mod!=='all')ts=ts.filter(t=>t.module===UI.mod);
+  if(f==='blocked')ts=ts.filter(t=>isBlocked(D,t));else if(f!=='all')ts=ts.filter(t=>t.stage===f);
+  ts.sort((a,b)=>sortKey(a)-sortKey(b)||((a.prio||9)-(b.prio||9))||((eff(D,a).d||'9').localeCompare(eff(D,b).d||'9'))||a.key.localeCompare(b.key,undefined,{numeric:true}));
+  const fl=['all','embryo','released','in_progress','completed','cancelled','blocked'];
+  let h='<div class="page"><div class="row spread"><div><h1>Backlog</h1><span class="muted">'+ts.length+' of '+D.tasks.length+' tasks</span></div>'+(ST()?'<button class="btn primary" data-act="new">New task</button>':'')+'</div>';
+  h+='<div class="filters" role="group" aria-label="Stage filter">'+fl.map(x=>'<button class="f" data-act="filter" data-v="'+x+'" aria-pressed="'+(f===x)+'">'+(x==='in_progress'?'in progress':x)+'</button>').join('')+'</div>';
+  h+='<div class="filters" role="group" aria-label="Module filter"><button class="f" data-act="modf" data-v="all" aria-pressed="'+(UI.mod==='all')+'">all modules</button>'+MODULES.map(m=>'<button class="f" data-act="modf" data-v="'+m.id+'" aria-pressed="'+(UI.mod===m.id)+'">'+esc(m.short)+'</button>').join('')+'</div>';
+  h+='<div class="row muted" style="font-size:13px;gap:8px">Priority <span class="chip p1">P1</span><span class="chip p2">P2</span><span class="chip p3">P3</span><span class="chip p0">none yet</span> &nbsp; Blockers <span class="chip blk">blocked by</span><span class="chip blocks">blocks n</span> &nbsp; <span class="inh">↳ italic = inherited deadline</span></div>';
+  h+='<div class="tblbox"><table><thead><tr><th>ID</th><th>Title</th><th>Module</th><th>Priority</th><th>Class</th><th>Deadline</th><th>Blockers</th><th>Stage</th></tr></thead><tbody>';
+  ts.forEach(t=>{h+='<tr class="'+(isBlocked(D,t)?'blocked':'')+'"><td class="mono">'+esc(t.key)+'</td><td><button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button></td><td>'+esc(modOf(D,t).short)+'</td><td>'+prioChip(t)+'</td><td class="muted">'+t.cls+'</td><td>'+dlHtml(t)+'</td><td>'+blockHtml(t)+'</td><td>'+stageHtml(t)+'</td></tr>';});
+  if(!ts.length)h+='<tr><td colspan="8" class="muted">Nothing matches this filter.</td></tr>';
+  return h+'</tbody></table></div><p class="muted" style="font-size:13px;margin:0">Only you set or move a deadline. A task without one inherits its parent’s, then its module’s.</p></div>';
+}
+
+function vTimeline(){
+  const up=D.tasks.filter(t=>isOpen(t)&&eff(D,t).d).sort((a,b)=>eff(D,a).d.localeCompare(eff(D,b).d)||a.key.localeCompare(b.key)).slice(0,8);
+  const types=['all','commit','doc','gap','milestone','issue','task event'];
+  let all=FEED.slice();
+  if(UI.tlMod!=='all')all=all.filter(x=>x.mod===UI.tlMod);
+  if(UI.tlType!=='all')all=all.filter(x=>x.type===UI.tlType);
+  const total=all.length;all=all.slice(0,200);
+  let h='<div class="page"><div><h1>Timeline</h1><span class="muted">Everything that happened, newest first, and what is due next.</span></div>';
+  h+='<div class="card"><h2>Upcoming deadlines</h2><div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">'
+   +(up.length?up.map(t=>{const e=eff(D,t);const n=days(TODAY,e.d);return '<div class="row" style="gap:10px"><span class="mono" style="width:86px">'+e.d+'</span><span class="'+(n<0?'warnline':'muted')+'" style="width:84px;font-size:12px">'+(n<0?'overdue '+(-n)+' d':(n===0?'today':'in '+n+' d'))+'</span>'+prioChip(t)+'<button class="linkbtn" data-act="open" data-k="'+t.key+'"><b class="mono">'+esc(t.key)+'</b> '+esc(t.title)+'</button>'+(e.inh?'<span class="inh" style="font-size:12px">inherited from '+esc(e.src)+'</span>':'')+'</div>';}).join(''):'<span class="muted">No deadlines set.</span>')+'</div></div>';
+  h+='<div class="filters" role="group" aria-label="Module filter"><button class="f" data-act="tlm" data-v="all" aria-pressed="'+(UI.tlMod==='all')+'">All</button>'+MODULES.map(m=>'<button class="f" data-act="tlm" data-v="'+m.id+'" aria-pressed="'+(UI.tlMod===m.id)+'">'+esc(m.short)+'</button>').join('')+'</div>';
+  h+='<div class="filters" role="group" aria-label="Type filter">'+types.map(x=>'<button class="f" data-act="tlt" data-v="'+x+'" aria-pressed="'+(UI.tlType===x)+'">'+x+'</button>').join('')+'</div>';
+  h+='<div class="feed">'+all.map(x=>'<div class="e"><span class="mono muted">'+esc(x.d)+'</span><span><span class="chip">'+x.type+'</span></span><span><span class="chip" style="background:var(--accent-tint)">'+esc(modShort(x.mod))+'</span></span><span>'+esc(x.text)+' '+x.links.map(s=>s[1]?'<a class="mono" target="_blank" rel="noopener" href="'+esc(s[1])+'">'+esc(s[0])+'</a>':'<span class="mono muted">'+esc(s[0])+'</span>').join(' ')+'</span></div>').join('')+(all.length?'':'<div class="e"><span class="muted">Nothing matches.</span></div>')+'</div>';
+  return h+'<p class="muted" style="font-size:13px;margin:0">Commits come from git, issues and task events from GitHub, the rest from the project files. Newest 200 of '+total+'.</p></div>';
+}
+
+function vQuality(){
+  const id=UI.codeMod;const c=CODE.modules[id];const mm=MODULES.find(m=>m.id===id);const nm=id==='unassigned'?'Not mapped to a module':(mm?mm.name:id);
+  const mods=MODULES.filter(m=>!m.virtual).concat([{id:'unassigned',short:'Unassigned'}]);
+  const snap=CODE.wired?'Snapshot '+esc(CODE.commit)+', '+esc((CODE.generated_at||'').slice(0,10))+'. Dimensions stay separate: no overall score, no pass or fail until you set a threshold.':'';
+  let h='<div class="page"><div><h1>Code: '+esc(nm)+'</h1><span class="muted">'+snap+'</span></div>';
+  h+='<div class="filters" role="group" aria-label="Module">'+mods.map(m=>'<button class="f" data-act="codem" data-v="'+m.id+'" aria-pressed="'+(id===m.id)+'">'+esc(m.short)+'</button>').join('')+'</div>';
+  if(!c)return h+'<div class="card tile nw"><span class="label">Code snapshot</span><span class="v muted" style="font-size:18px">not wired</span><span class="muted" style="font-size:13px">'+(CODE.wired?'no metrics for this module in the snapshot':'point --code at a code snapshot directory')+'</span></div></div>';
+  const T=(l,v,s)=>'<div class="card tile"><span class="label">'+l+'</span><span class="v">'+(v==null?'<span class="muted">n/a</span>':v)+'</span><span class="muted" style="font-size:13px">'+s+'</span></div>';
+  const f1=(v,n)=>v==null?null:v.toFixed(n);
+  h+='<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(230px,1fr))">'
+   +T('Size',c.code==null?null:c.code.toLocaleString('en-US'),'code lines'+(c.files?' · '+esc(c.files):''))
+   +T('Complexity',c.cc,'worst block'+(c.ccAt?' ('+esc(c.ccAt)+')':'')+' · mean '+(c.mean==null?'n/a':c.mean.toFixed(1))+' · '+(c.dfe==null?'n/a':c.dfe)+' blocks rated D to F')
+   +T('Maintainability',f1(c.mi,1),'mean index')
+   +T('Lint',c.lint,esc(c.lintNote||'default ruleset'))
+   +T('Dead-code candidates',c.dead,'candidates only; many are false positives')
+   +T('Import cycles',c.cyc==null?null:c.cyc+' files','in cycles')
+   +T('Duplication',c.dup==null?null:c.dup.toFixed(2)+'%','of code lines')
+   +T('Docstrings',c.doc==null?null:c.doc.toFixed(1)+'%','documented')
+   +(c.cov==null?'<div class="card tile nw"><span class="label">Test coverage</span><span class="v muted" style="font-size:18px">not wired</span><span class="muted" style="font-size:13px">needs a coverage run (pytest --cov)</span></div>':T('Test coverage',c.cov.toFixed(1)+'%','statements covered'))
+   +(c.churn!=null?T('Churn',c.churn,esc(c.churnNote)):'')+(c.testRatio!=null?T('Tests',c.testRatio,'test-to-code ratio; '+esc(c.testsNote)):'')+'</div>';
+  h+='<div class="tblbox"><table style="min-width:560px"><thead><tr><th>Hotspot</th><th>Commits in window</th><th>Worst complexity</th><th></th></tr></thead><tbody>'
+   +(c.hot||[]).map((x,i)=>'<tr><td class="mono">'+esc(x[0])+'</td><td>'+x[1]+'</td><td>'+x[2]+'</td><td>'+(ST()?'<button class="btn small" data-act="hotspot" data-m="'+id+'" data-i="'+i+'">File a task</button>':'')+'</td></tr>').join('')
+   +'</tbody></table></div><p class="muted" style="font-size:13px;margin:0">Hotspot = commits in the window × worst block complexity: a sorting aid, not a verdict..</p></div>';
+  return h;
+}
+
+/* ---------- code intelligence tabs, diagrams, workflow ---------- */
+const DIAG={
+ deps:{t:'Module dependency graph',d:'Who imports whom among the Python packages. An arrow from A to B means A imports B. Red edges are packages that import each other (cycles). Whole repository, not one module.'},
+ flow:{t:'Data flow: code to database tables',d:'Which packages read from or write to which database tables, found by scanning the SQL in the code. Blue solid arrows write, grey dotted arrows read. A heuristic scan: it misses table names built at run time.'},
+ erd:{t:'Entity-relationship diagram of the database',d:'The tables of the database grouped by name prefix, with the declared foreign keys between them. Amber dashed edges would mark relations only inferred from column names.'},
+ js:{t:'Extension dependency graph',d:'The scripts of the browser extension and which script loads which.'}
+};
+const SVGFILE={deps:'deps',flow:'dataflow',erd:'erd',js:'js'};
+function vDiagram(k){
+  const x=DIAG[k];const fit=UI.fit[k];
+  if(!CODE.wired||!CODE.diagrams.includes(SVGFILE[k]))return '<div class="card tile nw"><span class="label">'+x.t+'</span><span class="v muted" style="font-size:18px">not wired</span><span class="muted" style="font-size:13px">point --code at a code snapshot directory</span></div>';
+  return '<div class="row spread"><div style="max-width:70ch"><h2>'+x.t+'</h2><p class="muted" style="margin:4px 0 0">'+x.d+'</p></div><button class="btn small" data-act="fit" data-v="'+k+'">'+(fit?'Actual size':'Fit to width')+'</button></div>'
+   +'<div class="dg'+(fit?' fit':'')+'" id="dgbox" data-k="'+k+'">'+(SVGC[k]||'<span class="muted">Loading…</span>')+'</div><p class="muted" style="font-size:13px;margin:0">Snapshot '+esc(CODE.commit)+', '+esc((CODE.generated_at||'').slice(0,10))+'. Regenerate the snapshot to refresh.</p>';
+}
+async function hydrate(){
+  const b=document.getElementById('dgbox');if(!b||SVGC[b.dataset.k])return;
+  const k=b.dataset.k;
+  try{const r=await fetch('/code/'+SVGFILE[k]+'.svg');SVGC[k]=await r.text();}catch(e){SVGC[k]='<span class="warnline">could not load the diagram</span>';}
+  const again=document.getElementById('dgbox');if(again&&again.dataset.k===k)again.innerHTML=SVGC[k];
+}
+function vCode(){
+  const tabs=[['quality','Quality'],['deps','Dependencies'],['flow','Data flow'],['erd','ERD'],['js','Extension']];
+  const T=UI.codeTab;
+  return '<div class="page"><div><h1>Code</h1><span class="muted">Metrics and documentation drawn from the code itself, one snapshot of the repository.</span></div>'
+   +'<div class="tabs" role="tablist">'+tabs.map(t=>'<button role="tab" data-act="codetab" data-v="'+t[0]+'" aria-selected="'+(T===t[0])+'">'+t[1]+'</button>').join('')+'</div>'
+   +(T==='quality'?vQuality():vDiagram(T))+'</div>';
+}
+function wfSvg(){
+  const L=(cx,cy,ls,c)=>'<text'+(c?' class="'+c+'"':'')+' x="'+cx+'" y="'+(cy-(ls.length-1)*8+4)+'" text-anchor="middle">'+ls.map((l,i)=>'<tspan x="'+cx+'" dy="'+(i?16:0)+'">'+esc(l)+'</tspan>').join('')+'</text>';
+  const box=(cx,cy,w,h,ls,c)=>'<rect class="box '+(c||'')+'" x="'+(cx-w/2)+'" y="'+(cy-h/2)+'" width="'+w+'" height="'+h+'" rx="8"/>'+L(cx,cy,ls);
+  const pill=(cx,cy,w,t)=>'<rect class="st" x="'+(cx-w/2)+'" y="'+(cy-16)+'" width="'+w+'" height="32" rx="16"/>'+L(cx,cy,[t]);
+  const dia=(cx,cy,w,h,ls)=>'<polygon class="dia" points="'+cx+','+(cy-h/2)+' '+(cx+w/2)+','+cy+' '+cx+','+(cy+h/2)+' '+(cx-w/2)+','+cy+'"/>'+L(cx,cy,ls);
+  const ar=d=>'<path class="ar" d="'+d+'" marker-end="url(#wa)"/>';
+  const lab=(x,y,t)=>'<text class="sm" x="'+x+'" y="'+y+'">'+esc(t)+'</text>';
+  const note=(cx,cy,w,ls)=>'<rect class="note" x="'+(cx-w/2)+'" y="'+(cy-ls.length*8-8)+'" width="'+w+'" height="'+(ls.length*16+16)+'" rx="8"/>'+L(cx,cy,ls,'sm');
+  let s='<svg class="wf" viewBox="0 0 900 1130" role="img" aria-label="Task workflow flowchart in three lanes: Manager, Orchestrator, Worker"><defs><marker id="wa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z"/></marker></defs>';
+  [[10,290,'Manager (you)',155],[310,290,'Orchestrator (AI agent)',455],[610,280,'Worker (AI agent)',750]].forEach(l=>{s+='<rect class="lane" x="'+l[0]+'" y="40" width="'+l[1]+'" height="1080" rx="10"/><text class="lh" x="'+l[3]+'" y="28" text-anchor="middle">'+l[2]+'</text>';});
+  s+=box(155,86,230,46,['File a task or sub-task'],'m')+box(455,86,250,46,['Orchestrator files an embryo','(a suggestion)'])+pill(155,166,120,'Embryo')
+   +dia(155,250,170,76,['Release it?'])+box(155,350,250,56,['Release: set priority P1 to P3','and an optional deadline'],'m')+pill(155,422,120,'Released')
+   +dia(455,422,200,80,['All blockers','completed?'])+box(455,520,260,62,['Rank the queue: priority, deadline,','tasks that unblock the most,','must before nice'])
+   +box(455,606,250,44,['Assign to a free Worker','(workers setting)'])+box(750,606,230,56,['Work in its own work tree','and commit on a branch'],'w')
+   +dia(455,712,170,76,['Checks pass?'])+box(455,806,230,44,['Accept, merge and push'])+pill(455,876,130,'Completed')
+   +box(155,806,240,44,['Cancel at any time','before completed'],'m')+pill(155,876,130,'Cancelled')
+   +'<text class="lh" x="155" y="944" text-anchor="middle" style="text-anchor:middle">Change requests</text>'
+   +box(455,1010,270,56,['Orchestrator proposes a new','priority or deadline'])+dia(155,1010,190,80,['Accept the','proposal?'])+box(155,1090,230,40,['Change applied as the Manager'],'m');
+  s+=ar('M155 109V150')+ar('M455 109V166H215')+ar('M155 182V212')+ar('M155 288V322')+lab(166,308,'yes')
+   +ar('M70 250H35V166H95')+lab(40,241,'no')+ar('M155 378V406')+ar('M215 422H355')
+   +ar('M555 422H588V366H455V382')+lab(594,398,'no: wait')+ar('M455 462V489')+lab(466,478,'yes')+ar('M455 551V584')+ar('M580 606H635')
+   +ar('M700 634V664H455V674')+ar('M540 712H780V634')+lab(560,704,'no: rework')+ar('M455 750V784')+lab(466,770,'yes')+ar('M455 828V860')+ar('M155 828V860')
+   +ar('M320 1010H250')+ar('M155 1050V1070')+lab(166,1062,'yes')+ar('M60 1010H30')+lab(12,1034,'no: dismissed');
+  s+=note(750,150,250,['Priority and deadline are set only','by the Manager. A task without a','deadline inherits it from its parent','task, then from its module.'])
+   +note(750,290,250,['The Orchestrator makes the token','estimate before it assigns a task.','You never enter estimates.'])
+   +note(750,440,250,['Workers never write to the task','list. The Orchestrator records','what they did.']);
+  return s+'</svg>';
+}
+function vHow(){
+  return '<div class="page"><div><h1>How it works</h1><span class="muted">The life of a task, who does each step, and where the decisions are.</span></div>'
+   +'<div class="legend"><span><b>Rounded box</b> a step</span><span><b>Diamond</b> a decision</span><span><b>Pill</b> a state of the task</span><span><b>Arrow</b> what happens next</span></div>'
+   +'<div class="dg">'+wfSvg()+'</div>'
+   +'<div class="card" style="max-width:75ch"><h2>What to call these diagrams</h2><p style="margin:8px 0 0">This one is a <b>flowchart</b> (steps, decisions, arrows) with lanes for who acts. Because the pills are the task\u2019s states, it also works as a <b>state diagram</b>. A <b>data-flow diagram</b> is a different picture: it shows data moving between parts of the system. That is the Data flow tab under Code, which shows which code reads and writes which database tables.</p></div></div>';
+}
+/* ---------- drawer ---------- */
+function seg(name,sel){return '<fieldset class="seg" aria-label="Priority">'+[1,2,3].map(n=>'<input type="radio" id="'+name+n+'" name="p" value="'+n+'"'+(sel===n?' checked':'')+'><label class="l'+n+'" for="'+name+n+'">P'+n+'</label>').join('')+'</fieldset>';}
+function drawerTask(t){
+  const u=unfinished(D,t);const e=eff(D,t);const props=D.proposals.filter(p=>p.n===t.number);
+  const kids=D.tasks.filter(x=>x.parent===t.key);const blocks=D.tasks.filter(x=>isOpen(x)&&x.blockedBy.includes(t.key));
+  const others=D.tasks.filter(x=>x.key!==t.key&&!t.blockedBy.includes(x.key));
+  let h='<div class="row spread"><a class="mono" target="_blank" rel="noopener" href="'+esc(t.url)+'">'+esc(t.key)+'</a><button class="btn small" data-act="close">Close</button></div>'
+   +'<h1 style="font-size:19px;line-height:1.3">'+esc(t.title)+'</h1><div class="chips"><span class="chip" style="background:var(--accent-tint)">'+esc(modShort(t.module))+'</span><span class="chip">'+esc(t.type)+'</span><span class="chip">'+t.cls+'</span><span class="chip">'+STAGE_LABEL[t.stage]+'</span>'+prioChip(t)+'</div>';
+  h+='<dl class="facts"><dt>Deadline</dt><dd>'+dlHtml(t)+'</dd><dt>Blocked by</dt><dd>'+(u.length?u.map(b=>'<span class="chip blk">'+esc(b.key)+'</span>').join(' '):'<span class="muted">none</span>')+'</dd><dt>Blocks</dt><dd>'+(blocks.length?blocks.map(b=>'<span class="chip blocks">'+esc(b.key)+'</span>').join(' '):'<span class="muted">none</span>')+'</dd>'
+   +'<dt>Assignee</dt><dd>'+(t.assignee?esc(t.assignee):'<span class="muted">not assigned</span>')+'</dd><dt>Token estimate</dt><dd>'+(t.est?tok(t.est)+(t.used?' · used '+tok(t.used):''):'<span class="muted">not estimated yet</span>')+'</dd><dt>Parent</dt><dd>'+(t.parent?esc(t.parent):'module')+'</dd>'
+   +(t.hint?'<dt>Architect’s hint</dt><dd>'+esc(t.hint)+' <span class="muted">(not your priority)</span></dd>':'')+(t.status?'<dt>Project status</dt><dd>'+esc(t.status)+'</dd>':'')+'</dl>';
+  t.flags.forEach(f=>{h+='<div class="proposal" style="background:var(--danger-tint);color:var(--danger)"><b>Unauthorised change.</b> '+esc(f)+'. Ignored until the Manager sets it again.</div>';});
+  const c=conflict(D,t);if(c)h+='<div class="proposal" style="background:var(--danger-tint);color:var(--danger)"><b>Deadline conflict.</b> '+esc(c.key)+' blocks this task and is due '+eff(D,c).d+', after '+e.d+'.</div>';
+  h+=(t.desc?'<p style="margin:0;white-space:pre-wrap;overflow-wrap:anywhere">'+esc(t.desc)+'</p>':'')+(t.evidence.length?'<div style="display:flex;flex-direction:column;gap:3px">'+t.evidence.map(x=>'<a target="_blank" rel="noopener" href="'+esc(x.url)+'">'+esc(x.text)+'</a>').join('')+'</div>':'');
+  props.forEach(p=>{h+='<div class="proposal"><b>The Orchestrator proposes a change</b><span>'+(p.field==='deadline'?'Move the deadline to <b>'+esc(p.value)+'</b>.':'Set the priority to <b>P'+esc(p.value)+'</b>.')+' '+esc(p.reason)+'</span>'
+    +(ST()?'<div class="row"><button class="btn primary small" data-act="accept" data-n="'+t.number+'" data-id="'+esc(p.id)+'">Accept</button><button class="btn small" data-act="dismiss" data-n="'+t.number+'" data-id="'+esc(p.id)+'">Dismiss</button></div><span style="font-size:12px">Accepting applies it as you. Only you can change priority or a deadline.</span>':'')+'</div>';});
+  if(ST()){
+  if(t.stage==='embryo'){
+    h+='<form class="card" data-form="release" data-k="'+t.key+'" style="display:flex;flex-direction:column;gap:12px"><h2>Release this task</h2><div class="field"><span>Priority</span>'+seg('rp',2)+'<span class="muted" style="font-size:12px">1 is first. The Orchestrator ranks by priority, then deadline.</span></div>'
+     +'<div class="field"><label for="rd">Deadline (optional)</label><input id="rd" type="date" name="d"><span class="muted" style="font-size:12px">Complete by the end of this day. Leave empty to inherit from the parent or module.</span></div><button class="btn primary">Release</button></form>';
+  }else if(t.stage==='released'||t.stage==='in_progress'){
+    h+='<form class="card" data-form="change" data-k="'+t.key+'" style="display:flex;flex-direction:column;gap:12px"><h2>Change</h2><div class="field"><span>Priority</span>'+seg('cp',t.prio)+'</div><div class="field"><label for="cd">Deadline</label><input id="cd" type="date" name="d" value="'+(t.deadline||'')+'"><span class="muted" style="font-size:12px">Clear it to inherit again.</span></div><div class="row"><button class="btn primary">Save changes</button></div></form>';
+  }else h+='<p class="muted">Finished work is not reopened. File a new task instead.</p><button class="btn" data-act="followup" data-k="'+t.key+'">File a follow-up task</button>';
+  if(isOpen(t)){
+    h+='<div class="card" style="display:flex;flex-direction:column;gap:10px"><h2>Blockers</h2><div class="chips">'+(t.blockedBy.length?t.blockedBy.map(k=>'<button class="chip blk" style="cursor:pointer" data-act="unblock" data-k="'+t.key+'" data-b="'+k+'" aria-label="Remove blocker '+k+'">'+esc(k)+' ×</button>').join(''):'<span class="muted">No blockers.</span>')+'</div>'
+     +'<form class="row" data-form="block" data-k="'+t.key+'"><label class="muted" for="bk" style="font-size:13px">Blocked by</label><select id="bk" name="b" style="border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:6px;min-height:36px;max-width:220px">'+others.filter(isOpen).map(x=>'<option value="'+x.key+'">'+esc(x.key)+' '+esc(x.title.slice(0,28))+'</option>').join('')+'</select><button class="btn small">Add</button></form></div>';
+    h+='<div class="row"><button class="btn small" data-act="subtask" data-k="'+t.key+'">File a sub-task</button>'
+     +(SIM()&&t.stage==='released'&&!isBlocked(D,t)?'<button class="btn small" data-act="take" data-k="'+t.key+'">Simulate: Orchestrator takes it</button>':'')
+     +(SIM()&&t.stage==='in_progress'?'<button class="btn small" data-act="complete" data-k="'+t.key+'">Simulate: Orchestrator completes it</button>':'')
+     +'<button class="btn danger small" data-act="cancel" data-k="'+t.key+'">Cancel task</button></div>';
+  }
+  }
+  if(kids.length)h+='<div class="card"><h2>Sub-tasks</h2>'+kids.map(k=>'<div><button class="linkbtn" data-act="open" data-k="'+k.key+'"><b class="mono">'+esc(k.key)+'</b> '+esc(k.title)+'</button> '+prioChip(k)+'</div>').join('')+'</div>';
+  const ev=D.events.filter(x=>x.key===t.key);
+  h+='<div class="card"><h2>History</h2><div style="display:flex;flex-direction:column;gap:5px;margin-top:8px;font-size:13px">'+(ev.length?ev.map(x=>'<span><span class="mono muted">'+x.t.slice(5)+'</span> <b>'+esc(x.actor)+'</b> '+esc(x.text)+'</span>').join(''):'<span class="muted">No events yet.</span>')+'</div></div>';
+  return h;
+}
+function drawerNew(p){
+  p=p||{};
+  const mods=MODULES.filter(m=>!m.virtual);
+  return '<div class="row spread"><h1 style="font-size:19px">New task</h1><button class="btn small" data-act="close">Cancel</button></div>'
+   +'<form data-form="new" style="display:flex;flex-direction:column;gap:12px"><div class="field"><label for="nt">Title</label><input id="nt" type="text" name="title" required value="'+esc(p.title||'')+'"></div>'
+   +'<div class="field"><label for="nd">Description</label><textarea id="nd" name="desc">'+esc(p.desc||'')+'</textarea></div>'
+   +'<div class="field"><label for="nm">Module</label><select id="nm" name="module">'+mods.map(m=>'<option value="'+m.id+'"'+((p.module||'')===m.id?' selected':'')+'>'+esc(m.name)+'</option>').join('')+'<option value=""'+(mods.some(m=>m.id===p.module)?'':' selected')+'>No module</option></select></div>'
+   +'<div class="row"><div class="field" style="flex:1"><label for="ny">Type</label><select id="ny" name="type">'+TYPES.map(x=>'<option'+(x===(p.type||'decision')?' selected':'')+'>'+x+'</option>').join('')+'</select></div>'
+   +'<div class="field" style="flex:1"><label for="nc">Class</label><select id="nc" name="cls"><option>nice</option><option>must</option></select></div></div>'
+   +'<div class="field"><label for="np">Parent task (optional)</label><select id="np" name="parent"><option value="">None, directly under the module</option>'+D.tasks.filter(isOpen).map(x=>'<option value="'+x.number+'"'+(p.parent===x.number?' selected':'')+'>'+esc(x.key)+' '+esc(x.title.slice(0,40))+'</option>').join('')+'</select></div>'
+   +'<div class="proposal" style="background:var(--accent-tint);color:var(--ink)">Saved as an embryo. Only you can release it, set its priority or a deadline. The Orchestrator makes the token estimate.</div><button class="btn primary">Save</button></form>';
+}
+
+/* ---------- render and actions ---------- */
+function render(){
+  const R=UI.route;
+  const nav=[['cockpit','Cockpit'],['backlog','Backlog'],['timeline','Timeline'],['code','Code'],['how','How it works']];
+  let h='<div class="top"><span class="brand">Project cockpit</span><nav class="nav" aria-label="Main">'+nav.map(n=>'<button data-act="go" data-r="'+n[0]+'"'+(R===n[0]?' aria-current="page"':'')+'>'+n[1]+'</button>').join('')+'</nav>';
+  if(D){const s=D.source;
+    h+='<div class="proto"><span class="pill'+(s.steering?' on':'')+'">'+esc(s.repo)+', '+(s.steering?'steering on':'read-only')+'</span>'
+     +(s.steering&&s.user!==s.manager?'<span class="pill bad">acting as '+esc(s.user)+', not the Manager ('+esc(s.manager)+')</span>':'')
+     +'<span class="muted">fetched '+esc(s.fetched)+'</span><button class="btn small" data-act="refresh">Refresh</button></div>';}
+  h+='</div>';
+  if(UI.err)h+='<div class="page"><div class="card" style="border-color:var(--danger)"><b class="warnline">Could not load from GitHub.</b> <span class="muted">'+esc(UI.err)+'</span> <button class="btn small" data-act="refresh">Retry</button></div></div>';
+  else if(!D)h+='<div class="page"><span class="muted">Loading…</span></div>';
+  else{
+  h+=R==='cockpit'?vCockpit():R==='backlog'?vBacklog():R==='timeline'?vTimeline():R==='how'?vHow():vCode();
+  if(UI.drawer){const t=UI.drawer.key&&byKey(D,UI.drawer.key);h+='<div class="drawer-bg" data-act="close"></div><div class="drawer" role="dialog" aria-modal="true" aria-label="Task">'+(UI.drawer.mode==='new'&&ST()?drawerNew(UI.drawer.prefill):(t?drawerTask(t):''))+'</div>';}
+  }
+  if(UI.toast)h+='<div class="toast" role="status">'+esc(UI.toast)+'</div>';
+  document.getElementById('app').innerHTML=h;
+  hydrate();
+}
+let toastTimer=null;
+function say(m,ms){UI.toast=m;clearTimeout(toastTimer);toastTimer=setTimeout(()=>{UI.toast='';render();},ms||2200);render();}
+const num=k=>{const t=byKey(D,k);return t&&t.number;};
+function act(a,ds){
+  const t=ds.k&&byKey(D,ds.k);
+  switch(a){
+   case 'go':UI.route=ds.r;UI.drawer=null;render();window.scrollTo(0,0);break;
+   case 'code':UI.route='code';UI.codeTab='quality';UI.codeMod=ds.m;render();window.scrollTo(0,0);break;
+   case 'codetab':UI.codeTab=ds.v;render();break;
+   case 'fit':UI.fit[ds.v]=!UI.fit[ds.v];render();break;
+   case 'codem':UI.codeMod=ds.v;render();break;
+   case 'mod':UI.route='backlog';UI.mod=ds.m;UI.filter='all';render();window.scrollTo(0,0);break;
+   case 'filter':UI.filter=ds.v;render();break;
+   case 'modf':UI.mod=ds.v;render();break;
+   case 'tlm':UI.tlMod=ds.v;render();break;
+   case 'tlt':UI.tlType=ds.v;render();break;
+   case 'open':UI.drawer={mode:'task',key:ds.k};render();break;
+   case 'close':UI.drawer=null;render();break;
+   case 'refresh':reload(true);break;
+   case 'new':UI.drawer={mode:'new'};render();break;
+   case 'subtask':UI.drawer={mode:'new',prefill:{parent:t.number,module:t.module,title:'',type:'feature'}};render();break;
+   case 'followup':UI.drawer={mode:'new',prefill:{module:t.module,title:'Follow up on '+t.key,desc:'Follow-up to '+t.key+' ('+t.title+').',type:t.type}};render();break;
+   case 'hotspot':{const c=CODE.modules[ds.m];const x=c.hot[+ds.i];const real=MODULES.some(m=>m.id===ds.m&&!m.virtual);UI.drawer={mode:'new',prefill:{module:real?ds.m:'',title:'Reduce the complexity of '+x[0]+' (worst block '+x[2]+')',desc:'From the code snapshot '+CODE.commit+': '+x[1]+' commits in the window, worst block complexity '+x[2]+'.',type:'devops'}};UI.route='backlog';render();break;}
+   case 'take':case 'complete':case 'cancel':post({action:a,n:t.number});break;
+   case 'unblock':post({action:'unblock',n:t.number,b:num(ds.b)});break;
+   case 'accept':case 'dismiss':post({action:a,n:+ds.n,id:ds.id});break;
+  }
+}
+document.addEventListener('click',function(e){const b=e.target.closest('[data-act]');if(!b)return;if(b.classList.contains('drawer-bg')&&e.target!==b)return;act(b.dataset.act,b.dataset);});
+document.addEventListener('keydown',function(e){if(e.key==='Escape'&&UI.drawer){UI.drawer=null;render();}});
+document.addEventListener('submit',async function(e){
+  const f=e.target.closest('[data-form]');if(!f)return;e.preventDefault();
+  const fd=new FormData(f);const k=f.dataset.k;const t=k&&byKey(D,k);const kind=f.dataset.form;
+  if(kind==='release')post({action:'release',n:t.number,p:fd.get('p'),d:fd.get('d')||''});
+  else if(kind==='change')post({action:'change',n:t.number,p:fd.get('p')||'',d:fd.get('d')||''});
+  else if(kind==='block')fd.get('b')&&post({action:'block',n:t.number,b:num(fd.get('b'))});
+  else if(kind==='moddl')post({action:'moddl',module:f.dataset.m,d:fd.get('d')||''});
+  else if(kind==='new'){const title=fd.get('title');
+    if(await post({action:'new',title:title,desc:fd.get('desc'),module:fd.get('module'),type:fd.get('type'),cls:fd.get('cls'),parent:fd.get('parent')||''})){
+      const nt=D.tasks.filter(x=>x.title===title).sort((a,b)=>b.number-a.number)[0];UI.drawer=nt?{mode:'task',key:nt.key}:null;UI.route='backlog';UI.filter='all';render();}}
+});
+setInterval(()=>{if(document.visibilityState==='visible'&&!UI.drawer&&D)reload(false);},60000);
+reload(false);
+</script>
