@@ -44,5 +44,10 @@ A change is flagged when it carries a Co-Authored-By trailer or bot author, or i
 - Relies on GitHub sub-issues, issue dependencies, Projects and Actions variables.
 - Reads the last 100 label events and 10 comments per issue.
 
+## Decisions and notes
+- Architecture decisions: [docs/adr](docs/adr/README.md).
+- Memos (roles, shortcuts, roadmap): [docs/memos](docs/memos/README.md).
+- The constitution: [docs/constitution.md](docs/constitution.md).
+
 ## Licence
 [0BSD](LICENSE), (c) 2026 nnikolo1. Clone: `git clone https://github.com/nnikolo1/project-cockpit`.
