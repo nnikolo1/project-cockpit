@@ -116,6 +116,10 @@ tr.blocked{background:var(--danger-tint)}tr.blocked td:first-child{box-shadow:in
 .tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
 .tabs button{background:none;border:0;border-bottom:2px solid transparent;padding:8px 12px;cursor:pointer;color:var(--muted);font-weight:500}
 .tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+.subrow{display:grid;grid-template-columns:1fr 28px 70px;gap:6px 10px;align-items:center;padding:6px 8px;border-radius:8px}
+.subrow:hover{background:var(--bg)}.subrow .bar{margin:0}.subrow .linkbtn{text-align:left}
+.filters.sub{padding-left:18px;border-left:2px solid var(--line)}
+.crumb{color:var(--muted)}
 .legend{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--muted);align-items:center}
 @media (max-width:640px){
   .feed .e{grid-template-columns:1fr;gap:4px}
@@ -133,13 +137,12 @@ const STAGES=['embryo','released','in_progress','completed','cancelled'];
 const STAGE_LABEL={embryo:'embryo',released:'released',in_progress:'in progress',completed:'completed',cancelled:'cancelled'};
 const TYPES=['feature','bug','decision','research','doc','devops','test'];
 function byKey(d,k){return d.tasks.find(t=>t.key===k);}
-function modOf(d,t){return MODULES.find(m=>m.id===t.module)||{id:'unassigned',short:'Unassigned'};}
 function eff(d,t){
   if(t.deadline)return {d:t.deadline,inh:false};
   const p=t.parent&&byKey(d,t.parent);
   if(p){const e=eff(d,p);if(e.d)return {d:e.d,inh:true,src:p.key};}
-  const md=d.modDeadline[t.module];
-  if(md)return {d:md,inh:true,src:modOf(d,t).short};
+  const md=t.modDl;  // [date, id of the module it is set on]: the sub-module's own, else its module's
+  if(md&&md[0])return {d:md[0],inh:true,src:(MODULES.find(m=>m.id===md[1])||{short:md[1]}).short};
   return {d:null,inh:false};
 }
 function days(a,b){const f=s=>{const x=s.split('-');return Date.UTC(+x[0],+x[1]-1,+x[2]);};return Math.round((f(b)-f(a))/864e5);}
@@ -179,17 +182,34 @@ function sortKey(t){return STAGES.indexOf(t.stage)===2?0:(t.stage==='released'?1
 /* Data layer: everything comes from the backend (/api/state, /api/timeline, /api/code). Nothing is stored in the browser. */
 let D=null,CODE={wired:false,modules:{}},FEED=[],MODULES=[],RULES={configured:false};
 const SVGC={};
-const UI={route:'cockpit',filter:'all',mod:'all',drawer:null,tlMod:'all',tlType:'all',rulesGroup:'all',codeMod:'unassigned',codeTab:'quality',fit:{deps:true,erd:true,js:true,flow:false},toast:'',err:''};
+const UI={route:'cockpit',filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',tlType:'all',rulesGroup:'all',codeMod:'unassigned',codeTab:'quality',fit:{deps:true,erd:true,js:true,flow:false},toast:'',err:''};
 const ST=()=>!!(D&&D.source.steering);
 const SIM=()=>!!(D&&D.source.simulate);
 const nd=(v,f)=>v==null?'<span class="muted">no data</span>':(f?f(v):v);
-const modShort=id=>{const m=MODULES.find(x=>x.id===id);return m?m.short:(id==='all'?'All':id==='rules'?'Rules':'Unassigned');};
+const modShort=id=>{const m=MODULES.find(x=>x.id===id);return m?(m.parent?modShort(m.parent)+' / ':'')+m.short:(id==='all'?'All':id==='rules'?'Rules':'Unassigned');};
+const inMod=(id,n)=>id===n||id.startsWith(n+'/');
+const modCell=id=>{const m=MODULES.find(x=>x.id===id);return m&&m.parent?esc(modShort(m.parent))+' <span class="crumb">/ '+esc(m.short)+'</span>':esc(modShort(id));};
+function stageBar(r){const n=STAGES.reduce((a,s)=>a+r[s],0);if(!n)return '';
+  const col={embryo:'var(--s-embryo)',released:'var(--s-released)',in_progress:'var(--s-progress)',completed:'var(--s-done)'};
+  return STAGES.slice(0,4).map(s=>r[s]?'<i style="width:'+(r[s]/n*100)+'%;background:'+col[s]+'"></i>':'').join('');}
+/* Two chip rows: the top-level modules, then (indented) the sub-modules of the selected one. ex = only tasks at the module level itself. */
+function modFilter(cur,act,first,allOf,unsorted,extra){
+  const top=cur.split('/')[0];
+  const b=(v,l,on,x)=>'<button class="f" data-act="'+act+'" data-v="'+v+'"'+(x?' data-x="1"':'')+' aria-pressed="'+on+'">'+l+'</button>';
+  const tops=MODULES.filter(m=>!m.parent).concat((extra||[]).filter(e=>!MODULES.some(m=>m.id===e.id)));
+  let h='<div class="filters" role="group" aria-label="Module filter">'+(first?b('all',first,cur==='all'):'')+tops.map(m=>b(m.id,esc(m.short),cur!=='all'&&top===m.id)).join('')+'</div>';
+  const tm=MODULES.find(m=>m.id===top);
+  if(cur!=='all'&&tm&&tm.children.length){const ex=UI.ex&&act==='modf';
+    h+='<div class="filters sub" role="group" aria-label="Sub-module filter">'+b(top,allOf.replace('{}',esc(tm.short)),cur===top&&!ex)
+     +tm.children.map(c=>MODULES.find(m=>m.id===c)).map(c=>b(c.id,esc(c.short),inMod(cur,c.id))).join('')
+     +(unsorted&&STAGES.some(s=>tm.counts[s])?b(top,'(unsorted)',ex,true):'')+'</div>';}
+  return h;}
 async function api(path,opt){const r=await fetch(path,opt);let j={};try{j=await r.json();}catch(e){}if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j;}
 async function reload(fresh){
   try{
     const [s,f,c,r]=await Promise.all([api('/api/state'+(fresh?'?fresh=1':'')),api('/api/timeline'),api('/api/code'),api('/api/rules').catch(e=>({configured:false,error:e.message}))]);
     D=s;TODAY=D.today;MODULES=D.modules;FEED=f.entries;CODE=c;RULES=r;UI.err='';
-    if(!CODE.modules[UI.codeMod]){const k=MODULES.find(m=>!m.virtual);UI.codeMod=CODE.modules[k&&k.id]?k.id:'unassigned';}
+    if(!CODE.modules[UI.codeMod]&&!MODULES.some(m=>m.id===UI.codeMod&&m.parent)){const k=MODULES.find(m=>!m.virtual);UI.codeMod=CODE.modules[k&&k.id]?k.id:'unassigned';}
   }catch(e){UI.err=String(e.message||e);}
   render();
 }
@@ -215,6 +235,17 @@ const unreviewed=()=>ruleChanges().filter(isUn);
 const pendingPrs=()=>RULES.configured?RULES.pending:[];
 
 /* ---------- views ---------- */
+function dlForm(m,md,small){
+  return !ST()?(md?'<div class="row"><span class="muted" style="font-size:13px">'+(small?'Deadline':'Module deadline')+'</span><b>'+md+'</b></div>':small?'':'<div class="row"><span class="muted" style="font-size:13px">Module deadline</span><b>—</b></div>')
+   :'<form data-form="moddl" data-m="'+m.id+'" class="row"><label class="muted" for="md-'+m.id+'" style="font-size:13px">'+(small?'Deadline':'Module deadline')+'</label><input id="md-'+m.id+'" type="date" name="d" value="'+md+'" style="border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:5px 8px;min-height:34px"><button class="btn small">Set</button></form>';}
+function subBlock(m){
+  if(!m.children.length)return '';
+  const rows=m.children.map(id=>MODULES.find(x=>x.id===id)).map(q=>{const n=STAGES.reduce((a,s)=>a+q.rollup[s],0);
+    return '<div class="subrow"><button class="linkbtn" data-act="mod" data-m="'+q.id+'"><b>'+esc(q.short)+'</b>'+(q.desc?'<span class="muted" style="font-size:12px;display:block">'+esc(q.desc)+'</span>':'')+'</button><span class="muted">'+n+'</span><span class="bar" aria-hidden="true">'+stageBar(q.rollup)+'</span>'
+     +'<div style="grid-column:1/-1">'+dlForm(q,D.modDeadline[q.id]||'',true)+'</div></div>';}).join('');
+  const un=STAGES.reduce((a,s)=>a+m.counts[s],0);
+  return '<div style="display:flex;flex-direction:column;gap:2px"><span class="label">Sub-modules</span>'+rows+'<span class="muted" style="font-size:12px">'
+   +(un?'<button class="linkbtn" style="color:var(--accent)" data-act="mod" data-m="'+m.id+'" data-x="1">'+un+' tasks only at module level</button>':'No tasks only at module level')+'. Deadlines inherit: task, sub-module, module.</span></div>';}
 function vCockpit(){
   const open=D.proposals.filter(p=>p.open);
   const emb=D.tasks.filter(t=>t.stage==='embryo').length;
@@ -236,19 +267,18 @@ function vCockpit(){
   h+='<p class="muted" style="font-size:12px;margin:12px 0 0">Ranking: your priority, then deadline, then tasks that unblock the most, then must before nice.</p></div>';
   h+='</div>';
   h+='<div class="grid">';
-  MODULES.filter(m=>!m.virtual).forEach(m=>{
-    const ts=D.tasks.filter(t=>t.module===m.id);const c=(CODE.modules||{})[m.id]||{};
-    const cnt={};STAGES.forEach(s=>cnt[s]=ts.filter(t=>t.stage===s).length);
-    const col={embryo:'var(--s-embryo)',released:'var(--s-released)',in_progress:'var(--s-progress)',completed:'var(--s-done)'};
-    const bar=ts.length?STAGES.slice(0,4).map(s=>cnt[s]?'<i style="width:'+(cnt[s]/ts.length*100)+'%;background:'+col[s]+'"></i>':'').join(''):'';
-    const txt=ts.length?STAGES.filter(s=>cnt[s]).map(s=>cnt[s]+' '+STAGE_LABEL[s]).join(' · '):'Nothing filed yet';
+  MODULES.filter(m=>!m.virtual&&!m.parent).forEach(m=>{
+    const cnt=m.rollup,n=STAGES.reduce((a,s)=>a+cnt[s],0);const c=(CODE.modules||{})[m.id]||{};
+    const bar=stageBar(cnt);
+    const txt=n?STAGES.filter(s=>cnt[s]).map(s=>cnt[s]+' '+STAGE_LABEL[s]).join(' · '):'Nothing filed yet';
     const md=D.modDeadline[m.id]||'';
-    const feed=FEED.filter(f=>f.mod===m.id).slice(0,3);
-    h+='<div class="card" style="display:flex;flex-direction:column;gap:12px"><div class="row spread"><button class="linkbtn" data-act="mod" data-m="'+m.id+'"><h2>'+esc(m.name)+'</h2></button><span class="muted">'+(ts.length?ts.length+' tasks':'no tasks')+'</span></div>'
+    const feed=FEED.filter(f=>inMod(f.mod,m.id)).slice(0,3);
+    h+='<div class="card" style="display:flex;flex-direction:column;gap:12px"><div class="row spread"><button class="linkbtn" data-act="mod" data-m="'+m.id+'"><h2>'+esc(m.name)+'</h2></button><span class="muted">'+(n?n+' tasks':'no tasks')+'</span></div>'
      +'<div class="bar" aria-hidden="true">'+bar+'</div><span class="muted" style="font-size:13px">'+txt+'</span>'
+     +subBlock(m)
      +'<dl class="facts"><dt>Open gaps</dt><dd>'+(m.gaps==null?'<span class="muted">no data</span>':m.gaps)+'</dd><dt>Documents</dt><dd>'+(m.ndocs==null?'<span class="muted">no data</span>':m.ndocs)+'</dd>'
      +'<dt>Code lines</dt><dd>'+nd(c.code,x=>x.toLocaleString('en-US'))+'</dd><dt>Worst complexity</dt><dd>'+nd(c.cc)+'</dd><dt>Import cycles</dt><dd>'+nd(c.cyc,x=>x+' files')+'</dd></dl>'
-     +(!ST()?'<div class="row"><span class="muted" style="font-size:13px">Module deadline</span><b>'+(md||'—')+'</b></div>':'<form data-form="moddl" data-m="'+m.id+'" class="row"><label class="muted" for="md-'+m.id+'" style="font-size:13px">Module deadline</label><input id="md-'+m.id+'" type="date" name="d" value="'+md+'" style="border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:5px 8px;min-height:34px"><button class="btn small">Set</button></form>')
+     +dlForm(m,md)
      +'<div style="border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:5px;font-size:13px">'
      +(feed.length?feed.map(f=>'<span><span class="mono muted">'+f.d.slice(5,10)+'</span> '+esc(f.text)+'</span>').join(''):'<span class="muted">Not documented yet.</span>')
      +'</div><button class="btn small" data-act="code" data-m="'+m.id+'" style="align-self:flex-start">Code quality</button></div>';
@@ -262,31 +292,31 @@ function vCockpit(){
 
 function vBacklog(){
   const f=UI.filter;let ts=D.tasks.slice();
-  if(UI.mod!=='all')ts=ts.filter(t=>t.module===UI.mod);
+  if(UI.mod!=='all')ts=ts.filter(t=>UI.ex?t.module===UI.mod:inMod(t.module,UI.mod));
   if(f==='blocked')ts=ts.filter(t=>isBlocked(D,t));else if(f!=='all')ts=ts.filter(t=>t.stage===f);
   ts.sort((a,b)=>sortKey(a)-sortKey(b)||((a.prio||9)-(b.prio||9))||((eff(D,a).d||'9').localeCompare(eff(D,b).d||'9'))||a.key.localeCompare(b.key,undefined,{numeric:true}));
   const fl=['all','embryo','released','in_progress','completed','cancelled','blocked'];
   let h='<div class="page"><div class="row spread"><div><h1>Backlog</h1><span class="muted">'+ts.length+' of '+D.tasks.length+' tasks</span></div>'+(ST()?'<button class="btn primary" data-act="new">New task</button>':'')+'</div>';
   h+='<div class="filters" role="group" aria-label="Stage filter">'+fl.map(x=>'<button class="f" data-act="filter" data-v="'+x+'" aria-pressed="'+(f===x)+'">'+(x==='in_progress'?'in progress':x)+'</button>').join('')+'</div>';
-  h+='<div class="filters" role="group" aria-label="Module filter"><button class="f" data-act="modf" data-v="all" aria-pressed="'+(UI.mod==='all')+'">all modules</button>'+MODULES.map(m=>'<button class="f" data-act="modf" data-v="'+m.id+'" aria-pressed="'+(UI.mod===m.id)+'">'+esc(m.short)+'</button>').join('')+'</div>';
+  h+=modFilter(UI.mod,'modf','all modules','all of {}',true);
   h+='<div class="row muted" style="font-size:13px;gap:8px">Priority <span class="chip p1">P1</span><span class="chip p2">P2</span><span class="chip p3">P3</span><span class="chip p0">none yet</span> &nbsp; Blockers <span class="chip blk">blocked by</span><span class="chip blocks">blocks n</span> &nbsp; <span class="inh">↳ italic = inherited deadline</span></div>';
   h+='<div class="tblbox"><table><thead><tr><th>ID</th><th>Title</th><th>Module</th><th>Priority</th><th>Class</th><th>Deadline</th><th>Blockers</th><th>Stage</th></tr></thead><tbody>';
-  ts.forEach(t=>{h+='<tr class="'+(isBlocked(D,t)?'blocked':'')+'"><td class="mono">'+esc(t.key)+'</td><td><button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button></td><td>'+esc(modOf(D,t).short)+'</td><td>'+prioChip(t)+'</td><td class="muted">'+t.cls+'</td><td>'+dlHtml(t)+'</td><td>'+blockHtml(t)+'</td><td>'+stageHtml(t)+'</td></tr>';});
+  ts.forEach(t=>{h+='<tr class="'+(isBlocked(D,t)?'blocked':'')+'"><td class="mono">'+esc(t.key)+'</td><td><button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button></td><td>'+modCell(t.module)+'</td><td>'+prioChip(t)+'</td><td class="muted">'+t.cls+'</td><td>'+dlHtml(t)+'</td><td>'+blockHtml(t)+'</td><td>'+stageHtml(t)+'</td></tr>';});
   if(!ts.length)h+='<tr><td colspan="8" class="muted">Nothing matches this filter.</td></tr>';
-  return h+'</tbody></table></div><p class="muted" style="font-size:13px;margin:0">Only you set or move a deadline. A task without one inherits its parent’s, then its module’s.</p></div>';
+  return h+'</tbody></table></div><p class="muted" style="font-size:13px;margin:0">Only you set or move a deadline. A task without one inherits its parent’s, then its sub-module’s or module’s.</p></div>';
 }
 
 function vTimeline(){
   const up=D.tasks.filter(t=>isOpen(t)&&eff(D,t).d).sort((a,b)=>eff(D,a).d.localeCompare(eff(D,b).d)||a.key.localeCompare(b.key)).slice(0,8);
   const types=['all','commit','doc','gap','milestone','issue','task event','rule change'];
   let all=FEED.slice();
-  if(UI.tlMod!=='all')all=all.filter(x=>x.mod===UI.tlMod);
+  if(UI.tlMod!=='all')all=all.filter(x=>inMod(x.mod,UI.tlMod));
   if(UI.tlType!=='all')all=all.filter(x=>x.type===UI.tlType);
   const total=all.length;all=all.slice(0,200);
   let h='<div class="page"><div><h1>Timeline</h1><span class="muted">Everything that happened, newest first, and what is due next.</span></div>';
   h+='<div class="card"><h2>Upcoming deadlines</h2><div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">'
    +(up.length?up.map(t=>{const e=eff(D,t);const n=days(TODAY,e.d);return '<div class="row" style="gap:10px"><span class="mono" style="width:86px">'+e.d+'</span><span class="'+(n<0?'warnline':'muted')+'" style="width:84px;font-size:12px">'+(n<0?'overdue '+(-n)+' d':(n===0?'today':'in '+n+' d'))+'</span>'+prioChip(t)+'<button class="linkbtn" data-act="open" data-k="'+t.key+'"><b class="mono">'+esc(t.key)+'</b> '+esc(t.title)+'</button>'+(e.inh?'<span class="inh" style="font-size:12px">inherited from '+esc(e.src)+'</span>':'')+'</div>';}).join(''):'<span class="muted">No deadlines set.</span>')+'</div></div>';
-  h+='<div class="filters" role="group" aria-label="Module filter"><button class="f" data-act="tlm" data-v="all" aria-pressed="'+(UI.tlMod==='all')+'">All</button>'+MODULES.map(m=>'<button class="f" data-act="tlm" data-v="'+m.id+'" aria-pressed="'+(UI.tlMod===m.id)+'">'+esc(m.short)+'</button>').join('')+'</div>';
+  h+=modFilter(UI.tlMod,'tlm','All','all of {}');
   h+='<div class="filters" role="group" aria-label="Type filter">'+types.map(x=>'<button class="f" data-act="tlt" data-v="'+x+'" aria-pressed="'+(UI.tlType===x)+'">'+x+'</button>').join('')+'</div>';
   h+='<div class="feed">'+all.map(x=>'<div class="e'+(x.type==='rule change'?' rule':'')+'"><span class="mono muted">'+esc(x.d)+'</span><span><span class="chip'+(x.type==='rule change'?' rc':'')+'">'+x.type+'</span></span><span><span class="chip" style="background:var(--accent-tint)">'+esc(modShort(x.mod))+'</span></span><span>'+esc(x.text)+' '+x.links.map(s=>s[1]?'<a class="mono" target="_blank" rel="noopener" href="'+esc(s[1])+'">'+esc(s[0])+'</a>':'<span class="mono muted">'+esc(s[0])+'</span>').join(' ')+'</span></div>').join('')+(all.length?'':'<div class="e"><span class="muted">Nothing matches.</span></div>')+'</div>';
   return h+'<p class="muted" style="font-size:13px;margin:0">Commits come from git, issues and task events from GitHub, the rest from the project files. Newest 200 of '+total+'.</p></div>';
@@ -314,11 +344,10 @@ function vRules(){
   return h;
 }
 function vQuality(){
-  const id=UI.codeMod;const c=CODE.modules[id];const mm=MODULES.find(m=>m.id===id);const nm=id==='unassigned'?'Not mapped to a module':(mm?mm.name:id);
-  const mods=MODULES.filter(m=>!m.virtual).concat([{id:'unassigned',short:'Unassigned'}]);
+  const id=UI.codeMod;const c=CODE.modules[id];const mm=MODULES.find(m=>m.id===id);const nm=id==='unassigned'?'Not mapped to a module':(mm?(mm.parent?modShort(id):mm.name):id);
   const snap=CODE.wired?'Snapshot '+esc(CODE.commit)+', '+esc((CODE.generated_at||'').slice(0,10))+'. Dimensions stay separate: no overall score, no pass or fail until you set a threshold.':'';
   let h='<div class="page"><div><h1>Code: '+esc(nm)+'</h1><span class="muted">'+snap+'</span></div>';
-  h+='<div class="filters" role="group" aria-label="Module">'+mods.map(m=>'<button class="f" data-act="codem" data-v="'+m.id+'" aria-pressed="'+(id===m.id)+'">'+esc(m.short)+'</button>').join('')+'</div>';
+  h+=modFilter(id,'codem',null,'whole module (roll-up)',false,[{id:'unassigned',short:'Unassigned'}]);
   if(!c)return h+'<div class="card tile nw"><span class="label">Code snapshot</span><span class="v muted" style="font-size:18px">not wired</span><span class="muted" style="font-size:13px">'+(CODE.wired?'no metrics for this module in the snapshot':'point --code at a code snapshot directory')+'</span></div></div>';
   const T=(l,v,s)=>'<div class="card tile"><span class="label">'+l+'</span><span class="v">'+(v==null?'<span class="muted">n/a</span>':v)+'</span><span class="muted" style="font-size:13px">'+s+'</span></div>';
   const f1=(v,n)=>v==null?null:v.toFixed(n);
@@ -443,7 +472,7 @@ function drawerNew(p){
   return '<div class="row spread"><h1 style="font-size:19px">New task</h1><button class="btn small" data-act="close">Cancel</button></div>'
    +'<form data-form="new" style="display:flex;flex-direction:column;gap:12px"><div class="field"><label for="nt">Title</label><input id="nt" type="text" name="title" required value="'+esc(p.title||'')+'"></div>'
    +'<div class="field"><label for="nd">Description</label><textarea id="nd" name="desc">'+esc(p.desc||'')+'</textarea></div>'
-   +'<div class="field"><label for="nm">Module</label><select id="nm" name="module">'+mods.map(m=>'<option value="'+m.id+'"'+((p.module||'')===m.id?' selected':'')+'>'+esc(m.name)+'</option>').join('')+'<option value=""'+(mods.some(m=>m.id===p.module)?'':' selected')+'>No module</option></select></div>'
+   +'<div class="field"><label for="nm">Module</label><select id="nm" name="module">'+mods.map(m=>'<option value="'+m.id+'"'+((p.module||'')===m.id?' selected':'')+'>'+esc(m.parent?modShort(m.id):m.name)+'</option>').join('')+'<option value=""'+(mods.some(m=>m.id===p.module)?'':' selected')+'>No module</option></select></div>'
    +'<div class="row"><div class="field" style="flex:1"><label for="ny">Type</label><select id="ny" name="type">'+TYPES.map(x=>'<option'+(x===(p.type||'decision')?' selected':'')+'>'+x+'</option>').join('')+'</select></div>'
    +'<div class="field" style="flex:1"><label for="nc">Class</label><select id="nc" name="cls"><option>nice</option><option>must</option></select></div></div>'
    +'<div class="field"><label for="np">Parent task (optional)</label><select id="np" name="parent"><option value="">None, directly under the module</option>'+D.tasks.filter(isOpen).map(x=>'<option value="'+x.number+'"'+(p.parent===x.number?' selected':'')+'>'+esc(x.key)+' '+esc(x.title.slice(0,40))+'</option>').join('')+'</select></div>'
@@ -481,9 +510,9 @@ function act(a,ds){
    case 'codetab':UI.codeTab=ds.v;render();break;
    case 'fit':UI.fit[ds.v]=!UI.fit[ds.v];render();break;
    case 'codem':UI.codeMod=ds.v;render();break;
-   case 'mod':UI.route='backlog';UI.mod=ds.m;UI.filter='all';render();window.scrollTo(0,0);break;
+   case 'mod':UI.route='backlog';UI.mod=ds.m;UI.ex=!!ds.x;UI.filter='all';render();window.scrollTo(0,0);break;
    case 'filter':UI.filter=ds.v;render();break;
-   case 'modf':UI.mod=ds.v;render();break;
+   case 'modf':UI.mod=ds.v;UI.ex=!!ds.x;render();break;
    case 'tlm':UI.tlMod=ds.v;render();break;
    case 'tlt':UI.tlType=ds.v;render();break;
    case 'rg':UI.rulesGroup=ds.v;render();break;
