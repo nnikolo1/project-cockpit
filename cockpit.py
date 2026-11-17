@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import pathlib
+import re
 import secrets
 import subprocess
 import threading
@@ -352,11 +353,16 @@ def code_snapshot():
 
 
 # ---------- server ----------
+def redact(line):
+    """Keep the access token out of the request log."""
+    return re.sub(r"([?&]t=)[^ &]+", r"\1<token>", line)
+
+
 class H(BaseHTTPRequestHandler):
     token = ""
 
     def log_message(self, fmt, *a):
-        log.info("%s %s", self.address_string(), fmt % a)
+        log.info("%s %s", self.address_string(), redact(fmt % a))
 
     def send(self, code, body=b"", ctype="application/json", headers=()):
         if isinstance(body, (dict, list)):

@@ -168,3 +168,7 @@ def test_token_file_is_created_private_and_reused(tmp_path):
     assert t and C.load_token(str(p)) == t
     assert oct(p.stat().st_mode & 0o777) == "0o600"
     assert C.load_token() != C.load_token()
+
+
+def test_request_log_hides_the_token():
+    assert C.redact('"GET /?t=abc_DEF-1 HTTP/1.1" 303 -') == '"GET /?t=<token> HTTP/1.1" 303 -'
