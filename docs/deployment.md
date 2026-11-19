@@ -33,6 +33,12 @@ The Manager's rights are the only ones that matter for the protected attributes 
 
 Why the Orchestrator must not use the cockpit in steering mode: the cockpit's actions run as the `gh` login of the cockpit process. An Orchestrator that can drive a steering cockpit borrows the Manager's rights.
 
+### The Manager's assistant
+
+The same AI tool may also act as the Manager's personal assistant: it files and releases tasks when the Manager explicitly asks it to, in a conversation. From the point of view of identity and access it **is the Manager**: same GitHub identity, same authority. This is a fourth capacity, not a fifth role to separate: it is the Manager acting through a tool.
+
+Consequence: an assistant session holds the Manager's credentials. Once identities are separated (phase 2 and 3), it must never share an OS user, a logged-in `gh`, a token file or a terminal session with Orchestrator or Worker sessions, or those sessions would hold the Manager's authority too. Run it where the Manager works, and keep the Orchestrator and Workers elsewhere. Releases made by the assistant should leave a trace (for example a comment on the task saying that it was released on the Manager's explicit request), because GitHub shows them as the Manager's own actions.
+
 ## 3. Segregation layers and their strength
 
 | Layer | Prevents | Strength |
