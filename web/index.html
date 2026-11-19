@@ -37,6 +37,7 @@ h1{font-size:22px;margin:0;font-weight:600}h2{font-size:15px;margin:0;font-weigh
 .nav{display:flex;gap:4px;flex-wrap:wrap}
 .nav button{background:none;border:0;padding:8px 12px;border-radius:8px;cursor:pointer;color:var(--muted);font-weight:500}
 .nav button[aria-current="page"]{color:var(--ink);background:var(--accent-tint)}
+.psel{border:1px solid var(--line);border-radius:8px;background:var(--surface);min-height:34px;padding:0 8px;font-weight:600;max-width:100%}
 .proto{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px}
 .pill{border-radius:999px;padding:2px 10px;background:var(--warn);color:var(--warn-ink);font-size:12px;font-weight:600}
 .pill.on{background:var(--accent-tint);color:var(--accent)}.pill.bad{background:var(--danger-tint);color:var(--danger)}
@@ -180,6 +181,7 @@ function sortKey(t){return STAGES.indexOf(t.stage)===2?0:(t.stage==='released'?1
 
 
 /* Data layer: everything comes from the backend (/api/state, /api/timeline, /api/code). Nothing is stored in the browser. */
+let PROJ=null,PROJS=[];  /* the selected project (name) and the configured ones; the choice is kept in localStorage `cockpit-project` */
 let D=null,CODE={wired:false,modules:{}},FEED=[],MODULES=[],RULES={configured:false};
 const SVGC={};
 const UI={route:'cockpit',filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',tlType:'all',rulesGroup:'all',codeMod:'unassigned',codeTab:'quality',fit:{deps:true,erd:true,js:true,flow:false},toast:'',err:''};
@@ -204,17 +206,35 @@ function modFilter(cur,act,first,allOf,unsorted,extra){
      +tm.children.map(c=>MODULES.find(m=>m.id===c)).map(c=>b(c.id,esc(c.short),inMod(cur,c.id))).join('')
      +(unsorted&&STAGES.some(s=>tm.counts[s])?b(top,'(unsorted)',ex,true):'')+'</div>';}
   return h;}
-async function api(path,opt){const r=await fetch(path,opt);let j={};try{j=await r.json();}catch(e){}if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j;}
+const pq=p=>PROJ?p+(p.includes('?')?'&':'?')+'project='+encodeURIComponent(PROJ):p;
+async function api(path,opt){const r=await fetch(pq(path),opt);let j={};try{j=await r.json();}catch(e){}if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j;}
 async function reload(fresh){
+  const mine=PROJ;
   try{
     const [s,f,c,r]=await Promise.all([api('/api/state'+(fresh?'?fresh=1':'')),api('/api/timeline'),api('/api/code'),api('/api/rules').catch(e=>({configured:false,error:e.message}))]);
+    if(mine!==PROJ)return;  /* the user switched project while this was loading: drop the answer */
     D=s;TODAY=D.today;MODULES=D.modules;FEED=f.entries;CODE=c;RULES=r;UI.err='';
     if(!CODE.modules[UI.codeMod]&&!MODULES.some(m=>m.id===UI.codeMod&&m.parent)){const k=MODULES.find(m=>!m.virtual);UI.codeMod=CODE.modules[k&&k.id]?k.id:'unassigned';}
-  }catch(e){UI.err=String(e.message||e);}
+  }catch(e){if(mine!==PROJ)return;UI.err=String(e.message||e);}
   render();
 }
+async function pickProject(name){
+  if(name===PROJ)return;
+  PROJ=name;try{localStorage.setItem('cockpit-project',name);}catch(e){}
+  D=null;FEED=[];MODULES=[];CODE={wired:false,modules:{}};RULES={configured:false};REV=null;  /* page caches of the old project */
+  for(const k in SVGC)delete SVGC[k];
+  Object.assign(UI,{filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',rulesGroup:'all',codeMod:'unassigned',err:''});
+  render();await reload(false);
+}
+async function boot(){
+  try{const j=await api('/api/projects');PROJS=j.projects;
+    let v=null;try{v=localStorage.getItem('cockpit-project');}catch(e){}
+    PROJ=PROJS.some(p=>p.name===v)?v:j.default;
+  }catch(e){}
+  reload(false);
+}
 async function post(body){
-  try{const j=await api('/api/act',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  try{const j=await api('/api/act',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({project:PROJ},body))});
     await reload(true);say(j.msg);return true;}
   catch(e){say('Refused: '+e.message,6000);return false;}
 }
@@ -385,7 +405,10 @@ function vDiagram(k){
 async function hydrate(){
   const b=document.getElementById('dgbox');if(!b||SVGC[b.dataset.k])return;
   const k=b.dataset.k;
-  try{const r=await fetch('/code/'+SVGFILE[k]+'.svg');SVGC[k]=await r.text();}catch(e){SVGC[k]='<span class="warnline">could not load the diagram</span>';}
+  const mine=PROJ;
+  try{const r=await fetch(pq('/code/'+SVGFILE[k]+'.svg'));  /* links to report pages carry the project too */
+    SVGC[k]=(await r.text()).replace(/(href="[^"]*\/report\/[^"#?]+)"/g,PROJ?'$1?project='+encodeURIComponent(PROJ)+'"':'$&');}catch(e){SVGC[k]='<span class="warnline">could not load the diagram</span>';}
+  if(mine!==PROJ){delete SVGC[k];return;}
   const again=document.getElementById('dgbox');if(again&&again.dataset.k===k)again.innerHTML=SVGC[k];
 }
 function vCode(){
@@ -484,6 +507,7 @@ function render(){
   const R=UI.route;
   const nav=[['cockpit','Cockpit'],['backlog','Backlog'],['timeline','Timeline'],['rules','Rules'],['code','Code'],['how','How it works']];
   let h='<div class="top"><span class="brand">Project cockpit</span><nav class="nav" aria-label="Main">'+nav.map(n=>'<button data-act="go" data-r="'+n[0]+'"'+(R===n[0]?' aria-current="page"':'')+'>'+n[1]+'</button>').join('')+'</nav>';
+  if(PROJS.length>1)h=h.replace('</span><nav','</span><select class="psel" id="psel" aria-label="Project">'+PROJS.map(p=>'<option value="'+esc(p.name)+'"'+(p.name===PROJ?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select><nav');
   if(D){const s=D.source;
     h+='<div class="proto"><span class="pill'+(s.steering?' on':'')+'">'+esc(s.repo)+', '+(s.steering?'steering on':'read-only')+'</span>'
      +(s.steering&&s.user!==s.manager?'<span class="pill bad">acting as '+esc(s.user)+', not the Manager ('+esc(s.manager)+')</span>':'')
@@ -532,6 +556,7 @@ function act(a,ds){
   }
 }
 document.addEventListener('click',function(e){const b=e.target.closest('[data-act]');if(!b)return;if(b.classList.contains('drawer-bg')&&e.target!==b)return;act(b.dataset.act,b.dataset);});
+document.addEventListener('change',function(e){if(e.target.id==='psel')pickProject(e.target.value);});
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&UI.drawer){UI.drawer=null;render();}});
 document.addEventListener('submit',async function(e){
   const f=e.target.closest('[data-form]');if(!f)return;e.preventDefault();
@@ -545,5 +570,5 @@ document.addEventListener('submit',async function(e){
       const nt=D.tasks.filter(x=>x.title===title).sort((a,b)=>b.number-a.number)[0];UI.drawer=nt?{mode:'task',key:nt.key}:null;UI.route='backlog';UI.filter='all';render();}}
 });
 setInterval(()=>{if(document.visibilityState==='visible'&&!UI.drawer&&D)reload(false);},180000);
-reload(false);
+boot();
 </script>

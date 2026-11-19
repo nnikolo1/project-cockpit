@@ -22,7 +22,63 @@ import logic as L
 log = logging.getLogger("cockpit")
 HERE = pathlib.Path(__file__).parent
 TYPES = ["feature", "bug", "decision", "research", "doc", "devops", "test"]
+# Global switches (steer, simulate) live in CFG. A project is a dict of PROJECT_KEYS plus its name; PROJECTS maps name -> project.
+# Without any registered project (tests, embedding) CFG itself doubles as the one project.
 CFG = dict(repo=None, manager=None, steer=False, simulate=False, project=None, git=None, modules=None, phases=None, code=None)
+PROJECT_KEYS = ("repo", "manager", "project", "git", "modules", "phases", "code")
+PROJECTS, DEFAULT = {}, None
+
+
+class UnknownProject(KeyError):
+    pass
+
+
+def proj(name=None):
+    """The settings of project `name` (default: the configured default)."""
+    if not PROJECTS:
+        return CFG
+    n = name or DEFAULT
+    if n not in PROJECTS:
+        raise UnknownProject(f"unknown project {n!r}; configured: {', '.join(PROJECTS)}")
+    return PROJECTS[n]
+
+
+def pk(p, what):
+    """Cache key of `what` for project p: projects never share a cached value."""
+    return f"{p.get('name', '')}:{what}"
+
+
+def project_from_flags(a):
+    """The implicit project of the single-project flags, named after the repo."""
+    return dict(name=a["repo"].split("/")[-1], repo=a["repo"], manager=a.get("manager") or a["repo"].split("/")[0],
+                **{k: a.get(k) for k in PROJECT_KEYS[2:]})
+
+
+def projects_from_file(data):
+    """Parsed --projects JSON -> (list of project dicts, default name). Raises ValueError with a clear message."""
+    if not isinstance(data, dict) or not isinstance(data.get("projects"), list) or not data["projects"]:
+        raise ValueError('--projects: expected {"default": NAME, "projects": [{"name", "repo", ...}]}')
+    out = []
+    for e in data["projects"]:
+        name, repo = (e.get("name") or "").strip() if isinstance(e, dict) else "", e.get("repo") if isinstance(e, dict) else None
+        if not name or not isinstance(repo, str) or repo.count("/") != 1:
+            raise ValueError(f"--projects: every project needs a name and a repo OWNER/REPO (got {e!r})")
+        if any(name == p["name"] for p in out):
+            raise ValueError(f"--projects: duplicate project name {name!r}")
+        p = dict(name=name, repo=repo, manager=e.get("manager") or repo.split("/")[0], project=e.get("project"))
+        p.update({k: os.path.expanduser(e[k]) if e.get(k) else None for k in ("git", "modules", "phases", "code")})
+        out.append(p)
+    default = data.get("default") or out[0]["name"]
+    if default not in [p["name"] for p in out]:
+        raise ValueError(f"--projects: default {default!r} is not one of the projects")
+    return out, default
+
+
+def register(projects, default):
+    PROJECTS.clear()
+    PROJECTS.update({p["name"]: p for p in projects})
+    global DEFAULT
+    DEFAULT = default
 SVGS = {"erd": "erd.svg", "dataflow": "dataflow.svg", "deps": "deps.svg", "js": "js.svg"}
 
 
@@ -48,9 +104,9 @@ GQL = """query($o:String!,$r:String!,$after:String){repository(owner:$o,name:$r)
   ... on AssignedEvent{createdAt actor{login} assignee{... on User{login}}} ... on ClosedEvent{createdAt actor{login}}}}}}}}"""
 
 
-def fetch_issues():
+def fetch_issues(p):
     """All issues of the repo in 100-issue GraphQL pages -> (raw issues, events). One call per 100 issues."""
-    owner, name = CFG["repo"].split("/")
+    owner, name = p["repo"].split("/")
     issues, events, after = [], [], None
     while True:
         args = ["api", "graphql", "-f", f"query={GQL}", "-f", f"o={owner}", "-f", f"r={name}"] + (["-f", f"after={after}"] if after else [])
@@ -63,17 +119,17 @@ def fetch_issues():
         after = page["pageInfo"]["endCursor"]
 
 
-def fetch_project():
-    if not CFG["project"]:
+def fetch_project(p):
+    if not p["project"]:
         return {}
-    owner = CFG["repo"].split("/")[0]
-    d = json.loads(run_gh(["project", "item-list", str(CFG["project"]), "--owner", owner, "--format", "json", "--limit", "1000"]))
-    return L.parse_project(d["items"], CFG["repo"])
+    owner = p["repo"].split("/")[0]
+    d = json.loads(run_gh(["project", "item-list", str(p["project"]), "--owner", owner, "--format", "json", "--limit", "1000"]))
+    return L.parse_project(d["items"], p["repo"])
 
 
-def fetch_module_deadlines():
+def fetch_module_deadlines(p):
     try:
-        return L.parse_module_deadlines(run_gh(["api", f"repos/{CFG['repo']}/actions/variables/MODULE_DEADLINES", "--jq", ".value"]))
+        return L.parse_module_deadlines(run_gh(["api", f"repos/{p['repo']}/actions/variables/MODULE_DEADLINES", "--jq", ".value"]))
     except RuntimeError as ex:
         log.info("no MODULE_DEADLINES variable (%s)", str(ex)[:80])
         return {}
@@ -103,36 +159,38 @@ def gh_user():
 
 
 # ---------- state ----------
-def load_modules():
-    return json.load(open(CFG["modules"])) if CFG.get("modules") else None
+def load_modules(p):
+    return json.load(open(p["modules"])) if p.get("modules") else None
 
 
-def build_state():
+def build_state(p):
     t0 = time.time()
     with ThreadPoolExecutor(4) as ex:
-        fi, fp, fd = ex.submit(fetch_issues), ex.submit(fetch_project), ex.submit(fetch_module_deadlines)
+        fi, fp, fd = ex.submit(fetch_issues, p), ex.submit(fetch_project, p), ex.submit(fetch_module_deadlines, p)
         (issues, events), project, deadlines = fi.result(), fp.result(), fd.result()
-    cfgm = load_modules()
-    tasks, mods = L.derive(issues, events, project, CFG["manager"], (cfgm or {}).get("modules", []), grow=not cfgm)
+    cfgm = load_modules(p)
+    tasks, mods = L.derive(issues, events, project, p["manager"], (cfgm or {}).get("modules", []), grow=not cfgm)
     for t in tasks:
         t["modDl"] = L.module_deadline(deadlines, t["module"])  # (date, module it is set on): the sub-module's, else the module's
     for m in mods:
-        m["gaps"], m["ndocs"] = L.module_facts(L.module_dir(CFG["git"], m)) if CFG["git"] and not m.get("virtual") else (None, None)
+        m["gaps"], m["ndocs"] = L.module_facts(L.module_dir(p["git"], m)) if p["git"] and not m.get("virtual") else (None, None)
     keys = {i["number"]: L.split_title(i["title"], i["number"])[0] for i in issues}
     nums = {t["number"]: t for t in tasks}
     proposals = [dict(p, n=i["number"], key=keys[i["number"]]) for i in issues for p in L.parse_proposals(i["comments"])]
     log.info("state: %d tasks, %d events, %d open proposals in %.1fs", len(tasks), len(events), len(proposals), time.time() - t0)
     return dict(
         today=dt.date.today().isoformat(), tasks=tasks, modules=mods, modDeadline=deadlines, proposals=proposals,
-        events=L.task_events(events, keys, CFG["manager"])[:400], unauthorised=sum(len(t["flags"]) for t in nums.values()),
-        source=dict(repo=CFG["repo"], steering=CFG["steer"], simulate=CFG["simulate"] and CFG["steer"], project=CFG["project"],
-                    manager=CFG["manager"], user=gh_user(), fetched=time.strftime("%H:%M:%S")))
+        events=L.task_events(events, keys, p["manager"])[:400], unauthorised=sum(len(t["flags"]) for t in nums.values()),
+        source=dict(name=p.get("name", ""), repo=p["repo"], steering=CFG["steer"], simulate=CFG["simulate"] and CFG["steer"], project=p["project"],
+                    manager=p["manager"], user=gh_user(), fetched=time.strftime("%H:%M:%S")))
 
 
-def get_state(fresh=False):
-    if fresh and "state" in _cache:
-        _cache["state"] = (0, _cache["state"][1])  # force a refresh but keep the old copy for a failed one
-    return cached("state", build_state, 120)
+def get_state(fresh=False, p=None):
+    p = p or proj()
+    k = pk(p, "state")
+    if fresh and k in _cache:
+        _cache[k] = (0, _cache[k][1])  # force a refresh but keep the old copy for a failed one
+    return cached(k, lambda: build_state(p), 120)
 
 
 # ---------- actions: plan (pure) -> execute ----------
@@ -297,15 +355,18 @@ def execute(ops, run=run_gh):
             last = {}
 
 
-def do_act(form, run=run_gh, state=None):
-    """-> (http status, body). 403 when the app is read-only."""
+def do_act(form, run=run_gh, state=None, p=None):
+    """-> (http status, body). 403 when the app is read-only; acts on the project named in form["project"] (default project otherwise)."""
     if not CFG["steer"]:
         log.warning("refused action %s: read-only", form.get("action"))
         return 403, dict(error="read-only: this repo is not steerable (start with --steer)")
     try:
-        S = state or get_state(fresh=True)
-        ops, msg = plan_action(form, S, CFG["repo"], CFG["simulate"])
+        p = p or proj(form.get("project"))
+        S = state or get_state(fresh=True, p=p)
+        ops, msg = plan_action(form, S, p["repo"], CFG["simulate"])
         execute(ops, run)
+    except UnknownProject as ex:
+        return 404, dict(error=ex.args[0])
     except PermissionError as ex:
         return 403, dict(error=str(ex))
     except ValueError as ex:
@@ -314,69 +375,73 @@ def do_act(form, run=run_gh, state=None):
     except RuntimeError as ex:
         log.error("action %s failed: %s", form.get("action"), ex)
         return 502, dict(error=f"GitHub: {ex}")
-    _cache.clear()
-    log.info("action ok: %s -> %s", form.get("action"), msg)
+    for k in [k for k in _cache if k.startswith(pk(p, ""))]:
+        del _cache[k]  # this project's copies only
+    log.info("action ok on %s: %s -> %s", p.get("name", ""), form.get("action"), msg)
     return 200, dict(ok=True, msg=msg)
 
 
 # ---------- rules ----------
-def run_git(args, timeout=30):
+def run_git(p, args, timeout=30):
     """Run `git -C <clone> <args>` (list-based, bounded) and return stdout."""
-    return subprocess.run(["git", "-C", CFG["git"], *args], capture_output=True, text=True, check=True, timeout=timeout).stdout
+    return subprocess.run(["git", "-C", p["git"], *args], capture_output=True, text=True, check=True, timeout=timeout).stdout
 
 
-def build_rules():
-    rc = L.rules_config(load_modules())
-    if not rc or not CFG["git"]:
+def build_rules(p=None):
+    p = p or proj()
+    rc = L.rules_config(load_modules(p))
+    if not rc or not p["git"]:
         return dict(configured=False)
     t0, gs, spec = time.time(), rc["groups"], L.rule_pathspecs(rc["groups"])
     fmt = ["log", "--no-renames", f"--format={L.LOG_FMT}"]
-    changes = L.parse_rule_changes(run_git(fmt + ["--since=90.days.ago", "--numstat", "--", *spec]), run_git(fmt + ["--since=90.days.ago", "-p", "-U0", "--", *spec]), gs, rc["managers"])
-    last = L.parse_last_changes(run_git(fmt + ["--name-only", "--", *spec]), gs)
-    files = L.rule_files([p for p in run_git(["ls-files", "-z", "--", *spec]).split("\0") if p], last, gs)
+    changes = L.parse_rule_changes(run_git(p, fmt + ["--since=90.days.ago", "--numstat", "--", *spec]), run_git(p, fmt + ["--since=90.days.ago", "-p", "-U0", "--", *spec]), gs, rc["managers"])
+    last = L.parse_last_changes(run_git(p, fmt + ["--name-only", "--", *spec]), gs)
+    files = L.rule_files([p for p in run_git(p, ["ls-files", "-z", "--", *spec]).split("\0") if p], last, gs)
     try:
-        pending = L.pending_rule_prs(json.loads(run_gh(["pr", "list", "-R", CFG["repo"], "--state", "open", "--json", "number,title,author,files,url,createdAt"])), gs)
+        pending = L.pending_rule_prs(json.loads(run_gh(["pr", "list", "-R", p["repo"], "--state", "open", "--json", "number,title,author,files,url,createdAt"])), gs)
     except (RuntimeError, ValueError) as ex:
         log.warning("rules: open pull requests unavailable (%s)", str(ex)[:80])
         pending = []
     log.info("rules: %d files, %d changes, %d pending PRs in %.1fs", len(files), len(changes), len(pending), time.time() - t0)
-    return dict(configured=True, groups=[g["name"] for g in gs], files=files, changes=changes, pending=pending, repo=CFG["repo"])
+    return dict(configured=True, groups=[g["name"] for g in gs], files=files, changes=changes, pending=pending, repo=p["repo"])
 
 
-def get_rules():
-    return cached("rules", build_rules, 120)
+def get_rules(p=None):
+    p = p or proj()
+    return cached(pk(p, "rules"), lambda: build_rules(p), 120)
 
 
 # ---------- timeline / code ----------
-def load_commits():
-    if CFG.get("git"):
-        txt = subprocess.run(["git", "-C", CFG["git"], "log", "--name-only", "--date=iso", "--format=@%H|%ad|%s"], capture_output=True, text=True, check=True).stdout
+def load_commits(p):
+    if p.get("git"):
+        txt = subprocess.run(["git", "-C", p["git"], "log", "--name-only", "--date=iso", "--format=@%H|%ad|%s"], capture_output=True, text=True, check=True).stdout
         return L.parse_git_full(txt)
     since = (dt.date.today() - dt.timedelta(days=365)).isoformat()
-    raw = json.loads(run_gh(["api", f"repos/{CFG['repo']}/commits?since={since}T00:00:00Z&per_page=100"]))
+    raw = json.loads(run_gh(["api", f"repos/{p['repo']}/commits?since={since}T00:00:00Z&per_page=100"]))
     return [dict(sha=c["sha"], date=dt.date.fromisoformat(c["commit"]["author"]["date"][:10]), subject=c["commit"]["message"].splitlines()[0], files=[]) for c in raw]
 
 
-def build_timeline(S):
+def build_timeline(S, p=None):
+    p = p or proj()
     t0 = time.time()
-    cfgm = load_modules()
+    cfgm = load_modules(p)
     assign = cfgm["assign"] if cfgm else []
     mod_of = {t["key"]: t["module"] for t in S["tasks"]}
     url_of = {t["key"]: t["url"] for t in S["tasks"]}
-    feed = L.group_commits(cached("commits", load_commits, 60), assign, CFG["repo"]) + L.issue_entries(S["tasks"])
+    feed = L.group_commits(cached(pk(p, "commits"), lambda: load_commits(p), 60), assign, p["repo"]) + L.issue_entries(S["tasks"])
     feed += [dict(d=e["t"], type="task event", mod=mod_of.get(e["key"], "unassigned"), text=f"{e['actor']} {e['key']}: {e['text']}", links=[(e["key"], url_of.get(e["key"], ""))])
              for e in S["events"] if e["kind"] != "closed"]
-    if CFG["git"]:
+    if p["git"]:
         for m in S["modules"]:
             if not m.get("virtual"):
-                feed += L.static_entries(L.module_dir(CFG["git"], m), m["id"], CFG["repo"])
+                feed += L.static_entries(L.module_dir(p["git"], m), m["id"], p["repo"])
     try:
-        feed += L.rule_feed(get_rules().get("changes", []), CFG["repo"])
+        feed += L.rule_feed(get_rules(p).get("changes", []), p["repo"])
     except Exception as ex:  # the timeline must not break because the rule view could not be built
         log.warning("timeline: rule changes unavailable (%s)", str(ex)[:80])
-    if CFG["phases"]:
-        pj = json.load(open(CFG["phases"]))
-        feed += [dict(d=e["date"], type=e["type"], mod=pj.get("module", "unassigned"), text=e["text"], links=[l for l in (L.ref_link(r, CFG["repo"]) for r in e.get("refs", []))]) for e in pj["events"]]
+    if p["phases"]:
+        pj = json.load(open(p["phases"]))
+        feed += [dict(d=e["date"], type=e["type"], mod=pj.get("module", "unassigned"), text=e["text"], links=[l for l in (L.ref_link(r, p["repo"]) for r in e.get("refs", []))]) for e in pj["events"]]
     seen, out = set(), []
     for e in sorted(feed, key=lambda e: e["d"], reverse=True):
         k = (e["d"], e["type"], e["mod"], e["text"])
@@ -387,9 +452,9 @@ def build_timeline(S):
     return dict(entries=out[:400], total=len(out))
 
 
-def code_snapshot():
+def code_snapshot(p=None):
     try:
-        d = pathlib.Path(CFG["code"]).expanduser()
+        d = pathlib.Path((p or proj())["code"]).expanduser()
         return dict(wired=True, **L.code_view(json.load(open(d / "metrics.json"))), diagrams=[k for k, f in SVGS.items() if (d / f).exists()])
     except (OSError, ValueError, TypeError) as ex:
         log.info("code snapshot not wired (%s)", ex)
@@ -435,34 +500,45 @@ class H(BaseHTTPRequestHandler):
         try:
             if u.path in ("/", "/index.html"):
                 return self.send(200, (HERE / "web" / "index.html").read_bytes(), "text/html; charset=utf-8")
+            if u.path == "/api/projects":
+                return self.send(200, dict(default=DEFAULT, projects=[dict(name=n, repo=p["repo"]) for n, p in PROJECTS.items()]))
+            name_q = q.get("project", [""])[0]
+            if u.path.startswith("/report/") and not name_q:  # files a report page loads carry no query: take the page's own
+                name_q = parse_qs(urlparse(self.headers.get("Referer", "")).query).get("project", [""])[0]
+            p = proj(name_q or None)
             if u.path == "/api/state":
-                return self.send(200, get_state(fresh=bool(q.get("fresh"))))
+                return self.send(200, get_state(fresh=bool(q.get("fresh")), p=p))
             if u.path == "/api/timeline":
-                return self.send(200, build_timeline(get_state()))
+                return self.send(200, build_timeline(get_state(p=p), p))
             if u.path == "/api/rules":
-                return self.send(200, get_rules())
+                return self.send(200, get_rules(p))
             if u.path == "/api/code":
-                return self.send(200, code_snapshot())
+                return self.send(200, code_snapshot(p))
             name = u.path.removeprefix("/code/").removesuffix(".svg")
-            if u.path.startswith("/code/") and name in SVGS:
-                return self.send(200, (pathlib.Path(CFG["code"]).expanduser() / SVGS[name]).read_bytes(), "image/svg+xml")
-            if u.path.startswith("/report/") and CFG.get("code"):
-                f = L.report_file(CFG["code"], u.path.removeprefix("/report/"))
+            if u.path.startswith("/code/") and name in SVGS and p.get("code"):
+                return self.send(200, (pathlib.Path(p["code"]).expanduser() / SVGS[name]).read_bytes(), "image/svg+xml")
+            if u.path.startswith("/report/") and p.get("code"):
+                f = L.report_file(p["code"], u.path.removeprefix("/report/"))
                 if f:
                     kind = {".html": "text/html; charset=utf-8", ".svg": "image/svg+xml", ".css": "text/css"}[f.suffix]
                     return self.send(200, f.read_bytes(), kind)
             self.send(404, dict(error="not found"))
+        except UnknownProject as ex:
+            self.send(404, dict(error=ex.args[0]))
         except Exception as ex:
             log.exception("GET %s failed", u.path)
             self.send(502, dict(error=str(ex)))
 
     def do_POST(self):
-        if not self.authed() or urlparse(self.path).path != "/api/act":
+        u = urlparse(self.path)
+        if not self.authed() or u.path != "/api/act":
             return self.send(403, dict(error="forbidden"))
         try:
             form = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
         except ValueError:
             return self.send(400, dict(error="bad JSON"))
+        if not form.get("project") and parse_qs(u.query).get("project"):
+            form["project"] = parse_qs(u.query)["project"][0]
         self.send(*do_act(form))
 
 
@@ -480,9 +556,27 @@ def load_token(path=None):
     return p.read_text().strip()
 
 
+def resolve(a):
+    """Parsed command line (dict) -> (projects, default name). Single-project flags and --projects exclude each other."""
+    if a.get("projects"):
+        mixed = [f"--{k}" for k in PROJECT_KEYS if a.get(k) is not None]
+        if mixed:
+            raise ValueError(f"--projects replaces {', '.join(mixed)}: put them into the projects file (only --port, --lan, --steer, --token-file, --simulate-orchestrator stay on the command line)")
+        try:
+            data = json.load(open(a["projects"]))
+        except (OSError, ValueError) as ex:
+            raise ValueError(f"--projects: cannot read {a['projects']}: {ex}")
+        return projects_from_file(data)
+    if not a.get("repo"):
+        raise ValueError("give --repo OWNER/REPO or --projects FILE")
+    p = project_from_flags(a)
+    return [p], p["name"]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--repo", required=True, help="OWNER/REPO")
+    ap.add_argument("--projects", help="JSON {default, projects:[{name, repo, project?, manager?, modules?, git?, code?, phases?}]}: serve several projects (replaces the single-project flags)")
+    ap.add_argument("--repo", help="OWNER/REPO")
     ap.add_argument("--manager", help="the one login whose protected labels count (default: the repo owner)")
     ap.add_argument("--port", type=int, default=8795)
     ap.add_argument("--lan", action="store_true", help="bind 0.0.0.0 (plain HTTP + token)")
@@ -496,17 +590,22 @@ def main():
     ap.add_argument("--simulate-orchestrator", action="store_true", help="demo buttons: 'takes it' and 'completes it'")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    try:
+        projects, default = resolve(vars(a))
+    except ValueError as ex:
+        ap.error(str(ex))
+    register(projects, default)
+    CFG.update(steer=a.steer, simulate=a.simulate_orchestrator)
     steer = a.steer
-    CFG.update(repo=a.repo, manager=a.manager or a.repo.split("/")[0], steer=steer, simulate=a.simulate_orchestrator, project=a.project,
-               git=a.git, modules=a.modules, phases=a.phases, code=a.code)
-    log.info("repo=%s project=%s mode=%s", a.repo, a.project, "STEERING" if steer else "READ-ONLY")
-    if steer and gh_user() != CFG["manager"]:
-        log.warning("gh is logged in as %s but the Manager is %s: protected labels set now would be flagged unauthorised", gh_user(), CFG["manager"])
+    for p in projects:
+        log.info("project %s: repo=%s project=%s manager=%s mode=%s", p["name"], p["repo"], p["project"], p["manager"], "STEERING" if steer else "READ-ONLY")
+        if steer and gh_user() != p["manager"]:
+            log.warning("%s: gh is logged in as %s but the Manager is %s: protected labels set now would be flagged unauthorised", p["name"], gh_user(), p["manager"])
     H.token = load_token(a.token_file)
     host = "0.0.0.0" if a.lan else "127.0.0.1"
     if a.lan:
         log.warning("--lan: plain HTTP, the token travels unencrypted; trusted network only")
-    log.info("open http://%s:%d/?t=%s  (acting as the gh user; manager=%s)", host, a.port, "<token file>" if a.token_file else H.token, CFG["manager"])
+    log.info("open http://%s:%d/?t=%s  (acting as the gh user; manager=%s)", host, a.port, "<token file>" if a.token_file else H.token, ", ".join(f"{p['name']}={p['manager']}" for p in projects))
     ThreadingHTTPServer((host, a.port), H).serve_forever()
 
 
