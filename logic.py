@@ -577,3 +577,14 @@ def rule_feed(changes, repo):
     """Rule changes -> timeline entries (type 'rule change', lane 'rules')."""
     return [dict(d=c["date"], type="rule change", mod="rules", text=f"{c['subject']} ({', '.join(f['path'] for f in c['files'][:3])}{', ...' if len(c['files']) > 3 else ''})",
                  links=[(c["sha"], f"https://github.com/{repo}/commit/{c['sha']}")]) for c in changes]
+
+
+REPORT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.(html|svg|css)$")
+
+
+def report_file(code_dir, name):
+    """Path of one file of the snapshot's report/ folder, or None. Plain file names only (no folders, no '..')."""
+    if not REPORT_NAME.match(name or ""):
+        return None
+    p = pathlib.Path(code_dir).expanduser() / "report" / name
+    return p if p.is_file() else None

@@ -446,6 +446,11 @@ class H(BaseHTTPRequestHandler):
             name = u.path.removeprefix("/code/").removesuffix(".svg")
             if u.path.startswith("/code/") and name in SVGS:
                 return self.send(200, (pathlib.Path(CFG["code"]).expanduser() / SVGS[name]).read_bytes(), "image/svg+xml")
+            if u.path.startswith("/report/") and CFG.get("code"):
+                f = L.report_file(CFG["code"], u.path.removeprefix("/report/"))
+                if f:
+                    kind = {".html": "text/html; charset=utf-8", ".svg": "image/svg+xml", ".css": "text/css"}[f.suffix]
+                    return self.send(200, f.read_bytes(), kind)
             self.send(404, dict(error="not found"))
         except Exception as ex:
             log.exception("GET %s failed", u.path)
