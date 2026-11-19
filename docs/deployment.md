@@ -87,7 +87,7 @@ Guaranteed: read-only by default, a token on the page, no stored GitHub secrets.
 
 ## 5. Running as a service
 
-Use one cockpit per repo, under the Manager's user, loopback unless a phone must reach it. Replace paths and names. Keep `PATH` explicit: services do not inherit your shell's, and `gh` must be found.
+Use one cockpit instance (it can serve several projects, see ADR 0012), under the Manager's user, loopback unless a phone must reach it. Replace paths and names. Keep `PATH` explicit: services do not inherit your shell's, and `gh` must be found.
 
 ### macOS: LaunchAgent
 

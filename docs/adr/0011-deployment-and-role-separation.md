@@ -1,4 +1,4 @@
-# 0011. Deployment: one cockpit per repo, role separation by identity and credentials
+# 0011. Deployment: role separation by identity and credentials (one cockpit per repo, since extended by ADR 0012)
 
 Status: accepted
 Date: 2026-11-17
