@@ -156,6 +156,10 @@ Add `--lan` and `--port N` only for phone access; the first LAN connection may r
 - **Upgrade**: `git -C ~/src/project-cockpit pull --ff-only`, then restart (table above). Nothing to migrate.
 - **Check after a start**: `T=$(cat TOKENFILE)`; `curl -si "http://127.0.0.1:8795/?t=$T"` should answer `303` with `Set-Cookie: t=...`; then `curl -s -b "t=$T" http://127.0.0.1:8795/api/state | head -c 300` should show JSON with `"steering": true` (or false when read-only). Without the cookie `/api/state` answers 403. A POST to `/api/act` on a read-only instance answers 403.
 
+### One instance for several projects
+
+Instead of one service per repo, list the repos in a `--projects` file (see the README) and start one process: `python3 cockpit.py --projects ~/.config/project-cockpit/projects.json --token-file ... [--steer]`. There is one token and one mode for all projects. The `gh` login must have access to every configured repo, and each project's `manager` (default: its repo owner) should be that login, since every action runs as it; a mismatch is warned about per project at start. Pages poll only the project on screen, but all projects share the login's rate-limit allowance ([ADR 0012](adr/0012-several-projects-in-one-instance.md)). For different logins or modes, keep one instance each.
+
 ## 6. Operations
 
 - **Rate limits**: one GraphQL query per 100 issues; the state is cached 2 minutes, the page refreshes itself every 3 minutes while visible, Refresh forces a fetch ([ADR 0010](adr/0010-rate-limit-resilience.md)). The cockpit shares the `gh` login's hourly allowance with that user's other tools.
