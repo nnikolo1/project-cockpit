@@ -697,7 +697,7 @@ def footprint_view(data):
 
 
 def ambiguity_view(data, warn=UNSORTED_WARN):
-    """ambiguity.json -> {modules: {id: {own, subs, unsorted, total, share, high}}, module_level, unassigned_nondoc}.
+    """ambiguity.json -> {modules: {id: {own, subs, unsorted, ambiguous, total, share, high}}, module_level, unassigned_nondoc}.
     total = own_files + all sub_files + unsorted (unsorted files are counted in neither of the others); high = share > warn."""
     mods = {}
     for mid, m in (data.get("modules") or {}).items():
@@ -707,7 +707,8 @@ def ambiguity_view(data, warn=UNSORTED_WARN):
         uns = [u for u in (m.get("unsorted") or []) if isinstance(u, dict)]
         total = (_num(m.get("own_files")) or 0) + sum(subs.values()) + len(uns)
         share = len(uns) / total if total else 0
-        mods[mid] = dict(own=_num(m.get("own_files")) or 0, subs=subs, unsorted=uns, total=total, share=round(share, 3), high=share > warn)
+        amb = [u for u in uns if u.get("candidates")]   # unsorted because ambiguous between sub-modules: shown as notes on the card
+        mods[mid] = dict(own=_num(m.get("own_files")) or 0, subs=subs, unsorted=uns, ambiguous=amb, total=total, share=round(share, 3), high=share > warn)
     ml = [u for u in (data.get("module_level") or []) if isinstance(u, dict)]
     return dict(modules=mods, module_level=ml, unassigned_nondoc=_num(data.get("unassigned_nondoc")))
 

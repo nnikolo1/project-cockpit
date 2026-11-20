@@ -105,6 +105,7 @@ tr.blocked{background:var(--danger-tint)}tr.blocked td:first-child{box-shadow:in
 .wf .lane{fill:var(--bg);stroke:var(--line)}
 .wf .box,.wf .dia{fill:var(--surface);stroke:var(--edge);stroke-width:1.3}
 .wf .m{fill:var(--accent-tint);stroke:var(--accent)}.wf .w{fill:var(--p3);stroke:var(--p3-ink)}
+.meta .note{margin:6px 0;padding:6px 10px;border-left:3px solid var(--edge);font-size:13px}.meta .note ul{margin:4px 0 0;padding-left:18px}
 .wf .st{fill:var(--line);stroke:none}.wf .note{fill:none;stroke:var(--edge);stroke-dasharray:4 3}
 .wf path.ar{fill:none;stroke:var(--edge);stroke-width:1.5}.wf marker path{fill:var(--edge);stroke:none}
 .page .page{padding-top:0}
@@ -306,8 +307,9 @@ function ambHtml(id){
   const sub=Object.keys(m.subs).map(k=>esc(k)+' '+m.subs[k]).join(', ');
   const sh=Math.round(m.share*100);
   const mark=m.high?' <span class="chip blk">⚠ many unsorted: '+sh+'%</span>':(m.unsorted.length?' <span class="muted">'+m.unsorted.length+' unsorted ('+sh+'%)</span>':' <span class="muted">none unsorted</span>');
-  return '<details'+(m.high?' open':'')+'>'+head(mark)+'<div>Module level: '+m.own+' files'+(sub?' · sub-modules: '+sub:'')+' · unsorted: '+m.unsorted.length+' of '+m.total+' files</div>'
-   +(m.unsorted.length?'<ul>'+m.unsorted.slice(0,10).map(u=>'<li><span class="mono">'+esc(u.path)+'</span> <span class="muted">could be '+esc((u.candidates||[]).join(' or '))+' · '+esc(u.reason||'no reason given')+'</span></li>').join('')+(m.unsorted.length>10?'<li class="muted">and '+(m.unsorted.length-10)+' more</li>':'')+'</ul>':'')+'</details>';}
+  const note=m.ambiguous.length?'<div class="note"><b>Ambiguous between sub-modules ('+m.ambiguous.length+'):</b> kept in this module by the rule that a file which cannot be assigned unambiguously to a sub-module belongs to its module<ul>'+m.ambiguous.map(u=>'<li><span class="mono">'+esc(u.path)+'</span> <span class="muted">could be '+esc((u.candidates||[]).join(' or '))+' · '+esc(u.reason||'no reason given')+'</span></li>').join('')+'</ul></div>':'';
+  return note+'<details'+(m.high?' open':'')+'>'+head(mark)+'<div>Module level: '+m.own+' files'+(sub?' · sub-modules: '+sub:'')+' · unsorted: '+m.unsorted.length+' of '+m.total+' files</div>'
+   +(m.unsorted.length?'<ul>'+m.unsorted.filter(u=>!(u.candidates&&u.candidates.length)).slice(0,10).map(u=>'<li><span class="mono">'+esc(u.path)+'</span> <span class="muted">could be '+esc((u.candidates||[]).join(' or '))+' · '+esc(u.reason||'no reason given')+'</span></li>').join('')+(m.unsorted.length-m.ambiguous.length>10?'<li class="muted">and '+(m.unsorted.length-m.ambiguous.length-10)+' more</li>':'')+'</ul>':'')+'</details>';}
 const metaBlock=id=>'<div class="meta">'+churnHtml(id)+footHtml(id)+ambHtml(id)+'</div>';
 function metaLegend(){
   const some=Object.values(META).some(c=>c&&c.status==='ok');

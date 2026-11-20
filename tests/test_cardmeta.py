@@ -122,3 +122,10 @@ def test_card_metadata_reads_the_folder_and_survives_an_empty_one(tmp_path):
     assert {out[k]["status"] for k in L.CARD_KINDS} == {"missing"}
     (tmp_path / "m" / "churn.json").write_bytes(b"\xff\xfe")
     assert C.card_metadata(p, NOW)["churn"]["status"] == "invalid"
+
+
+def test_ambiguity_view_lists_the_files_ambiguous_between_sub_modules_as_notes():
+    v = L.ambiguity_view({"modules": {"m": {"own_files": 1, "sub_files": {"a": 2}, "unsorted": [
+        {"path": "x.py", "candidates": ["m/a", "m/b"], "reason": "shared"}, {"path": "y.py", "candidates": [], "reason": ""}]}}})
+    m = v["modules"]["m"]
+    assert [u["path"] for u in m["ambiguous"]] == ["x.py"] and len(m["unsorted"]) == 2

@@ -11,6 +11,7 @@ Preferences the owner wants as defaults for every project the cockpit shows. Whe
 - Persistence footprint per module and sub-module: tables (rows, owner), files and folders (inside and outside the repository, personal-data marker), logging (loggers, files, rotation, what is never logged), statistics (records, sizes, input volume per day, week and month), backup and retention policy.
 - Code-change metrics for the last 30 and 90 days: commits, files, lines added and removed, net, churn, source/tests/docs split, active days, trend against the previous window; parents show their own files and the total; colour by relative rank of churn (hot to cold, neutral for no change), never colour alone, with an option to colour relative to module size.
 - Assignment ambiguity: files per sub-module, the module's unsorted files with candidates and reasons, a marker when many files are unsorted, the files that are ambiguous between modules on the overview.
+- The files that are ambiguous between sub-modules of a module are listed as notes on that module's card (all of them, each with its candidate sub-modules and the reason), because by the module-map rule they stay in the module itself.
 
 ## Module map rules
 - One owner per file; a file used by several modules goes to its main user and is shown in every module that uses it, marked as shared.
