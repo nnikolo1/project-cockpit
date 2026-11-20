@@ -187,10 +187,28 @@ def build_state(p):
     proposals = [dict(p, n=i["number"], key=keys[i["number"]]) for i in issues for p in L.parse_proposals(i["comments"])]
     log.info("state: %d tasks, %d events, %d open proposals in %.1fs", len(tasks), len(events), len(proposals), time.time() - t0)
     return dict(
-        today=dt.date.today().isoformat(), tasks=tasks, modules=mods, modDeadline=deadlines, proposals=proposals,
+        today=dt.date.today().isoformat(), tasks=tasks, questions=L.parse_questions(issues, p.get("name", "")), modules=mods, modDeadline=deadlines, proposals=proposals,
         events=L.task_events(events, keys, p["manager"])[:400], unauthorised=sum(len(t["flags"]) for t in nums.values()),
         source=dict(name=p.get("name", ""), repo=p["repo"], steering=CFG["steer"], simulate=CFG["simulate"] and CFG["steer"], project=p["project"],
-                    manager=p["manager"], user=gh_user(), fetched=time.strftime("%H:%M:%S")))
+                    manager=p["manager"], user=gh_user(), fetched=time.strftime("%H:%M:%S"), fetchedAt=time.time()))
+
+
+def build_questions(fresh=False, now=None):
+    """Open questions of every configured project (from each project's cached state) -> one oldest-first list plus a status per project.
+    A project that cannot be read is reported with its error; a stale copy is served with its age (age_s)."""
+    now = now or dt.datetime.now(dt.timezone.utc)
+    per, status = {}, []
+    for name, p in (PROJECTS or {CFG.get("name", ""): CFG}).items():
+        try:
+            S = get_state(fresh=fresh, p=p)
+            per[name] = S["questions"]
+            status.append(dict(name=name, repo=p["repo"], age_s=max(0, round(time.time() - S["source"]["fetchedAt"])), error=None))
+        except Exception as ex:
+            log.warning("questions: project %s unreadable: %s", name, str(ex)[:120])
+            status.append(dict(name=name, repo=p["repo"], age_s=None, error=str(ex)[:200]))
+    rows = L.merge_questions(per, now)
+    log.info("questions: %d open across %d projects", len(rows), len(per))
+    return dict(questions=rows, counts=L.group_questions(rows), projects=status)
 
 
 def get_state(fresh=False, p=None):
@@ -533,6 +551,8 @@ class H(BaseHTTPRequestHandler):
             p = proj(name_q or None)
             if u.path == "/api/state":
                 return self.send(200, get_state(fresh=bool(q.get("fresh")), p=p))
+            if u.path == "/api/questions":
+                return self.send(200, build_questions(fresh=bool(q.get("fresh"))))
             if u.path == "/api/timeline":
                 return self.send(200, build_timeline(get_state(p=p), p))
             if u.path == "/api/rules":

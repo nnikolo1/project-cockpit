@@ -430,6 +430,50 @@ def norm_events(n):
     return out
 
 
+# ---------- open questions: issues labelled `question` ----------
+RECOMMENDATION = re.compile(r"\*\*Recommendation\.?\*\*\.?[ \t]*(.*?)(?:\n[ \t]*\n|\Z)", re.S)
+RECO_CAP = 400
+
+
+def parse_recommendation(body):
+    """The text of the `**Recommendation.**` paragraph of an issue body (whitespace collapsed, capped), or None."""
+    m = RECOMMENDATION.search(body or "")
+    text = " ".join(m.group(1).split()) if m else ""
+    return (text[:RECO_CAP - 1] + "\u2026" if len(text) > RECO_CAP else text) or None
+
+
+def age_days(created, now):
+    """Whole days between an ISO timestamp (`...Z`) and `now` (aware datetime); never negative."""
+    t = dt.datetime.fromisoformat(created.replace("Z", "+00:00"))
+    return max(0, (now - t).days)
+
+
+def parse_questions(issues, project):
+    """Raw issues -> the open ones labelled `question`, as panel entries (title series split off, recommendation extracted)."""
+    out = []
+    for i in issues:
+        if i["state"] != "open" or "question" not in i["labels"]:
+            continue
+        key, title = split_title(i["title"], i["number"])
+        out.append(dict(project=project, number=i["number"], key=key, title=title, url=i["url"], created=i["created_at"],
+                        recommendation=parse_recommendation(i.get("body"))))
+    return out
+
+
+def merge_questions(per_project, now):
+    """{project: [entries]} -> one list, oldest first (ties by project then number), each entry with `age` in days."""
+    rows = [dict(q, age=age_days(q["created"], now)) for qs in per_project.values() for q in qs]
+    return sorted(rows, key=lambda q: (q["created"], q["project"], q["number"]))
+
+
+def group_questions(rows):
+    """Entries -> {project: count} in first-seen order (the project filter chips)."""
+    out = {}
+    for q in rows:
+        out[q["project"]] = out.get(q["project"], 0) + 1
+    return out
+
+
 def parse_project(items, repo):
     """`gh project item-list --format json` items -> {issue#: {module, hint, status, est, used}} (this repo's issues only).
     Field keys are the lower-cased field names; the number fields are matched by their first word."""
