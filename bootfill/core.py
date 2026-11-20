@@ -10,7 +10,7 @@ DEFAULTS = dict(
     five_hour=dict(low_left=10, low_payload=5, high_left=50, high_payload=20, max_hours_to_reset=2),
     weekly=dict(min_left=20, max_hours_to_reset=24, payload=50),
     day_cap=60,
-    workers=3,
+    workers=2,  # how many workers may run at the same time (configuration key `workers`; 0 starts none)
     worker_stop_left=5,  # stop starting workers when either window has this percent or less left
     summary_hour=20,  # local hour after which the daily summary is written
     tie_judgement=True,
@@ -341,7 +341,11 @@ def worker_slots(running, max_workers, quota, stop_left):
     """How many more workers may start: 0 when either window has stop_left percent or less left."""
     if min(100 - quota["five"][0], 100 - quota["week"][0]) <= stop_left:
         return 0
-    return max(0, max_workers - running)
+    try:
+        cap = max(0, int(max_workers))
+    except (TypeError, ValueError):
+        cap = DEFAULTS["workers"]  # an unusable value falls back to the default instead of failing the poll
+    return max(0, cap - running)
 
 
 # ---------- budget-panel contract (docs/contracts/budget-panel.md): decisions.jsonl lines for the cockpit ----------

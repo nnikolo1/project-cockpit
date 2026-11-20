@@ -304,3 +304,10 @@ def test_worker_slots():
 def test_merge_config():
     c = B.merge_config(B.DEFAULTS, {"five_hour": {"low_payload": 7}, "day_cap": 10})
     assert c["five_hour"]["low_payload"] == 7 and c["five_hour"]["high_payload"] == 20 and c["day_cap"] == 10 and c["mode"] == "dry-run"
+
+
+def test_workers_default_is_two_and_unusable_values_fall_back():
+    assert B.DEFAULTS["workers"] == 2
+    q = quota(10)
+    assert B.worker_slots(0, B.DEFAULTS["workers"], q, 5) == 2
+    assert B.worker_slots(0, 0, q, 5) == 0 and B.worker_slots(0, "x", q, 5) == 2 and B.worker_slots(0, None, q, 5) == 2

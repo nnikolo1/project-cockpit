@@ -9,3 +9,7 @@ Decision: [ADR 0014](adr/0014-boot-filling-job.md); implementation choices: [ADR
 5. After a week of dry run read `decision-log.jsonl` and the Budget page; only then set `"mode": "real"`.
 
 Stop at any time: `touch DIR/PAUSE`, or label the tracking issue `pause`, or `launchctl unload` the plist.
+
+## Parallel workers
+
+The configuration key `workers` sets how many workers may run at the same time (default 2; 0 starts none; an unusable value falls back to the default). Change it in the local config; it takes effect at the next poll.

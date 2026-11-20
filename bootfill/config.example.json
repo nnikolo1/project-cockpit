@@ -15,6 +15,6 @@
     "branch_prefix": "boot/"
   },
   "notify_cmd": ["osascript", "-e", "display notification \"{message}\" with title \"{title}\""],
-  "workers": 3,
+  "workers": 2,
   "day_cap": 60
 }

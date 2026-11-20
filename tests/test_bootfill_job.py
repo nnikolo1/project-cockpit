@@ -119,9 +119,9 @@ def test_real_mode_releases_with_trail_and_queues(tmp_path):
     ctx, h, w, *_ = make(tmp_path, many(10), mode="real", q=quota_of(80, 1.0, week_used=90))
     J.poll(ctx, NOW)
     assert len(h.released) == 5 and "boot-filling job (real)" in h.released[0][2] and "five_low" in h.released[0][2]
-    assert w.started == [2, 3, 4]  # three workers in parallel, two stay queued
+    assert w.started == [2, 3]  # the default is two workers in parallel, three stay queued
     st = A.read_json(ctx.state_path, {})
-    assert len(st["queue"]) == 2 and len(st["running"]) == 3 and st["day_count"] == 5
+    assert len(st["queue"]) == 3 and len(st["running"]) == 2 and st["day_count"] == 5
     states = {r["number"]: r["state"] for r in B.release_list(A.read_jsonl(ctx.decisions))}
     assert states[2] == "running" and states[6] == "queued"
 
@@ -184,18 +184,18 @@ def test_release_failure_is_recorded_and_others_continue(tmp_path):
 def test_workers_stop_when_threshold_crossed_and_resume(tmp_path):
     ctx, h, w, qu, _ = make(tmp_path, many(10), mode="real", q=quota_of(80, 1.0, week_used=90))
     J.poll(ctx, NOW)
-    assert w.started == [2, 3, 4]
+    assert w.started == [2, 3]
     w.rc = {2: 0, 3: 1}  # one finished, one failed
     qu.q = quota_of(97, 1.0, week_used=90)  # window nearly spent: nothing new starts
     J.poll(ctx, NOW + 1800)
     st = A.read_json(ctx.state_path, {})
-    assert w.started == [2, 3, 4] and len(st["running"]) == 1
+    assert w.started == [2, 3] and len(st["running"]) == 0
     assert any(e["number"] == 3 and e["attempt"] == 2 for e in st["queue"])  # unfinished goes back to the queue
     states = {r["number"]: r["state"] for r in B.release_list(A.read_jsonl(ctx.decisions))}
     assert states[2] == "finished" and states[3] == "unfinished"
     qu.q = quota_of(10, 4.0, week_used=90)  # after the reset
     J.poll(ctx, NOW + 3600)
-    assert 5 in w.started and 3 in w.started
+    assert w.started[2:] == [4, 5]  # after the reset the queue moves on; the failed one waits at the back for its retry
 
 
 def test_daily_summary_once_per_day_and_notification(tmp_path):
