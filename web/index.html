@@ -122,6 +122,16 @@ tr.blocked{background:var(--danger-tint)}tr.blocked td:first-child{box-shadow:in
 .filters.sub{padding-left:18px;border-left:2px solid var(--line)}
 .crumb{color:var(--muted)}
 .legend{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--muted);align-items:center}
+/* Churn bands reuse the priority palette (red, amber, blue are told apart without relying on hue) and always carry a symbol and a word. */
+.band{display:inline-block;border-radius:6px;padding:1px 8px;font-size:12px;font-weight:600;white-space:nowrap}
+.band-hot{background:var(--p1);color:var(--p1-ink)}.band-mid{background:var(--p2);color:var(--p2-ink)}.band-cold{background:var(--p3);color:var(--p3-ink)}
+.band-dormant{background:none;border:1px dashed var(--s-embryo);color:var(--muted)}
+.meta{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--line);padding-top:10px;font-size:13px}
+.meta details{border:1px solid var(--line);border-radius:8px;padding:6px 10px}
+.meta summary{cursor:pointer;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.meta .crow{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.meta ul{margin:6px 0 0;padding-left:18px}.meta li{margin:2px 0;overflow-wrap:anywhere}
+.gap{color:var(--danger);font-weight:600}
 @media (max-width:640px){
   .feed .e{grid-template-columns:1fr;gap:4px}
   .proto{margin-left:0}
@@ -182,9 +192,10 @@ function sortKey(t){return STAGES.indexOf(t.stage)===2?0:(t.stage==='released'?1
 
 /* Data layer: everything comes from the backend (/api/state, /api/timeline, /api/code). Nothing is stored in the browser. */
 let PROJ=null,PROJS=[];  /* the selected project (name) and the configured ones; the choice is kept in localStorage `cockpit-project` */
-let D=null,CODE={wired:false,modules:{}},FEED=[],MODULES=[],RULES={configured:false};
+const NOMETA=()=>({footprint:{status:'missing'},churn:{status:'missing'},ambiguity:{status:'missing'}});
+let D=null,CODE={wired:false,modules:{}},FEED=[],MODULES=[],RULES={configured:false},META=NOMETA();
 const SVGC={};
-const UI={route:'cockpit',filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',tlType:'all',rulesGroup:'all',codeMod:'unassigned',codeTab:'quality',fit:{deps:true,erd:true,js:true,flow:false},toast:'',err:''};
+const UI={churnRel:false,route:'cockpit',filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',tlType:'all',rulesGroup:'all',codeMod:'unassigned',codeTab:'quality',fit:{deps:true,erd:true,js:true,flow:false},toast:'',err:''};
 const ST=()=>!!(D&&D.source.steering);
 const SIM=()=>!!(D&&D.source.simulate);
 const nd=(v,f)=>v==null?'<span class="muted">no data</span>':(f?f(v):v);
@@ -211,9 +222,9 @@ async function api(path,opt){const r=await fetch(pq(path),opt);let j={};try{j=aw
 async function reload(fresh){
   const mine=PROJ;
   try{
-    const [s,f,c,r]=await Promise.all([api('/api/state'+(fresh?'?fresh=1':'')),api('/api/timeline'),api('/api/code'),api('/api/rules').catch(e=>({configured:false,error:e.message}))]);
+    const [s,f,c,r,mt]=await Promise.all([api('/api/state'+(fresh?'?fresh=1':'')),api('/api/timeline'),api('/api/code'),api('/api/rules').catch(e=>({configured:false,error:e.message})),api('/api/cardmeta').catch(e=>null)]);
     if(mine!==PROJ)return;  /* the user switched project while this was loading: drop the answer */
-    D=s;TODAY=D.today;MODULES=D.modules;FEED=f.entries;CODE=c;RULES=r;UI.err='';
+    D=s;TODAY=D.today;MODULES=D.modules;FEED=f.entries;CODE=c;RULES=r;META=mt||NOMETA();UI.err='';
     if(!CODE.modules[UI.codeMod]&&!MODULES.some(m=>m.id===UI.codeMod&&m.parent)){const k=MODULES.find(m=>!m.virtual);UI.codeMod=CODE.modules[k&&k.id]?k.id:'unassigned';}
   }catch(e){if(mine!==PROJ)return;UI.err=String(e.message||e);}
   render();
@@ -221,7 +232,7 @@ async function reload(fresh){
 async function pickProject(name){
   if(name===PROJ)return;
   PROJ=name;try{localStorage.setItem('cockpit-project',name);}catch(e){}
-  D=null;FEED=[];MODULES=[];CODE={wired:false,modules:{}};RULES={configured:false};REV=null;  /* page caches of the old project */
+  D=null;FEED=[];MODULES=[];CODE={wired:false,modules:{}};RULES={configured:false};META=NOMETA();REV=null;  /* page caches of the old project */
   for(const k in SVGC)delete SVGC[k];
   Object.assign(UI,{filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',rulesGroup:'all',codeMod:'unassigned',err:''});
   render();await reload(false);
@@ -254,6 +265,65 @@ const ruleChanges=()=>RULES.configured?RULES.changes:[];
 const unreviewed=()=>ruleChanges().filter(isUn);
 const pendingPrs=()=>RULES.configured?RULES.pending:[];
 
+/* ---------- card metadata: churn, footprint, ambiguity (files written by the project side, see docs/contracts/card-metadata.md) ---------- */
+const BAND={hot:['▲','hot'],mid:['●','mid'],cold:['▽','cold'],dormant:['–','dormant']};
+const bandChip=b=>b?'<span class="band band-'+b+'">'+BAND[b][0]+' '+BAND[b][1]+'</span>':'<span class="muted">n/a</span>';
+const sgn=n=>n>0?'+'+n:n<0?'−'+(-n):'0';
+const ageTxt=a=>a<1?'under 1 h ago':a<48?Math.round(a)+' h ago':Math.round(a/24)+' d ago';
+const hb=n=>n==null?'?':n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':(n/1048576).toFixed(1)+' MB';
+function asOf(c){
+  if(c.status!=='ok')return '<span class="muted">no data'+(c.status==='invalid'?' ('+esc(c.reason)+')':'')+'</span>';
+  return '<span class="muted">as of '+esc((c.generated_at||'unknown time').replace('T',' ').slice(0,16))+(c.age_h==null?'':' · '+ageTxt(c.age_h))+'</span>'+(c.stale?' <span class="chip blocks">⚠ stale: older than 48 h</span>':'');}
+function churnLine(e,w){
+  const b=e[UI.churnRel?'band_rel':'band_abs'];
+  const tr=e.trend_pct==null?'new activity':(e.trend_pct>0?'↑ +':e.trend_pct<0?'↓ −':'→ ')+Math.abs(e.trend_pct).toFixed(0)+'% vs before';
+  return '<div class="crow"><b>'+w+' d</b>'+bandChip(b)+'<span>'+e.commits+' commits · +'+e.added+' −'+e.removed+' · net '+sgn(e.net)+' · churn '+e.churn
+    +(UI.churnRel&&e.rel!=null?' ('+(e.rel*100).toFixed(1)+'% of size)':'')+' · '+tr+'</span></div>';}
+function churnSum(id){  /* the 30-day band as a chip, for collapsed rows */
+  const c=META.churn,m=c.status==='ok'&&c.view.modules[id],e=m&&m.windows['30'];
+  return e?bandChip(e[UI.churnRel?'band_rel':'band_abs'])+' <span class="muted">30 d churn '+e.churn+'</span>':'<span class="muted">churn: no data</span>';}
+function churnHtml(id){
+  const c=META.churn,m=c.status==='ok'&&c.view.modules[id];
+  let h='<div style="display:flex;flex-direction:column;gap:4px"><div class="row spread"><span class="label">Change (churn)</span>'+asOf(c)+'</div>';
+  if(!m)return h+(c.status==='ok'?'<span class="muted">no data for this module</span>':'')+'</div>';
+  const ws=c.view.windows.filter(w=>m.windows[w]);
+  return h+(ws.length?ws.map(w=>churnLine(m.windows[w],w)).join(''):'<span class="muted">no data for this module</span>')+'</div>';}
+function footHtml(id){
+  const f=META.footprint,m=f.status==='ok'&&f.view.modules[id];
+  const head='<summary><span class="label">Persistence footprint</span>'+asOf(f)+'</summary>';
+  if(!m)return '<details>'+head+(f.status==='ok'?'<span class="muted">no data for this module</span>':'')+'</details>';
+  const li=a=>a.length?'<ul>'+a.join('')+'</ul>':'<span class="muted"> none recorded</span>';
+  const pol=(l,p)=>'<div>'+l+': '+(p[1]?'<span class="gap">⚠ undocumented (gap)</span>':esc(p[0]))+'</div>';
+  const vol=['day','week','month'].map(k=>{const v=m.volume[k];return k+': '+(v?(v.rows==null?'?':v.rows)+' rows, '+hb(v.bytes):'<span class="muted">no data</span>');}).join(' · ');
+  return '<details>'+head+'<b>Tables</b>'+li(m.tables.map(t=>'<li class="mono">'+esc(t.name)+' · '+(t.rows==null?'?':t.rows)+' rows'+(t.bytes==null?'':' · '+hb(t.bytes))+' · owner '+esc(t.owner||'?')+(t.role?' ('+esc(t.role)+')':'')+'</li>'))
+   +'<b>Files and folders</b>'+li(m.files.map(x=>'<li><span class="mono">'+esc(x.path)+'</span> <span class="chip">'+x.location+' the repo</span>'+(x.personal_data?' <span class="chip blk">◆ personal data</span>':'')+' <span class="muted">'+esc(x.kind||'')+' '+(x.count!=null?x.count+' files':x.size_bytes!=null?hb(x.size_bytes):'')+(x.written_by?' · written by '+esc(x.written_by):'')+'</span></li>'))
+   +'<b>Logging</b>'+li(m.logging.map(x=>'<li><span class="mono">'+esc(x.logger||'?')+'</span> → '+esc(x.file||'?')+' <span class="muted">'+hb(x.size_bytes)+' · rotation: '+esc(x.rotation||'none recorded')+'</span></li>'))
+   +'<div style="margin-top:6px"><b>Volume</b> '+vol+'</div>'+pol('<b>Backup</b>',m.backup)+pol('<b>Retention</b>',m.retention)+'</details>';}
+function ambHtml(id){
+  const a=META.ambiguity,m=a.status==='ok'&&a.view.modules[id];
+  const head=(x)=>'<summary><span class="label">File ambiguity</span>'+x+asOf(a)+'</summary>';
+  if(!m)return '<details>'+head('')+(a.status==='ok'?'<span class="muted">no data for this module</span>':'')+'</details>';
+  const sub=Object.keys(m.subs).map(k=>esc(k)+' '+m.subs[k]).join(', ');
+  const sh=Math.round(m.share*100);
+  const mark=m.high?' <span class="chip blk">⚠ many unsorted: '+sh+'%</span>':(m.unsorted.length?' <span class="muted">'+m.unsorted.length+' unsorted ('+sh+'%)</span>':' <span class="muted">none unsorted</span>');
+  return '<details'+(m.high?' open':'')+'>'+head(mark)+'<div>Module level: '+m.own+' files'+(sub?' · sub-modules: '+sub:'')+' · unsorted: '+m.unsorted.length+' of '+m.total+' files</div>'
+   +(m.unsorted.length?'<ul>'+m.unsorted.slice(0,10).map(u=>'<li><span class="mono">'+esc(u.path)+'</span> <span class="muted">could be '+esc((u.candidates||[]).join(' or '))+' · '+esc(u.reason||'no reason given')+'</span></li>').join('')+(m.unsorted.length>10?'<li class="muted">and '+(m.unsorted.length-10)+' more</li>':'')+'</ul>':'')+'</details>';}
+const metaBlock=id=>'<div class="meta">'+churnHtml(id)+footHtml(id)+ambHtml(id)+'</div>';
+function metaLegend(){
+  const some=Object.values(META).some(c=>c&&c.status==='ok');
+  return '<div class="card" style="display:flex;flex-direction:column;gap:8px"><div class="row spread"><h2>Card metadata</h2>'
+   +'<button class="btn small" data-act="churnmode" aria-pressed="'+UI.churnRel+'">Colour churn by: '+(UI.churnRel?'size (changed lines / current lines)':'absolute churn')+'</button></div>'
+   +'<div class="legend" role="note"><span>Churn rank within the project:</span>'+['hot','mid','cold','dormant'].map(b=>bandChip(b)).join('')
+   +'<span>hot = top fifth, cold = bottom fifth, dormant = no change in the window. Churn = lines added + removed. Top-level modules and sub-modules are ranked among their own level.</span></div>'
+   +(some?'':'<span class="muted" style="font-size:13px">No card metadata yet'+(META.dir?' in '+esc(META.dir):'')+'. The project side writes footprint.json, churn.json and ambiguity.json there.</span>')+'</div>';}
+function moduleLevelAmb(){
+  const a=META.ambiguity;
+  if(a.status!=='ok')return '<div class="card" style="display:flex;flex-direction:column;gap:6px"><div class="row spread"><h2>Files claimed by several modules</h2>'+asOf(a)+'</div></div>';
+  const ml=a.view.module_level,n=a.view.unassigned_nondoc;
+  return '<div class="card" style="display:flex;flex-direction:column;gap:6px"><div class="row spread"><h2>Files claimed by several modules</h2>'+asOf(a)+'</div>'
+   +(ml.length?'<ul style="margin:0;padding-left:18px">'+ml.slice(0,15).map(u=>'<li><span class="mono">'+esc(u.path)+'</span> <span class="muted">could be '+esc((u.candidates||[]).join(' or '))+' · '+esc(u.reason||'no reason given')+'</span></li>').join('')+(ml.length>15?'<li class="muted">and '+(ml.length-15)+' more</li>':'')+'</ul>':'<span class="muted">None: every file has one module.</span>')
+   +(n==null?'':'<span class="muted" style="font-size:13px">'+n+' code files belong to no module at all.</span>')+'</div>';}
+
 /* ---------- views ---------- */
 function dlForm(m,md,small){
   return !ST()?(md?'<div class="row"><span class="muted" style="font-size:13px">'+(small?'Deadline':'Module deadline')+'</span><b>'+md+'</b></div>':small?'':'<div class="row"><span class="muted" style="font-size:13px">Module deadline</span><b>—</b></div>')
@@ -262,7 +332,8 @@ function subBlock(m){
   if(!m.children.length)return '';
   const rows=m.children.map(id=>MODULES.find(x=>x.id===id)).map(q=>{const n=STAGES.reduce((a,s)=>a+q.rollup[s],0);
     return '<div class="subrow"><button class="linkbtn" data-act="mod" data-m="'+q.id+'"><b>'+esc(q.short)+'</b>'+(q.desc?'<span class="muted" style="font-size:12px;display:block">'+esc(q.desc)+'</span>':'')+'</button><span class="muted">'+n+'</span><span class="bar" aria-hidden="true">'+stageBar(q.rollup)+'</span>'
-     +'<div style="grid-column:1/-1">'+dlForm(q,D.modDeadline[q.id]||'',true)+'</div></div>';}).join('');
+     +'<div style="grid-column:1/-1">'+dlForm(q,D.modDeadline[q.id]||'',true)
+     +'<details class="meta" style="border:0;padding:0"><summary>'+churnSum(q.id)+' <span class="muted">more</span></summary>'+metaBlock(q.id)+'</details></div></div>';}).join('');
   const un=STAGES.reduce((a,s)=>a+m.counts[s],0);
   return '<div style="display:flex;flex-direction:column;gap:2px"><span class="label">Sub-modules</span>'+rows+'<span class="muted" style="font-size:12px">'
    +(un?'<button class="linkbtn" style="color:var(--accent)" data-act="mod" data-m="'+m.id+'" data-x="1">'+un+' tasks only at module level</button>':'No tasks only at module level')+'. Deadlines inherit: task, sub-module, module.</span></div>';}
@@ -286,6 +357,7 @@ function vCockpit(){
     :'<p class="muted" style="margin:10px 0 0">Nothing released and unblocked. Release a task in the backlog.</p>';
   h+='<p class="muted" style="font-size:12px;margin:12px 0 0">Ranking: your priority, then deadline, then tasks that unblock the most, then must before nice.</p></div>';
   h+='</div>';
+  h+=metaLegend()+moduleLevelAmb();
   h+='<div class="grid">';
   MODULES.filter(m=>!m.virtual&&!m.parent).forEach(m=>{
     const cnt=m.rollup,n=STAGES.reduce((a,s)=>a+cnt[s],0);const c=(CODE.modules||{})[m.id]||{};
@@ -298,7 +370,7 @@ function vCockpit(){
      +subBlock(m)
      +'<dl class="facts"><dt>Open gaps</dt><dd>'+(m.gaps==null?'<span class="muted">no data</span>':m.gaps)+'</dd><dt>Documents</dt><dd>'+(m.ndocs==null?'<span class="muted">no data</span>':m.ndocs)+'</dd>'
      +'<dt>Code lines</dt><dd>'+nd(c.code,x=>x.toLocaleString('en-US'))+'</dd><dt>Worst complexity</dt><dd>'+nd(c.cc)+'</dd><dt>Import cycles</dt><dd>'+nd(c.cyc,x=>x+' files')+'</dd></dl>'
-     +dlForm(m,md)
+     +dlForm(m,md)+metaBlock(m.id)
      +'<div style="border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:5px;font-size:13px">'
      +(feed.length?feed.map(f=>'<span><span class="mono muted">'+f.d.slice(5,10)+'</span> '+esc(f.text)+'</span>').join(''):'<span class="muted">Not documented yet.</span>')
      +'</div><button class="btn small" data-act="code" data-m="'+m.id+'" style="align-self:flex-start">Code quality</button></div>';
@@ -306,7 +378,9 @@ function vCockpit(){
   const u=(CODE.modules||{}).unassigned;const un=D.tasks.filter(t=>t.module==='unassigned').length;
   h+='<div class="card" style="border-style:dashed;display:flex;flex-direction:column;gap:10px"><h2>Not mapped to a module</h2><p class="muted" style="margin:0">'
    +(u?u.code.toLocaleString('en-US')+' code lines, '+(u.churn==null?'some':u.churn)+' recent commits touch files that no module claims. Mapping them is your decision.':'No code snapshot wired.')
-   +(un?' '+un+' tasks have no module.':'')+'</p><button class="btn small" data-act="code" data-m="unassigned" style="align-self:flex-start">Code quality</button></div>';
+   +(un?' '+un+' tasks have no module.':'')+'</p>'
+   +(META.churn.status==='ok'&&META.churn.view.unassigned&&META.churn.view.unassigned['30']?'<p class="muted" style="margin:0">Last 30 days: '+META.churn.view.unassigned['30'].commits+' commits, churn '+META.churn.view.unassigned['30'].churn+' in unmapped files. '+asOf(META.churn)+'</p>':'')
+   +'<button class="btn small" data-act="code" data-m="unassigned" style="align-self:flex-start">Code quality</button></div>';
   return h+'</div></div>';
 }
 
@@ -531,6 +605,7 @@ function act(a,ds){
   switch(a){
    case 'go':UI.route=ds.r;UI.drawer=null;render();window.scrollTo(0,0);break;
    case 'code':UI.route='code';UI.codeTab='quality';UI.codeMod=ds.m;render();window.scrollTo(0,0);break;
+   case 'churnmode':UI.churnRel=!UI.churnRel;render();break;
    case 'codetab':UI.codeTab=ds.v;render();break;
    case 'fit':UI.fit[ds.v]=!UI.fit[ds.v];render();break;
    case 'codem':UI.codeMod=ds.v;render();break;

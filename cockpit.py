@@ -67,6 +67,8 @@ def projects_from_file(data):
             raise ValueError(f"--projects: duplicate project name {name!r}")
         p = dict(name=name, repo=repo, manager=e.get("manager") or repo.split("/")[0], project=e.get("project"))
         p.update({k: os.path.expanduser(e[k]) if e.get(k) else None for k in ("git", "modules", "phases", "code")})
+        if e.get("meta"):
+            p["meta"] = os.path.expanduser(e["meta"])  # optional: absent means the default folder, see meta_dir()
         out.append(p)
     default = data.get("default") or out[0]["name"]
     if default not in [p["name"] for p in out]:
@@ -80,6 +82,12 @@ def register(projects, default):
     global DEFAULT
     DEFAULT = default
 SVGS = {"erd": "erd.svg", "dataflow": "dataflow.svg", "deps": "deps.svg", "js": "js.svg"}
+DATA_DIR = pathlib.Path("~/.local/share/project-cockpit").expanduser()  # where deployment.md keeps each project's token folder
+
+
+def meta_dir(p):
+    """Folder of the project's card metadata files: its `meta` setting, else <data dir>/<project name>/cardmeta."""
+    return pathlib.Path(p.get("meta") or DATA_DIR / (p.get("name") or p["repo"].split("/")[-1]) / "cardmeta")
 
 
 # ---------- gh ----------
@@ -461,6 +469,23 @@ def code_snapshot(p=None):
         return dict(wired=False, modules={}, diagrams=[])
 
 
+def card_metadata(p=None, now=None):
+    """Read footprint/churn/ambiguity.json of the project (read-only). Anything missing or broken is reported as 'no data', never raised."""
+    p = p or proj()
+    d, texts = meta_dir(p), {}
+    for kind in L.CARD_KINDS:
+        try:
+            texts[kind] = (d / f"{kind}.json").read_text()
+        except FileNotFoundError:
+            texts[kind] = None
+        except (OSError, UnicodeDecodeError) as ex:
+            log.warning("card metadata %s unreadable: %s", d / f"{kind}.json", ex)
+            texts[kind] = "\0unreadable"  # parse_card reports it as invalid
+    out = L.card_meta(texts, p.get("name") or None, now)
+    log.info("card metadata of %s from %s: %s", p.get("name", ""), d, {k: v["status"] for k, v in out.items()})
+    return dict(out, dir=str(d))
+
+
 # ---------- server ----------
 def redact(line):
     """Keep the access token out of the request log."""
@@ -514,6 +539,8 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, get_rules(p))
             if u.path == "/api/code":
                 return self.send(200, code_snapshot(p))
+            if u.path == "/api/cardmeta":
+                return self.send(200, cached(pk(p, "cardmeta"), lambda: card_metadata(p), 60))
             name = u.path.removeprefix("/code/").removesuffix(".svg")
             if u.path.startswith("/code/") and name in SVGS and p.get("code"):
                 return self.send(200, (pathlib.Path(p["code"]).expanduser() / SVGS[name]).read_bytes(), "image/svg+xml")
@@ -575,7 +602,7 @@ def resolve(a):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--projects", help="JSON {default, projects:[{name, repo, project?, manager?, modules?, git?, code?, phases?}]}: serve several projects (replaces the single-project flags)")
+    ap.add_argument("--projects", help="JSON {default, projects:[{name, repo, project?, manager?, modules?, git?, code?, phases?, meta?}]}: serve several projects (replaces the single-project flags)")
     ap.add_argument("--repo", help="OWNER/REPO")
     ap.add_argument("--manager", help="the one login whose protected labels count (default: the repo owner)")
     ap.add_argument("--port", type=int, default=8795)

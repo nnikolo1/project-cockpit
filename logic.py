@@ -2,6 +2,7 @@
 import datetime as dt
 import json
 import logging
+import math
 import pathlib
 import re
 
@@ -588,3 +589,143 @@ def report_file(code_dir, name):
         return None
     p = pathlib.Path(code_dir).expanduser() / "report" / name
     return p if p.is_file() else None
+
+
+# ---------- card metadata: footprint, churn, ambiguity (contract: docs/contracts/card-metadata.md) ----------
+CARD_KINDS = ("footprint", "churn", "ambiguity")
+STALE_HOURS = 48       # a file older than this is shown with a stale warning
+UNSORTED_WARN = 0.30   # unsorted files above this share of a module's files raise the marker
+HOT_SHARE = 0.2        # top fifth of the churn ranking is hot, bottom fifth cold
+GAP_WORDS = ("", "undocumented", "unknown", "none", "n/a")
+
+
+def _num(x):
+    return x if isinstance(x, (int, float)) and not isinstance(x, bool) else None
+
+
+def parse_card(text, kind, project=None, now=None):
+    """Raw text of one card file (None = file missing) -> {status: ok|missing|invalid, data, generated_at, age_h, stale, reason}.
+    Never raises: a missing, unreadable, foreign (wrong kind, project or schema) file just means 'no data'."""
+    if text is None:
+        return dict(status="missing", data=None, generated_at=None, age_h=None, stale=False, reason="file not found")
+    bad = lambda why: dict(status="invalid", data=None, generated_at=None, age_h=None, stale=False, reason=why)
+    try:
+        d = json.loads(text)
+    except ValueError as ex:
+        return bad(f"not JSON ({str(ex)[:60]})")
+    if not isinstance(d, dict):
+        return bad("not a JSON object")
+    if d.get("schema") != 1:
+        return bad(f"unsupported schema {d.get('schema')!r} (this cockpit reads 1)")
+    if d.get("kind") != kind:
+        return bad(f"kind is {d.get('kind')!r}, expected {kind!r}")
+    if project and d.get("project") != project:
+        return bad(f"belongs to project {d.get('project')!r}, not {project!r}")
+    gen, age = d.get("generated_at"), None
+    try:
+        t = dt.datetime.fromisoformat(str(gen).replace("Z", "+00:00"))
+        t = t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc)
+        age = ((now or dt.datetime.now(dt.timezone.utc)) - t).total_seconds() / 3600
+    except ValueError:
+        gen = None
+    return dict(status="ok", data=d, generated_at=gen, age_h=None if age is None else round(max(age, 0), 1), stale=age is None or age > STALE_HOURS, reason="")
+
+
+def rank_bands(values, share=HOT_SHARE):
+    """{id: number|None} -> {id: 'hot'|'mid'|'cold'|'dormant'|None}. Zero is dormant and not ranked; among the others the top
+    fifth (ties kept together) is hot, the bottom fifth cold; fewer than 3 ranked values, or all equal, stay mid."""
+    live = sorted((v for v in values.values() if v), reverse=True)
+    k = max(1, math.ceil(len(live) * share)) if live else 0
+    hot, cold = (live[k - 1], live[-k]) if len(live) >= 3 else (None, None)
+    split = hot is not None and hot > cold
+    return {i: None if v is None else "dormant" if v == 0 else "hot" if split and v >= hot else "cold" if split and v <= cold else "mid"
+            for i, v in values.items()}
+
+
+def churn_view(data):
+    """churn.json -> {windows, modules: {id: {windows: {'30': {..entry, rel, band_abs, band_rel}}, size, lines}}, unassigned, excluded, mapping_check}.
+    Cards show `total` (the module with its sub-modules; `own` when there is no total). Bands are ranked per level (top-level
+    modules among themselves, sub-modules among themselves), by churn (abs) and by churn per current line (rel)."""
+    wins = [str(w) for w in (data.get("windows") or [30, 90])]
+    mods = {}
+    for mid, m in (data.get("modules") or {}).items():
+        if not isinstance(m, dict):
+            continue
+        size = m.get("size") if isinstance(m.get("size"), dict) else {}
+        lines = (_num(size.get("source_lines")) or 0) + (_num(size.get("test_lines")) or 0)
+        t = m.get("total") or m.get("own") or {}
+        w = {}
+        for k in wins:
+            e = t.get(k)
+            if isinstance(e, dict):
+                c = _num(e.get("churn"))
+                w[k] = dict(e, rel=round(c / lines, 4) if c is not None and lines else None)
+        mods[mid] = dict(windows=w, size=size, lines=lines)
+    for level in (False, True):
+        ids = [i for i in mods if ("/" in i) == level]
+        for k in wins:
+            for mode, f in (("abs", lambda e: _num(e.get("churn"))), ("rel", lambda e: e.get("rel"))):
+                bands = rank_bands({i: f(mods[i]["windows"][k]) for i in ids if k in mods[i]["windows"]})
+                for i, b in bands.items():
+                    mods[i]["windows"][k]["band_" + mode] = b
+    return dict(windows=wins, modules=mods, unassigned=data.get("unassigned"), excluded=data.get("excluded"), mapping_check=data.get("mapping_check"))
+
+
+def file_location(path):
+    """'inside' when the path is relative to the repository, else 'outside' (absolute, '~', or climbing out with '..')."""
+    p = str(path or "")
+    return "outside" if p.startswith(("/", "~", "..")) or re.match(r"^[A-Za-z]:[\\/]", p) else "inside"
+
+
+def policy_text(v):
+    """Backup/retention policy -> (text, gap). Missing, empty or 'undocumented' is a gap, shown as such."""
+    t = str(v).strip() if v is not None else ""
+    return (t or "undocumented", t.lower() in GAP_WORDS)
+
+
+def footprint_view(data):
+    """footprint.json -> {modules: {id: {tables, files (+location), logging, volume, backup, retention as (text, gap)}}}."""
+    out = {}
+    for mid, m in (data.get("modules") or {}).items():
+        if not isinstance(m, dict):
+            continue
+        pol = m.get("policy") if isinstance(m.get("policy"), dict) else {}
+        lst = lambda k: [x for x in (m.get(k) or []) if isinstance(x, dict)]
+        out[mid] = dict(tables=lst("tables"), logging=lst("logging"), files=[dict(f, location=file_location(f.get("path"))) for f in lst("files")],
+                        volume=m.get("volume") if isinstance(m.get("volume"), dict) else {}, backup=policy_text(pol.get("backup")), retention=policy_text(pol.get("retention")))
+    return dict(modules=out)
+
+
+def ambiguity_view(data, warn=UNSORTED_WARN):
+    """ambiguity.json -> {modules: {id: {own, subs, unsorted, total, share, high}}, module_level, unassigned_nondoc}.
+    total = own_files + all sub_files + unsorted (unsorted files are counted in neither of the others); high = share > warn."""
+    mods = {}
+    for mid, m in (data.get("modules") or {}).items():
+        if not isinstance(m, dict):
+            continue
+        subs = {k: v for k, v in (m.get("sub_files") or {}).items() if _num(v) is not None}
+        uns = [u for u in (m.get("unsorted") or []) if isinstance(u, dict)]
+        total = (_num(m.get("own_files")) or 0) + sum(subs.values()) + len(uns)
+        share = len(uns) / total if total else 0
+        mods[mid] = dict(own=_num(m.get("own_files")) or 0, subs=subs, unsorted=uns, total=total, share=round(share, 3), high=share > warn)
+    ml = [u for u in (data.get("module_level") or []) if isinstance(u, dict)]
+    return dict(modules=mods, module_level=ml, unassigned_nondoc=_num(data.get("unassigned_nondoc")))
+
+
+CARD_VIEWS = dict(footprint=footprint_view, churn=churn_view, ambiguity=ambiguity_view)
+
+
+def card_meta(texts, project=None, now=None):
+    """{kind: raw text or None} -> {kind: parse_card result plus `view` (the page's data) when ok}. A view that cannot be built makes it 'invalid'."""
+    out = {}
+    for kind in CARD_KINDS:
+        c = parse_card(texts.get(kind), kind, project, now)
+        if c["status"] == "ok":
+            try:
+                c["view"] = CARD_VIEWS[kind](c["data"])
+            except (AttributeError, TypeError, ValueError) as ex:
+                log.warning("card metadata %s: unusable (%s)", kind, ex)
+                c.update(status="invalid", reason=f"unusable content ({str(ex)[:60]})")
+        c.pop("data")
+        out[kind] = c
+    return out
