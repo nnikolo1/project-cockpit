@@ -24,7 +24,8 @@ HERE = pathlib.Path(__file__).parent
 TYPES = ["feature", "bug", "decision", "research", "doc", "devops", "test"]
 # Global switches (steer, simulate) live in CFG. A project is a dict of PROJECT_KEYS plus its name; PROJECTS maps name -> project.
 # Without any registered project (tests, embedding) CFG itself doubles as the one project.
-CFG = dict(repo=None, manager=None, steer=False, simulate=False, project=None, git=None, modules=None, phases=None, code=None)
+CFG = dict(repo=None, manager=None, steer=False, simulate=False, project=None, git=None, modules=None, phases=None, code=None,
+           quota_feed=None, usage_report=None, decision_log=None)  # the last three: budget panel files (None = default under DATA_DIR/budget)
 PROJECT_KEYS = ("repo", "manager", "project", "git", "modules", "phases", "code")
 PROJECTS, DEFAULT = {}, None
 
@@ -504,6 +505,38 @@ def card_metadata(p=None, now=None):
     return dict(out, dir=str(d))
 
 
+# ---------- budget panel ----------
+BUDGET_FILES = dict(quota_feed="quota.json", usage_report="usage.json", decision_log="decisions.jsonl")
+
+
+def budget_path(key):
+    return pathlib.Path(CFG.get(key) or DATA_DIR / "budget" / BUDGET_FILES[key]).expanduser()
+
+
+def _read_with_mtime(path):
+    """-> (text or None, modification time or None). Unreadable counts as missing (logged), never raises."""
+    try:
+        st = path.stat()
+        return path.read_text(), dt.datetime.fromtimestamp(st.st_mtime, dt.timezone.utc)
+    except FileNotFoundError:
+        return None, None
+    except (OSError, UnicodeDecodeError) as ex:
+        log.warning("budget file %s unreadable: %s", path, ex)
+        return None, None
+
+
+def build_budget(now=None):
+    """Read the quota feed, the usage report and the decision log (read-only; each may be missing) and build the page's data."""
+    now = now or dt.datetime.now(dt.timezone.utc)
+    q, qm = _read_with_mtime(budget_path("quota_feed"))
+    u, um = _read_with_mtime(budget_path("usage_report"))
+    lg, _ = _read_with_mtime(budget_path("decision_log"))
+    out = L.budget_view(q, qm, u, um, lg, now)
+    log.info("budget: quota %s, usage %s, decision log %s (%d releases, %d polls, %d lines skipped)", out["quota"]["status"], out["usage"]["status"], out["log"]["status"],
+             len(out["log"]["releases"]), len(out["log"]["polls"]), out["log"]["skipped"])
+    return out
+
+
 # ---------- server ----------
 def redact(line):
     """Keep the access token out of the request log."""
@@ -559,6 +592,8 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, get_rules(p))
             if u.path == "/api/code":
                 return self.send(200, code_snapshot(p))
+            if u.path == "/api/budget":
+                return self.send(200, build_budget())
             if u.path == "/api/cardmeta":
                 return self.send(200, cached(pk(p, "cardmeta"), lambda: card_metadata(p), 60))
             name = u.path.removeprefix("/code/").removesuffix(".svg")
@@ -633,6 +668,9 @@ def main():
     ap.add_argument("--phases", help="extra timeline.json ({module, events:[...]}) merged into the timeline")
     ap.add_argument("--code", help="code snapshot directory: metrics.json and erd|dataflow|deps|js.svg (see README)")
     ap.add_argument("--token-file", help="keep the access token in this file (created 0600 if missing), so the URL survives restarts")
+    ap.add_argument("--quota-feed", help="budget panel: JSON {five_hour, seven_day: {used_percentage, resets_at}} (default <data dir>/budget/quota.json)")
+    ap.add_argument("--usage-report", help="budget panel: token usage report per window (default <data dir>/budget/usage.json)")
+    ap.add_argument("--decision-log", help="budget panel: boot-filling decision log, JSON lines (default <data dir>/budget/decisions.jsonl)")
     ap.add_argument("--steer", action="store_true", help="enable actions (default: read-only)")
     ap.add_argument("--simulate-orchestrator", action="store_true", help="demo buttons: 'takes it' and 'completes it'")
     a = ap.parse_args()
@@ -642,7 +680,7 @@ def main():
     except ValueError as ex:
         ap.error(str(ex))
     register(projects, default)
-    CFG.update(steer=a.steer, simulate=a.simulate_orchestrator)
+    CFG.update(steer=a.steer, simulate=a.simulate_orchestrator, quota_feed=a.quota_feed, usage_report=a.usage_report, decision_log=a.decision_log)
     steer = a.steer
     for p in projects:
         log.info("project %s: repo=%s project=%s manager=%s mode=%s", p["name"], p["repo"], p["project"], p["manager"], "STEERING" if steer else "READ-ONLY")

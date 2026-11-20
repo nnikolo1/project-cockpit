@@ -17,6 +17,8 @@ How to run the cockpit, and how far the Manager / Orchestrator / Worker separati
 
 **Card metadata folder.** Per project the cockpit reads `footprint.json`, `churn.json` and `ambiguity.json` ([contract](contracts/card-metadata.md)) from the `meta` key of the project in the `--projects` file, default `~/.local/share/project-cockpit/<project name>/cardmeta/` (next to the project's token folder). Example: `{"name": "widgets", "repo": "acme/widgets", "meta": "~/.local/share/project-cockpit/widgets/cardmeta"}`. The folder is written by a producer on the project side, not by the cockpit; missing files just show "no data". This repository ships generic collectors for it (`tools/cardmeta_collect.py --repo PATH --map MODULE_MAP.json --project NAME`, stdlib, read-only on the repository; the footprint collector also reads a committed declaration, see its docstring). The cockpit's own map is `docs/cockpit-modules.json` and its declaration `docs/footprint-declared.json`.
 
+**Budget panel files.** The Budget page reads `quota.json`, `usage.json` and `decisions.jsonl` ([contract](contracts/budget-panel.md)) from `~/.local/share/project-cockpit/budget/`; `--quota-feed`, `--usage-report` and `--decision-log` set other paths. They are written by external producers, read-only for the cockpit; a missing file shows "no data".
+
 The token protects the page; it is one shared secret, not a user. Whoever holds it can do, in `--steer` mode, everything the `gh` login can do through the cockpit's actions. Treat it like the login itself.
 
 ## 2. The three roles
