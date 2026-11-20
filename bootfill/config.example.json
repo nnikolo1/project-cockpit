@@ -1,0 +1,19 @@
+{
+  "mode": "dry-run",
+  "projects": [
+    {"name": "widgets", "repo": "acme/widgets", "manager": "alice", "dir": "~/code/widgets",
+     "modules": null, "board": null, "exclusions": "~/.local/share/project-cockpit/widgets/bootfill-exclusions.json"}
+  ],
+  "tracking_issue": {"project": "widgets", "number": 1},
+  "quota_feed": "~/.local/share/project-cockpit/quota.json",
+  "quota_refresh_cmd": ["claude", "-p", "ok", "--model", "haiku"],
+  "transcript_glob": "~/.claude/projects/**/*.jsonl",
+  "judge_cmd": ["claude", "-p", "{prompt}", "--model", "haiku"],
+  "worker": {
+    "command": ["claude", "-p", "{prompt}", "--allowedTools", "Read,Edit,Write,Bash(git:*),Bash(gh:*),Bash(python3:*),Bash(pytest:*)"],
+    "branch_prefix": "boot/"
+  },
+  "notify_cmd": ["osascript", "-e", "display notification \"{message}\" with title \"{title}\""],
+  "workers": 3,
+  "day_cap": 60
+}
