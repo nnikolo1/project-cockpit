@@ -13,7 +13,7 @@ Assistant quota that is not used before a window resets is lost. The owner wants
 - Triggers, independent and each at most once per window: 5-hour window with more than 10 percent left and less than 2 hours to the reset releases 5 tasks; with more than 50 percent left it releases 20 (the larger wins); weekly window with more than 20 percent left and one day or less to the reset releases 50. These numbers are the owner's defaults and are configuration.
 - Ranking: priority label, due date, unblocked before blocked, what a task unblocks, must before nice, then a recorded judgement of value. A task without a priority counts as P2.
 - It starts headless assistant sessions to work the released tasks, a small fixed number in parallel (configuration key `workers`, default 2), with the manager identity only; unfinished tasks resume after a quota reset.
-- Limits: embryos only; never decisions or questions, anything that sends or withdraws outside the project, schema changes, deletions, spending; caps per run and per day; a kill switch (flag file and pause label); a one-week dry run; a daily summary; a trail comment on every release.
+- Limits: embryos only; never decisions or questions, anything that sends or withdraws outside the project, schema changes, deletions, spending; caps per run and per day; a kill switch (flag file and pause label); an optional dry-run mode (not a requirement); a daily summary; a trail comment on every release.
 - Every poll, skip, failure and release is logged: a rotated log and an append-only decision log with the ranking inputs and the judgement; the budget view shows the decision log; no tokens and no task text beyond title and number.
 
 ## Consequences
