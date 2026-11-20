@@ -51,5 +51,14 @@ Every line has `kind` (`"release"` or `"poll"`) and `time` (ISO 8601 UTC). A lin
 ```
 - `idle`: boolean (anything else shows "?"). `five_hour_used`, `weekly_used`: percent as read at poll time (numbers). `*_resets_at`: text, ISO 8601 preferred. `triggers`: the verdict of every trigger evaluated (`verdict` `fired` is highlighted). `decision`: the outcome in words, for example `release 20` or `skip: not idle`.
 
+**Authority line** (extension, added with [ADR 0016](../adr/0016-boot-filling-authority-judgement.md); one per task the job did not release because it needs an owner decision or approval, or released flagged):
+```
+{"kind": "authority_skip", "time": "2026-11-20T10:00:05Z", "project": "demo", "issue": 9, "title": "Change the schema",
+ "status": "NEEDS YOU", "verdict": "needs_authority", "reason": "NEEDS YOU: demo #9 Change the schema (NOT released). Why: ... To release it: ... Signals: ...",
+ "action": "skipped"}
+```
+- `status` is always `NEEDS YOU`; `action` is `skipped` (stays an embryo) or `flagged` (released anyway, `authority_mode` flag); `reason` is the job's one wording, cut to 300 characters.
+- Compatibility: readers of version 1 count an unknown `kind` as an unreadable line (this was always the rule above). The cockpit's `logic.decision_view` ignores `authority_skip` lines without counting them, shows only `release` and `poll`, and still counts any other unknown kind as unreadable (tested).
+
 ## What the page does with them
 Two window cards (used share bar, time to reset, reset time, tokens when a usage report exists, age and stale marker per source), a table of released tasks and a table of the latest polls. Missing files are reported per source. Fixtures for tests: `tests/fixtures/budget/`.

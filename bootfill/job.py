@@ -23,9 +23,11 @@ class Ctx:
     """Everything a poll needs. hosting: tasks(project), labels(project, n), release(project, task, comment), comment(project, n, body);
     quota.read(); idle.last_write(); procs() -> [(pid, ppid, cmd)] or None; workers: start(entry, project_cfg), poll(handle); judge(tasks); notify(title, msg)."""
 
-    def __init__(self, cfg, data_dir, hosting, quota, idle, workers, judge, notify, excl=None, procs=None):
+    def __init__(self, cfg, data_dir, hosting, quota, idle, workers, judge, notify, excl=None, procs=None, authority_judge=None):
         self.cfg, self.dir = cfg, pathlib.Path(data_dir)
         self.hosting, self.quota, self.idle, self.workers, self.judge, self.notify = hosting, quota, idle, workers, judge, notify
+        self.authority_judge = authority_judge  # (task, signals) -> (verdict, reason); None = no judge: 'maybe' tasks are skipped conservatively
+        self.last_authority = dict(needs=[], flagged=0, judged=0)
         self.procs = procs  # process lister for the other-agent check; None = not used
         self.excl = excl or {}  # project name -> parsed exclusions
         self.mode = cfg["mode"]
@@ -100,12 +102,14 @@ def poll(ctx, now=None):
         A.write_json(ctx.state_path, state)
         return text
     released = release_batch(ctx, state, now, dec, triggers)
+    auth = authority_suffix(ctx)
     text = f"{'would release' if ctx.mode == core.DRY else 'released'} {len(released)} of {dec['n']} ({', '.join(dec['fired'])})" + ("; " + "; ".join(dec["reasons"]) if dec["reasons"] else "")
     if not released:
         text = "skip: no eligible task"
     else:
         core.mark_fired(state, dec, triggers)
         state["day_count"] += len(released)
+    text += auth
     _skip(ctx, now, idle, why, q, triggers, text)
     if q:
         start_workers(ctx, state, now, q)
@@ -134,6 +138,8 @@ def release_batch(ctx, state, now, dec, triggers):
     """Gather eligible embryos of every project, rank, select, release (or only log in dry run). -> released rows."""
     A, cfg = _io(), ctx.cfg
     rows, run_id = [], f"{int(now)}"
+    cache, logged, open_ = state.setdefault("authority_cache", {}), state.setdefault("authority_logged", {}), state.setdefault("authority_open", {})
+    needs, judged, budget = [], 0, [cfg["authority_judge_max"]]
     for pr in cfg["projects"]:
         name = pr["name"]
         try:
@@ -142,19 +148,38 @@ def release_batch(ctx, state, now, dec, triggers):
             log.error("task list of %s failed: %s: %s", name, type(ex).__name__, str(ex)[:200])
             continue
         by_key = {t["key"]: t for t in tasks}
+        by_number = {t["number"]: t for t in tasks}
         unb = core.unblock_counts(tasks)
         excl = core.parse_exclusions(ctx.excl.get(name))
         track = (cfg.get("tracking_issue") or {})
-        ok = []
+        ok, open_items = [], []
         for t in tasks:
             good, reason = core.eligibility(t, cfg, excl, track.get("number") if track.get("project") == name else None)
             if good:
+                ad = core.authority_decide(t, cfg, excl, by_key, by_number, ctx.authority_judge, cache, now, budget)
+                judged += ad["judged"] and not ad["cached"]
+                if not ad["release"]:
+                    rec = core.authority_skip_record(now, name, t, ad, cfg["authority_mode"])
+                    open_items.append(dict(project=name, number=t["number"], title=t["title"], text=rec["text"], action=rec["action"]))
+                    if cfg["authority_mode"] == "flag":
+                        t["_authority"] = rec
+                    else:
+                        needs.append(rec)
+                        if logged.get(f"{name}/{t['key']}") != rec["text"]:  # one record per change, not one per poll
+                            logged[f"{name}/{t['key']}"] = rec["text"]
+                            A.append_jsonl(ctx.decisions, rec)
+                            _contract(ctx, core.contract_authority(rec))
+                            plog.warning("%s", rec["text"])
+                            log.warning("authority: %s %s %s", rec["action"], name, t["key"])
+                        continue
                 ok.append(t)
             elif t["stage"] == "embryo":
                 log.info("skip %s %s: %s", name, t["key"], reason)
+        open_[name] = open_items
         for r in core.rank(ok, by_key, unb):
             r["project"] = name
             rows.append(r)
+    ctx.last_authority = dict(needs=needs, flagged=sum(1 for r in rows if r["task"].get("_authority")), judged=judged)
     rows = core.group_rows(rows)
     judge = ctx.judge if cfg["tie_judgement"] else None
     chosen = core.select(rows, dec["n"], judge)
@@ -165,6 +190,8 @@ def release_batch(ctx, state, now, dec, triggers):
         try:
             if ctx.mode == core.REAL:
                 comment = TRAIL.format(mode="real", trigger=trig, rank=r["rank"], when=rec["time"])
+                if r["task"].get("_authority"):
+                    comment += " " + r["task"]["_authority"]["text"]
                 if r["judgement"]:
                     comment += f" Tie broken by value judgement: {r['judgement']}"
                 ctx.hosting.release(r["project"], r["task"], comment)
@@ -174,11 +201,28 @@ def release_batch(ctx, state, now, dec, triggers):
             log.error("release of %s %s failed: %s: %s", r["project"], r["task"]["key"], type(ex).__name__, str(ex)[:200])
             _contract(ctx, core.contract_release(rec, failed=True))
             continue
+        arec = r["task"].get("_authority")
+        if arec:  # authority_mode flag: released, but marked everywhere
+            rec["authority"] = dict(status=core.STATUS, text=arec["text"])
+            A.append_jsonl(ctx.decisions, arec)
+            _contract(ctx, core.contract_authority(arec))
+            plog.warning("%s", arec["text"])
         A.append_jsonl(ctx.decisions, rec)
         _contract(ctx, core.contract_release(rec))
         log.info("%s %s %s rank %d trigger %s", rec["state"], r["project"], r["task"]["key"], r["rank"], trig)
         out.append(r)
     return out
+
+
+def authority_suffix(ctx):
+    """Poll-line addition: how many tasks NEED YOU (skipped, not released) or were released flagged, by number; empty when none."""
+    a = ctx.last_authority
+    parts = []
+    if a["needs"]:
+        parts.append(f"{core.STATUS}: {len(a['needs'])} task(s) NOT released, authority needed ({', '.join('#' + str(r['number']) for r in a['needs'])})")
+    if a["flagged"]:
+        parts.append(f"{core.STATUS}: {a['flagged']} flagged task(s) up for release (authority_mode flag)")
+    return "; " + "; ".join(parts) if parts else ""
 
 
 def _contract(ctx, line):
@@ -253,7 +297,8 @@ def daily_summary(ctx, state, now):
     if state.get("summary_date") == today or dt.datetime.fromtimestamp(now).hour < ctx.cfg["summary_hour"]:
         return
     rows = core.release_list(A.read_jsonl(ctx.decisions))
-    text = core.summary_text(rows, today, ctx.mode)
+    needs = [i for items in state.get("authority_open", {}).values() for i in items]
+    text = core.summary_text(rows, today, ctx.mode, needs)
     track = ctx.cfg.get("tracking_issue")
     try:
         if track:
@@ -284,7 +329,8 @@ def main(argv=None):
     own_cwd.mkdir(parents=True, exist_ok=True)  # the job's own headless calls run here, so their transcripts land in one recognisable, excluded folder
     exclude = list(cfg["transcript_exclude"]) + [f"*{core.encode_cwd(own_cwd)}*"]
     ctx = Ctx(cfg, a.data_dir, A.Gh(cfg["projects"]), A.Quota(cfg["quota_feed"], cfg.get("quota_refresh_cmd"), cwd=own_cwd), A.Idle(cfg["transcript_glob"], exclude),
-              A.Workers(cfg["worker"], a.data_dir), A.Judge(cfg["judge_cmd"], cwd=own_cwd), A.Notifier(cfg.get("notify_cmd")), excl, A.Processes())
+              A.Workers(cfg["worker"], a.data_dir), A.Judge(cfg["judge_cmd"], cwd=own_cwd), A.Notifier(cfg.get("notify_cmd")), excl, A.Processes(),
+              A.AuthorityJudge(cfg["judge_cmd"], cfg["authority_excerpt_chars"], cwd=own_cwd))
     if ctx.mode == core.REAL:
         since = A.read_json(f"{a.data_dir}/state-{core.DRY}.json", {}).get("dry_run_since")
         if since is None or time.time() - since < 7 * 86400:

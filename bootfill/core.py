@@ -30,6 +30,33 @@ DEFAULTS = dict(
     budget_dir="~/.local/share/project-cockpit/budget",  # decisions.jsonl for the cockpit's budget page (docs/contracts/budget-panel.md)
     exclude_labels=["type:decision", "question"],
     exclude_title_patterns=[r"\b(send|submit|withdraw|delete|drop|purchase|spend|spending|schema|ddl)\b"],
+    # Authority need (ADR 0016): would the task dead-end for lack of an authority the job and its workers do not have?
+    authority_mode="skip",  # "skip": do not release, the task stays an embryo; "flag": release but mark it (trail comment, decision log, summary)
+    authority_labels=["needs-approval", "needs-owner", "owner-decision", "approval", "constitutional", "legal", "security", "policy"],
+    authority_strong_patterns=[  # an approval or a choice by the owner is required: a hit alone means needs_authority
+        r"\b(needs?|requires?|awaits?|pending)\s+(explicit\s+|prior\s+|the\s+owner'?s?\s+|owner\s+|manager\s+)?(approval|sign-?off|decision|consent)\b",
+        r"\b(owner|manager|user)\s+(decides|to\s+decide|must\s+decide|approves|to\s+approve|must\s+approve)\b",
+        r"\b(ddl|schema\s+(change|migration)|alter\s+table|drop\s+table|migration\s+of\s+the\s+schema)\b",
+        r"\b(credentials?|secrets?|api[ -]?keys?|tokens?|passwords?)\b.{0,40}\b(rotate|issue|create|obtain|provide|share|enter)\b",
+        r"\b(rotate|issue|create|obtain|provide|share|enter)\b.{0,40}\b(credentials?|secrets?|api[ -]?keys?|tokens?|passwords?)\b",
+        r"\b(make|set)\b.{0,20}\b(public|open[ -]source)\b|\bpublic\s+release\b|\bpublish\b.{0,30}\b(publicly|to\s+the\s+public)\b",
+    ],
+    authority_weak_patterns=[  # words that often, not always, mean an authority is needed: a hit alone means maybe (model judge)
+        r"\b(submit|submission|send|withdraw|delete|deletion|remove\s+data|purge|purchase|spend|spending|budget|payment|billing|paid)\b",
+        r"\b(credentials?|secrets?|tokens?|passwords?|api[ -]?keys?)\b",
+        r"\b(legal|licen[cs]e|compliance|gdpr|privacy|policy|contract|terms)\b",
+        r"\b(public(ly)?|release\s+to|go\s+live|production|deploy)\b",
+        r"\b(decide|decision|choose|choice|which\s+option|trade-?off)\b",
+        r"\b(migration|migrate|rename|retire|deprecate)\b",
+    ],
+    protected_paths=["claude.md", "constitution.md", "*/schema.sql", "schema.sql", ".github/workflows/*", "docs/owner-defaults.md"],  # fnmatch on paths named in the task text (lower case)
+    authority_weights=dict(label=3, strong=3, question=3, path=3, weak=1),
+    authority_skip_score=3,  # score at or above: needs_authority
+    authority_maybe_score=1,  # score at or above (and below skip): maybe, sent to the judge
+    authority_judgement=True,
+    authority_judge_max=10,  # judge calls per poll; further "maybe" tasks wait for a later poll and are skipped meanwhile (conservative)
+    authority_excerpt_chars=600,  # cap of the body excerpt sent to the judge
+    authority_cache_hours=24,  # a judged verdict is reused for this long while title, labels and excerpt are unchanged
 )
 DRY, REAL = "dry-run", "real"
 
@@ -226,7 +253,8 @@ def roll_day(state, today):
 
 # ---------- eligibility ----------
 def parse_exclusions(text_or_obj):
-    """Per-project exclusion file: {"labels": [...], "numbers": [...], "title_patterns": [...]}; missing file = empty."""
+    """Per-project exclusion file: {"labels": [...], "numbers": [...], "title_patterns": [...]}; missing file = empty. Optional authority keys
+    (ADR 0016): "authority_labels", "authority_patterns", "protected_paths" add to the configured lists."""
     d = json.loads(text_or_obj) if isinstance(text_or_obj, (str, bytes)) else (text_or_obj or {})
     for k in ("labels", "numbers", "title_patterns"):
         d.setdefault(k, [])
@@ -252,6 +280,191 @@ def eligibility(task, cfg, excl, tracking_number=None):
         if re.search(pat, task["title"], re.I):
             return False, f"title matches /{pat}/"
     return True, "eligible"
+
+
+# ---------- authority need (ADR 0016) ----------
+NEEDS, MAYBE, NONE_ = "needs_authority", "maybe", "none"
+_SECRET = re.compile(r"(?i)(gh[pousr]_[A-Za-z0-9]{10,}|sk-[A-Za-z0-9_-]{10,}|xox[abp]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{12,}|[A-Za-z0-9+/=_-]{32,}"
+                     r"|(?:password|passwd|secret|token|api[_-]?key)\s*[:=]\s*\S+|[\w.+-]+@[\w-]+\.[\w.-]+|/(?:Users|home)/[\w.-]+)")
+
+
+def redact(text):
+    """Remove secret-looking strings, e-mail addresses and home-directory paths from a text before it leaves the job (marked [removed])."""
+    return _SECRET.sub("[removed]", text or "")
+
+
+def excerpt(text, limit):
+    """Redacted, whitespace-collapsed body excerpt capped at `limit` characters."""
+    return re.sub(r"\s+", " ", redact(text)).strip()[:max(0, int(limit))]
+
+
+def question_links(task, by_key, by_number):
+    """Open question or decision issues the task depends on: its blockers, its parent and '#N' references in its text.
+    -> sorted list of 'T-n' keys / numbers (strings)."""
+    def is_q(t):
+        return t and t["stage"] != "completed" and ("question" in (t.get("labels") or []) or t.get("type") == "decision" or "type:decision" in (t.get("labels") or []))
+    out = set()
+    for k in list(task.get("blockedBy") or []) + [task.get("parent")]:
+        if is_q(by_key.get(k)):
+            out.add(str(k))
+    for n in re.findall(r"(?<![\w&])#(\d+)\b", (task.get("title") or "") + " " + (task.get("desc") or "")):
+        t = by_number.get(int(n))
+        if t is not None and t is not task and is_q(t):
+            out.add(f"#{n}")
+    return sorted(out)
+
+
+def authority_signals(task, cfg, excl, by_key, by_number):
+    """Cheap deterministic signals -> list of dict(kind, detail, weight). kinds: label, strong, weak, question, path."""
+    w, sig = cfg["authority_weights"], []
+    labels = set(task.get("labels") or [])
+    for lab in sorted(labels & (set(cfg["authority_labels"]) | set(excl.get("authority_labels", [])))):
+        sig.append(dict(kind="label", detail=lab, weight=w["label"]))
+    text = (task.get("title") or "") + "\n" + (task.get("desc") or "")
+    for kind, pats in (("strong", list(cfg["authority_strong_patterns"]) + list(excl.get("authority_patterns", []))), ("weak", cfg["authority_weak_patterns"])):
+        for pat in pats:
+            m = re.search(pat, text, re.I | re.S)
+            if m:
+                sig.append(dict(kind=kind, detail=re.sub(r"\s+", " ", m.group(0))[:60], weight=w[kind]))
+    for q in question_links(task, by_key, by_number):
+        sig.append(dict(kind="question", detail=f"open question/decision {q}", weight=w["question"]))
+    import fnmatch
+    prot = list(cfg["protected_paths"]) + list(excl.get("protected_paths", []))
+    for p in task_paths(text):
+        if any(fnmatch.fnmatch(p, pat.lower()) for pat in prot):
+            sig.append(dict(kind="path", detail=p, weight=w["path"]))
+    return sig
+
+
+def authority_assess(task, cfg, excl, by_key, by_number):
+    """-> dict(verdict, score, signals). needs_authority at score >= authority_skip_score, maybe at >= authority_maybe_score, else none."""
+    sig = authority_signals(task, cfg, excl, by_key, by_number)
+    score = sum(s["weight"] for s in sig)
+    verdict = NEEDS if score >= cfg["authority_skip_score"] else MAYBE if score >= cfg["authority_maybe_score"] else NONE_
+    return dict(verdict=verdict, score=score, signals=[f"{s['kind']}: {s['detail']}" for s in sig])
+
+
+def authority_prompt(task, signals, limit):
+    """Prompt for the authority judgement: title, labels, the cheap signals and a short redacted excerpt; nothing else."""
+    return ("A background worker (a headless coding assistant) may pick up the task below on its own. It can edit and test code in the repository and open a draft "
+            "pull request. It has NO authority to: decide between options on the owner's behalf, approve or change a database schema, handle credentials, spend "
+            "money, send or submit anything outside the repository, delete data, publish publicly, or settle legal or policy questions. "
+            "Would this task dead-end without such an authority? Answer with one JSON object: "
+            '{"verdict": "needs_authority" or "none", "reason": "one short sentence"}.\n'
+            f"Title: {redact(task.get('title', ''))}\nLabels: {', '.join(task.get('labels') or []) or '(none)'}\n"
+            f"Signals: {'; '.join(signals) or '(none)'}\nExcerpt: {excerpt(task.get('desc'), limit)}")
+
+
+def parse_authority(text):
+    """-> (verdict, one-line reason). Raises ValueError when no usable verdict is in the answer."""
+    m = re.search(r"\{.*\}", text or "", re.S)
+    if not m:
+        raise ValueError("no JSON object in the answer")
+    d = json.loads(m.group(0))
+    v = str(d.get("verdict", "")).strip().lower()
+    if v not in (NEEDS, NONE_):
+        raise ValueError(f"unknown verdict {v!r}")
+    return v, re.sub(r"\s+", " ", str(d.get("reason", ""))).strip()[:200]
+
+
+def fingerprint(task, limit):
+    import hashlib
+    raw = "\n".join([task.get("title") or "", ",".join(sorted(task.get("labels") or [])), excerpt(task.get("desc"), limit)])
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def authority_decide(task, cfg, excl, by_key, by_number, judge=None, cache=None, now=0.0, budget=None):
+    """Full assessment of one eligible task. -> dict(verdict, release, score, signals, reason, judged, cached).
+    none: release. needs_authority: do not release. maybe: ask `judge(task, signals) -> (verdict, reason)` (cached by fingerprint for
+    authority_cache_hours; `budget` is a one-item list [calls left]); a missing judge, an exhausted budget or a failing judge leaves the
+    task unreleased (a maybe always carries a cheap signal, so the cheap signals were not clean). `release` is the pre-mode verdict:
+    True only for none or a judge's none."""
+    a = authority_assess(task, cfg, excl, by_key, by_number)
+    out = dict(verdict=a["verdict"], release=a["verdict"] == NONE_, score=a["score"], signals=a["signals"], reason="no authority signal" if a["verdict"] == NONE_ else "", judged=False, cached=False, failure="")
+    if a["verdict"] == NEEDS:
+        out["reason"] = "cheap signals: " + "; ".join(a["signals"])
+    elif a["verdict"] == MAYBE:
+        fp, hit = fingerprint(task, cfg["authority_excerpt_chars"]), (cache or {}).get(f"{task.get('key')}")
+        if hit and hit.get("fp") == fp and now - hit.get("at", 0) < cfg["authority_cache_hours"] * 3600:
+            out.update(verdict=hit["verdict"], release=hit["verdict"] == NONE_, reason=hit["reason"], judged=True, cached=True)
+        elif not (judge and cfg.get("authority_judgement", True)):
+            out["failure"] = "no authority judge available"
+            out["reason"] = "weak signals (" + "; ".join(a["signals"]) + "); no judge available: conservative skip"
+        elif budget is not None and budget[0] <= 0:
+            out["failure"] = "judge budget for this poll used up (retried next poll)"
+            out["reason"] = "weak signals; judge budget for this poll used up: conservative skip, retried next poll"
+        else:
+            if budget is not None:
+                budget[0] -= 1
+            try:
+                v, why = judge(task, a["signals"])
+                out.update(verdict=v, release=v == NONE_, reason=why or "judge gave no reason", judged=True)
+                if cache is not None:
+                    cache[f"{task.get('key')}"] = dict(fp=fp, at=now, verdict=v, reason=out["reason"])
+            except Exception as ex:  # conservative: the cheap signals were not clean, so a failed judgement never releases
+                out["failure"] = f"the authority judgement FAILED ({type(ex).__name__})"
+                out["reason"] = f"weak signals ({'; '.join(a['signals'])}); judgement unavailable ({type(ex).__name__}): conservative skip"
+    return out
+
+
+STATUS = "NEEDS YOU"  # fixed status word: cannot be mistaken for progress; used in the decision log, the poll log and the summary
+
+
+def needs_you_sentences(dec):
+    """-> (why, todo): one plain sentence each. why: why the job did not release the task. todo: what exactly the owner must decide or do."""
+    sig = dec.get("signals") or []
+    first = lambda kind: next((x.split(": ", 1)[1] for x in sig if x.startswith(kind + ": ")), None)
+    if dec.get("failure"):
+        why = f"The job could not tell whether this task needs an authority: it has weak signals ({'; '.join(sig)}) and {dec['failure']}, so it stayed unreleased rather than guess."
+        todo = "Read the task and release it by hand if no owner decision is needed; fix the judge if this repeats."
+    elif dec.get("judged") and dec["verdict"] == NEEDS:
+        why = f"The model judge found that the task would dead-end without an authority: {dec['reason'] or 'no reason given'}."
+        todo = "Make the decision or give the approval the judge names, then release the task by hand."
+    elif first("question"):
+        why = f"The task depends on an open question or decision ({first('question')})."
+        todo = "Answer that question and close it, then release the task by hand."
+    elif first("path"):
+        why = f"The task names a protected file ({first('path')}) that a worker may not change on its own."
+        todo = f"Approve the change to {first('path')} (or take it off the protected list), then release the task by hand."
+    elif first("label"):
+        why = f"The task carries the label '{first('label')}', which marks it as needing the owner."
+        todo = f"Decide or approve what '{first('label')}' stands for, then release the task by hand."
+    elif first("strong"):
+        why = f"The task text asks for an approval or a choice by the owner ('{first('strong')}')."
+        todo = "Give that approval or make that choice in the task, then release it by hand."
+    else:
+        why = f"The task has weak authority signals ({'; '.join(sig) or 'none'}) and was not cleared."
+        todo = "Read the task and release it by hand if no owner decision is needed."
+    return why, todo
+
+
+def needs_you_text(project, number, title, dec, action="skipped"):
+    """THE one wording of a dead-end task; the decision-log record, the poll-log line and the daily summary all embed exactly this text."""
+    why, todo = needs_you_sentences(dec)
+    head = f"{STATUS}: {project} #{number} {title}" + (" (released anyway: authority_mode is flag)" if action == "flagged" else " (NOT released)")
+    return f"{head}. Why: {why} To release it: {todo} Signals: {'; '.join(dec.get('signals') or []) or 'none'}."
+
+
+def authority_skip_record(now, project, task, dec, mode):
+    """Decision-log line for a task not released (mode skip) or released with a mark (mode flag): task, project, verdict, signals, reason, time, and the shared text."""
+    action = "skipped" if mode == "skip" else "flagged"
+    why, todo = needs_you_sentences(dec)
+    return dict(type="authority_skip", time=iso(now), project=project, key=task["key"], number=task["number"], title=task["title"],
+                status=STATUS, verdict=dec["verdict"], signals=dec["signals"], reason=dec["reason"], why=why, todo=todo, judged=dec["judged"],
+                failure=dec.get("failure", ""), mode=mode, action=action, text=needs_you_text(project, task["number"], task["title"], dec, action))
+
+
+def contract_authority(rec):
+    """Own authority_skip record -> the budget contract's `authority_skip` line (extension kind, ignored by older readers)."""
+    return dict(kind="authority_skip", time=rec["time"], project=rec["project"], issue=rec["number"], title=rec["title"], status=STATUS,
+                verdict=rec["verdict"], reason=rec["text"][:300], action=rec["action"])
+
+
+def authority_needs_text(items):
+    """Summary section. items: authority_skip records (or their state copies) with `text`. Same wording as the records."""
+    if not items:
+        return ""
+    return f"{STATUS}: {len(items)} task(s) wait for an owner decision or approval (they stay embryos; release by hand if you want them):\n" + "\n".join("- " + i["text"] for i in items)
 
 
 # ---------- ranking ----------
@@ -402,12 +615,13 @@ def poll_line(now, idle, idle_reason, quota, triggers, decision_text):
     return f"idle={'yes' if idle else 'no'} ({idle_reason}) | {q('five')} {q('week')} | {trig} | decision: {decision_text}"
 
 
-def summary_text(rows, day, mode, skipped=0):
+def summary_text(rows, day, mode, needs=()):
     """Daily summary (comment body): every released task of the day, newest last."""
     today = [r for r in rows if r["time"].startswith(day)]
     head = f"Boot-filling summary {day} ({mode}): {len(today)} task(s) {'would be ' if mode == DRY else ''}released"
     body = [f"- {r['project']} #{r['number']} {r['title']} | rank {r['rank']} | {r['trigger']} | {r['time']} | {r['state']}" for r in today]
-    return "\n".join([head, *body])
+    extra = authority_needs_text(list(needs))
+    return "\n".join([head, *body] + ([extra] if extra else []))
 
 
 def worker_slots(running, max_workers, quota, stop_left):

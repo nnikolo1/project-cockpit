@@ -147,6 +147,17 @@ class Judge:
         return core.parse_judgement(out, [t["key"] for t in tasks])
 
 
+class AuthorityJudge:
+    """Authority-need judgement by one short headless model call: title, labels, signals and a capped, redacted excerpt only."""
+
+    def __init__(self, cmd, limit, cwd=None):
+        self.cmd, self.limit, self.cwd = cmd, limit, cwd
+
+    def __call__(self, task, signals):
+        prompt = core.authority_prompt(task, signals, self.limit)
+        return core.parse_authority(run([x.replace("{prompt}", prompt) for x in self.cmd], timeout=180, cwd=self.cwd))
+
+
 class Notifier:
     def __init__(self, cmd):
         self.cmd = cmd  # e.g. ["osascript", "-e", 'display notification "{message}" with title "{title}"']

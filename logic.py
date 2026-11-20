@@ -879,6 +879,9 @@ def _poll_row(d):
                 weekly_used=_num(d.get("weekly_used")), weekly_resets_at=_txt(d.get("weekly_resets_at")), triggers=trig, decision=_txt(d.get("decision")))
 
 
+IGNORED_DECISION_KINDS = ("authority_skip",)
+
+
 def decision_view(text, limit=LOG_LIMIT):
     """JSON-lines decision log (one object per line, `kind` is "release" or "poll") -> {status, releases, polls, skipped}, newest first,
     at most `limit` each. A line that is not JSON, has no known kind or no readable `time` is counted in `skipped`, never raised."""
@@ -895,6 +898,8 @@ def decision_view(text, limit=LOG_LIMIT):
             continue
         t = parse_ts(d.get("time")) if isinstance(d, dict) else None
         kind = d.get("kind") if isinstance(d, dict) else None
+        if kind in IGNORED_DECISION_KINDS:  # extension kinds of the contract (authority_skip): known, not shown here, not "unreadable"
+            continue
         if t is None or kind not in ("release", "poll"):
             skipped += 1
             continue
