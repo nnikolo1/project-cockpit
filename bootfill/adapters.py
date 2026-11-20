@@ -231,3 +231,17 @@ class Workers:
 
 def _q(s):
     return "'" + s.replace("'", "'\\''") + "'"
+
+
+class KeepAwake:
+    """Holds the machine awake for a while by starting macOS `caffeinate -i -t SECONDS` (idle sleep only: the display may still sleep).
+    Each armed poll renews the hold, so the chain of polls sustains itself and ends by itself a few minutes after the job is paused,
+    unloaded or switched to dry run. A closed lid or a flat battery still puts the machine to sleep (a limit of caffeinate)."""
+
+    def __init__(self, command="caffeinate"):
+        self.command = command
+
+    def hold(self, seconds):
+        subprocess.Popen([self.command, "-i", "-t", str(int(seconds))], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+

@@ -341,3 +341,35 @@ def test_render_plist_cli_reads_config(tmp_path, capsys):
     cfg.write_text("{}")
     R.main(["--config", str(cfg), "--data-dir", str(tmp_path), "--checkout", str(tmp_path), "--out", str(tmp_path / "o.plist")])
     assert "<integer>600</integer>" in (tmp_path / "o.plist").read_text()
+
+
+class FakeKeepAwake:
+    def __init__(self):
+        self.held = []
+
+    def hold(self, seconds):
+        self.held.append(seconds)
+
+
+def test_keep_awake_is_held_while_armed_not_when_dry_or_paused(tmp_path):
+    ctx, h, w, *_ = make(tmp_path, many(1), mode="real", q=quota_of(80, 1.0, week_used=90))
+    ctx.keep_awake = FakeKeepAwake()
+    J.poll(ctx, NOW)
+    assert ctx.keep_awake.held == [2 * 10 * 60]  # twice the default poll interval of 10 minutes
+    ctx.cfg["keep_awake"] = False
+    J.poll(ctx, NOW + 600)
+    assert ctx.keep_awake.held == [1200]  # switched off: no new hold
+    dctx, *_ = make(tmp_path / "dry", many(1), mode="dry-run", q=quota_of(80, 1.0, week_used=90))
+    dctx.keep_awake = FakeKeepAwake()
+    J.poll(dctx, NOW)
+    assert dctx.keep_awake.held == []  # dry run does not need the machine awake
+
+
+def test_keep_awake_failure_never_stops_the_poll(tmp_path):
+    class Broken:
+        def hold(self, seconds):
+            raise FileNotFoundError("caffeinate")
+    ctx, *_ = make(tmp_path, many(1), mode="real", q=quota_of(80, 1.0, week_used=90))
+    ctx.keep_awake = Broken()
+    assert isinstance(J.poll(ctx, NOW), str)  # the poll still returns its decision text
+

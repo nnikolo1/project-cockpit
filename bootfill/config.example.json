@@ -30,6 +30,8 @@
   "conflict_max_skips": 3,
   "conflict_labels": ["shared-files", "shared", "constitutional"],
   "conflict_judgement": true,
+  "keep_awake": true,
+  "keep_awake_minutes": null,
   "workers": 2,
   "day_cap": 60,
   "authority_mode": "skip",

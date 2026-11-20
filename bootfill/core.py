@@ -25,6 +25,8 @@ DEFAULTS = dict(
     quota_history="quota-history.jsonl",  # ADR 0017: one record per poll; relative = inside the data folder, null = off
     quota_history_days=400,  # rows older than this are pruned, at most once a day
     usage_report=None,  # path of the budget page's usage.json; null = <budget_dir>/usage.json, "" = do not write it
+    keep_awake=True,  # while armed (real mode, not paused) or while workers run, hold the machine awake so the next poll can fire
+    keep_awake_minutes=None,  # null = twice the poll interval; each poll renews the hold
     workers=2,  # how many workers may run at the same time (configuration key `workers`; 0 starts none)
     feed_stale_minutes=None,  # ADR 0018: a quota feed older than this is stale (null = 3 x poll_minutes); stale windows are estimated, never shown as measured
     worker_stop_left=5,  # stop starting workers when either window has this percent or less left

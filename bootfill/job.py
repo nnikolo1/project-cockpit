@@ -174,6 +174,20 @@ def _skip(ctx, now, idle, why, triggers, text):
     return text
 
 
+def _keep_awake(ctx, state, stopped):
+    """Hold the machine awake (see adapters.KeepAwake) while the job is armed (real mode, not paused) or workers are running."""
+    ka = getattr(ctx, "keep_awake", None)
+    if ka is None or not ctx.cfg.get("keep_awake", True):
+        return
+    if (ctx.mode == core.REAL and not stopped) or state.get("running"):
+        minutes = ctx.cfg.get("keep_awake_minutes") or 2 * ctx.cfg.get("poll_minutes", 10)
+        try:
+            ka.hold(int(minutes) * 60)
+            log.info("keep awake: held for %d minutes", int(minutes))
+        except Exception as ex:
+            log.warning("keep awake failed: %s: %s", type(ex).__name__, str(ex)[:120])
+
+
 def poll(ctx, now=None):
     """Run one poll; returns the decision text (also written to the poll log). Never raises for an expected failure."""
     A = _io()
@@ -190,6 +204,7 @@ def poll(ctx, now=None):
     except Exception as ex:
         log.error("kill-switch check failed: %s: %s", type(ex).__name__, str(ex)[:200])
         return _skip(ctx, now, None, "unknown", [], f"skip: cannot read the pause label ({type(ex).__name__}); doing nothing")
+    _keep_awake(ctx, state, stop)
     if stop:
         log.warning("%s", stop)
         return _skip(ctx, now, None, "not checked", [], f"skip: {stop}")
@@ -469,6 +484,7 @@ def main(argv=None):
               A.Workers(cfg["worker"], a.data_dir), A.Judge(cfg["judge_cmd"], cwd=own_cwd), A.Notifier(cfg.get("notify_cmd")), excl, A.Processes(),
               A.AuthorityJudge(cfg["judge_cmd"], cfg["authority_excerpt_chars"], cwd=own_cwd),
               QH.TokenScanner(cfg["transcript_glob"], exclude, pathlib.Path(a.data_dir) / "token-cache.json"))
+    ctx.keep_awake = A.KeepAwake()
     if ctx.mode == core.REAL:
         since = A.read_json(f"{a.data_dir}/state-{core.DRY}.json", {}).get("dry_run_since")
         if since is None or time.time() - since < 7 * 86400:
