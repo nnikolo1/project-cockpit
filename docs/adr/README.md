@@ -17,3 +17,4 @@ Short records of why the cockpit is the way it is. One decision per file, one sc
 | [0011](0011-deployment-and-role-separation.md) | Deployment: one cockpit per repo, role separation by identity and credentials | accepted |
 | [0012](0012-several-projects-in-one-instance.md) | Several projects in one instance, chosen by a selector | accepted |
 | [0013](0013-card-metadata-from-generated-files.md) | Card metadata (churn, footprint, ambiguity) comes from generated files | accepted |
+| [0014](0014-boot-filling-job.md) | The boot-filling job releases ranked tasks to use quota that would expire (idle only, 30-minute poll, fixed payloads, limits, full log) | accepted |
