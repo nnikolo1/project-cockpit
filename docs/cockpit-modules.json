@@ -19,6 +19,7 @@
   {"path": "tests/test_cache.py", "module": "core", "basis": "tests the cache in cockpit.py"},
   {"path": "tests/test_cardmeta.py", "module": "core", "basis": "tests logic.card_meta"},
   {"path": "tests/test_logic.py", "module": "core", "basis": "tests logic.py"},
+  {"path": "tests/test_questions.py", "module": "core", "basis": "tests the open-questions parsing in logic.py"},
   {"path": "tests/test_modules.py", "module": "core", "basis": "tests the module functions of logic.py"},
   {"path": "tests/test_projects.py", "module": "core", "basis": "tests the --projects handling in cockpit.py"},
   {"path": "tests/test_report.py", "module": "core", "basis": "tests the report functions of logic.py"},

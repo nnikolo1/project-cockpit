@@ -197,7 +197,7 @@ const NOMETA=()=>({footprint:{status:'missing'},churn:{status:'missing'},ambigui
 let Q={questions:[],counts:{},projects:[]};  /* open questions of every project: /api/questions, not tied to the selected project */
 let D=null,CODE={wired:false,modules:{}},FEED=[],MODULES=[],RULES={configured:false},META=NOMETA();
 const SVGC={};
-const UI={churnRel:false,route:'cockpit',filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',tlType:'all',rulesGroup:'all',qProj:'all',codeMod:'unassigned',codeTab:'quality',fit:{deps:true,erd:true,js:true,flow:false},toast:'',err:''};
+const UI={churnRel:true,route:'cockpit',filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',tlType:'all',rulesGroup:'all',qProj:'all',codeMod:'unassigned',codeTab:'quality',fit:{deps:true,erd:true,js:true,flow:false},toast:'',err:''};
 const ST=()=>!!(D&&D.source.steering);
 const SIM=()=>!!(D&&D.source.simulate);
 const nd=(v,f)=>v==null?'<span class="muted">no data</span>':(f?f(v):v);
