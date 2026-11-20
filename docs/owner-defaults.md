@@ -18,6 +18,7 @@ Preferences the owner wants as defaults for every project the cockpit shows. Whe
 - A file that cannot be assigned unambiguously to a sub-module belongs to the top-level module (its unsorted part). A file that cannot be assigned unambiguously to a module stays explicitly unassigned with its candidate modules and is reported to the owner.
 - A memo or ADR clearly about one module or sub-module stays with it; generic ones (several modules, or the project itself) have a generic home and are listed under every module they name.
 - Documents are assigned through a `Modules:` line; superseded documents move to an obsolete-documentation folder with a banner naming the replacement; decision records are never moved.
+- Every project has an `Internal` module (owner, 2026-11-20): what keeps the project and its assistants running, as opposed to the product itself. Typical sub-modules: Boot-filling (the job, its tests and footprint), Project metadata (the module map, the footprint declaration, the card-metadata collectors with their tests), DevOps (CI workflows, scheduler templates, install and deploy scripts, runtime settings, hosting-service policies; an existing Infrastructure sub-module is the same thing, DevOps is the template name), Agent policies and skills (standing instructions, skill and agent definitions). Files of such kinds that fit no sub-module stay in `Internal` itself.
 
 ## Data and change discipline
 - Commit what a person decides; generate what a script derives, into a local folder, never into git; cards show the age of generated data.
