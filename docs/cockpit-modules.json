@@ -1,0 +1,32 @@
+{
+ "_comment": "Module map of this repository (owner decision, 2026-11-20: four modules; tests are not a module, each test file follows the code it tests). Same shape as the modules file the cockpit reads (--modules): modules[{id,name,desc}], assign[{path,module,basis?,candidates?,alias?}]. Longest matching path prefix wins (a path ending in '/' is a prefix, otherwise an exact file). module=null is an explicit 'unassigned'; 'candidates' (optional, decision data) lists the modules a file could equally belong to and changes no assignment; 'alias' marks a pseudo-path that is not a tracked file. Test files follow the mirrored source path (tests/tools/test_x.py -> tools/x.py), then an entry for the test path itself. A file that cannot be placed in a sub-module goes to the parent; a file ambiguous between modules stays null and is reported. Guard: tests/tools/test_cardmeta_map.py.",
+ "modules": [
+  {"id": "core", "name": "Core logic", "desc": "logic.py (pure rules, parsing, ranking, card views) and cockpit.py (HTTP server, gh calls, caching, actions)"},
+  {"id": "web", "name": "Web page", "desc": "web/index.html: the single-page user interface"},
+  {"id": "docs", "name": "Documentation and contracts", "desc": "docs/: constitution, ADRs, memos, contracts, deployment, screenshots, owner defaults, footprint declarations and this map"},
+  {"id": "kit", "name": "Kit and tools", "desc": "kit/ (templates, policy check, setup scripts for a consuming repository) and tools/ (screenshots, card-metadata collectors)"}
+ ],
+ "assign": [
+  {"path": "logic.py", "module": "core", "basis": "decision PC-21"},
+  {"path": "cockpit.py", "module": "core", "basis": "decision PC-21"},
+  {"path": "web/", "module": "web", "basis": "decision PC-21"},
+  {"path": "docs/", "module": "docs", "basis": "decision PC-21"},
+  {"path": "kit/", "module": "kit", "basis": "decision PC-21"},
+  {"path": "tools/", "module": "kit", "basis": "decision PC-21"},
+  {"path": "README.md", "module": "docs", "basis": "documentation of the project; the owner's docs/ rule extended to the root README"},
+  {"path": "LICENSE", "module": "docs", "basis": "licence text is documentation"},
+  {"path": "tests/test_actions.py", "module": "core", "basis": "tests the action planning in cockpit.py and logic.py; tests follow the code"},
+  {"path": "tests/test_cache.py", "module": "core", "basis": "tests the cache in cockpit.py"},
+  {"path": "tests/test_cardmeta.py", "module": "core", "basis": "tests logic.card_meta"},
+  {"path": "tests/test_logic.py", "module": "core", "basis": "tests logic.py"},
+  {"path": "tests/test_modules.py", "module": "core", "basis": "tests the module functions of logic.py"},
+  {"path": "tests/test_projects.py", "module": "core", "basis": "tests the --projects handling in cockpit.py"},
+  {"path": "tests/test_report.py", "module": "core", "basis": "tests the report functions of logic.py"},
+  {"path": "tests/test_rules.py", "module": "core", "basis": "tests the rule-change functions of logic.py"},
+  {"path": "tests/fixtures/cardmeta/", "module": "core", "basis": "synthetic inputs of tests/test_cardmeta.py"},
+  {"path": "CLAUDE.md", "module": null, "candidates": ["core", "docs", "kit"], "basis": "standing-instruction file: it steers the work on every module and is not owned by one; needs the owner's decision"},
+  {"path": ".gitignore", "module": null, "candidates": ["core", "kit"], "basis": "repository configuration shared by the code and the tools; no main user"},
+  {"path": ".github/workflows/test.yml", "module": null, "candidates": ["core", "kit"], "basis": "CI that runs the whole test suite (core and kit tests alike); no main user"},
+  {"path": ".coverage", "module": null, "candidates": [], "basis": "generated coverage data that is tracked by mistake; it should be untracked rather than assigned"}
+ ]
+}
