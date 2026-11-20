@@ -13,7 +13,9 @@ How to run the cockpit, and how far the Manager / Orchestrator / Worker separati
 | Access token | random per start, or `--token-file PATH` (created mode 0600) | given once as `?t=TOKEN`, then an HttpOnly, SameSite=Strict cookie; hidden in the request log. The cookie has no `Secure` flag |
 | Listen address | `127.0.0.1:8795` (`--port`) | `--lan` binds `0.0.0.0`, plain HTTP: the token and cookie travel unencrypted |
 | Mode | read-only | every `POST /api/act` gets 403 unless started with `--steer` |
-| Inputs | GitHub (always); `--modules` JSON; `--git` local clone; `--code` snapshot dir; `--phases` JSON | the clone and snapshot are read, never written |
+| Inputs | GitHub (always); `--modules` JSON; `--git` local clone; `--code` snapshot dir; `--phases` JSON; the card-metadata folder | the clone, snapshot and metadata files are read, never written |
+
+**Card metadata folder.** Per project the cockpit reads `footprint.json`, `churn.json` and `ambiguity.json` ([contract](contracts/card-metadata.md)) from the `meta` key of the project in the `--projects` file, default `~/.local/share/project-cockpit/<project name>/cardmeta/` (next to the project's token folder). Example: `{"name": "widgets", "repo": "acme/widgets", "meta": "~/.local/share/project-cockpit/widgets/cardmeta"}`. The folder is written by a producer on the project side, not by the cockpit; missing files just show "no data".
 
 The token protects the page; it is one shared secret, not a user. Whoever holds it can do, in `--steer` mode, everything the `gh` login can do through the cockpit's actions. Treat it like the login itself.
 

@@ -27,10 +27,13 @@ Sub-modules: a slash id, `alpha/one` (parent = prefix; list the parent too; opti
 `assign` paths match by longest prefix, so a sub-module entry beats its parent; files matching only the parent stay in it. Deadlines inherit: task, parent task, sub-module, module (`MODULE_DEADLINES` keys are full ids); the Backlog names the source.
 The metrics snapshot may carry `alpha/one` entries under `modules`; the parent's entry is the producer's roll-up, a sub-module without one shows "not wired". The Code tab reads `DIR/metrics.json` plus optional `erd|dataflow|deps|js.svg`; without them it shows "not wired". Contract: see `code_view` in `logic.py`.
 
+## Card metadata
+Module and sub-module cards show three blocks read from files a producer writes: **churn** (commits, lines, net, trend for 30 and 90 days, coloured by rank within the project: `▲ hot` top fifth, `▽ cold` bottom fifth, `– dormant` no change; a button switches to churn relative to size), **persistence footprint** (tables, files and folders, logging, volume, backup and retention, with "undocumented" shown as a gap) and **file ambiguity** (unsorted files with candidates, a marker above 30 percent; module-level ambiguous files on the overview). Every block says "as of" and warns when older than 48 hours; no file means "no data". Contract: [docs/contracts/card-metadata.md](docs/contracts/card-metadata.md); folder setting `meta` per project: [docs/deployment.md](docs/deployment.md).
+
 ## Several projects
 `--projects FILE` serves several repos from one instance (replaces `--repo`, `--manager`, `--project`, `--git`, `--modules`, `--phases`, `--code`; `--port`, `--lan`, `--steer`, `--token-file` stay global):
 `{"default": "widgets", "projects": [{"name": "widgets", "repo": "acme/widgets", "project": 3, "manager": "alice", "modules": "m.json", "git": "~/src/widgets", "code": "~/snap"}, {"name": "gadgets", "repo": "acme/gadgets"}]}`.
-Only `name` and `repo` are required. With more than one project the header shows a selector (remembered in the browser); every `/api/*` call takes `?project=NAME` (default: the `default`), `/api/projects` lists `[{name, repo}]`, and only the visible project is polled.
+Only `name` and `repo` are required (optional: `project`, `manager`, `modules`, `git`, `code`, `phases`, `meta`). With more than one project the header shows a selector (remembered in the browser); every `/api/*` call takes `?project=NAME` (default: the `default`), `/api/projects` lists `[{name, repo}]`, and only the visible project is polled.
 Rationale and limits: [ADR 0012](docs/adr/0012-several-projects-in-one-instance.md).
 
 GitHub setup: `kit/` holds labels (`kit/setup.sh OWNER/REPO`), issue forms and the policy Action. Copy `kit/.github` to `.github` and `kit/policy.py` to `kit/policy.py` in the target repo, then `gh variable set MANAGER --body LOGIN`.
