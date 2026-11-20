@@ -19,3 +19,7 @@ Assistant quota that is not used before a window resets is lost. The owner wants
 ## Consequences
 - A project opts in with its own exclusion list and quota feed; the project's instruction file records the delegation.
 - The job is reversible by the kill switch at any time.
+
+## Amendment 2026-11-20 (owner, question PC-36)
+The boot-filling job, as an incarnation of the Orchestrator, may store the result of the authority analysis with the task: a marker comment, the label `needs-owner` when the task is flagged, and the linked question issue (labels `type:decision` and `question`). It still never sets `released`, a priority label, a deadline label or `cancelled`. These writes are part of the delegation limits and are logged like every other action of the job.
+
