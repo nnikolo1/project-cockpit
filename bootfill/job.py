@@ -408,9 +408,13 @@ def main(argv=None):
     cfg = core.merge_config(core.DEFAULTS, A.read_json(a.config, None))
     if cfg["mode"] not in (core.DRY, core.REAL):
         sys.exit(f"mode must be {core.DRY!r} or {core.REAL!r}")
+    for p in cfg["projects"]:  # a leading ~ in the project paths is expanded here, once (the hosting adapter opens them as they are)
+        for k in ("dir", "modules", "exclusions"):
+            if isinstance(p.get(k), str):
+                p[k] = os.path.expanduser(p[k])
     excl = {}
     for p in cfg["projects"]:
-        excl[p["name"]] = A.read_json(os.path.expanduser(p["exclusions"]), {}) if p.get("exclusions") else {}
+        excl[p["name"]] = A.read_json(p["exclusions"], {}) if p.get("exclusions") else {}
     own_cwd = pathlib.Path(cfg.get("headless_dir") or pathlib.Path(a.data_dir) / "headless").expanduser().resolve()
     own_cwd.mkdir(parents=True, exist_ok=True)  # the job's own headless calls run here, so their transcripts land in one recognisable, excluded folder
     exclude = list(cfg["transcript_exclude"]) + [f"*{core.encode_cwd(own_cwd)}*"]

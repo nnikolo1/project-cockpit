@@ -4,6 +4,7 @@ import datetime as dt
 import json
 import pathlib
 import re
+import time
 
 DEFAULTS = dict(
     mode="dry-run",  # "dry-run" only logs what would be released; the owner changes it to "real"
@@ -83,13 +84,18 @@ def parse_time(v):
     return dt.datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
 
 
-def parse_feed(obj):
+def parse_feed(obj, now=None):
     """{five_hour, seven_day: {used_percentage, resets_at}} -> {'five': (used, resets_at), 'week': (used, resets_at)}.
     Raises ValueError on a missing or out-of-range field, so a broken feed is a logged failure, never a guess."""
     if isinstance(obj, dict) and isinstance(obj.get("rate_limits"), dict):
         obj = obj["rate_limits"]  # the status line writes {observed_at, rate_limits: {five_hour, seven_day}}; a bare object is accepted too
     out = {}
     for name, key in (("five", "five_hour"), ("week", "seven_day")):
+        if key == "five_hour" and isinstance(obj, dict) and obj.get(key) in (None, {}) and isinstance(obj.get("seven_day"), dict):
+            # No active 5-hour window (the status line omits it after a reset until the next use): a fresh window is ahead,
+            # nothing used, ending 5 hours after its first use, so it is at best 5 hours from its reset and no 5-hour trigger fires.
+            out[name] = (0.0, (time.time() if now is None else float(now)) + 5 * 3600)
+            continue
         try:
             w = obj[key]
             used, reset = float(w["used_percentage"]), parse_time(w["resets_at"])
