@@ -33,6 +33,7 @@
   {"path": "tests/test_bootfill_job.py", "module": "internal/bootfilling", "basis": "tests bootfill/job.py and adapters.py; tests follow the code"},
   {"path": "tests/test_bootfill_history.py", "module": "internal/bootfilling", "basis": "tests bootfill/quota_history.py, quota_backfill.py and the snapshot in job.py; tests follow the code"},
   {"path": "tests/test_bootfill_authority.py", "module": "internal/bootfilling", "basis": "tests the authority judgement in bootfill/core.py and job.py; tests follow the code"},
+  {"path": "tests/test_bootfill_quota_stale.py", "module": "internal/bootfilling", "basis": "tests the stale and missing quota readings of the boot-filling job; tests follow the code"},
   {"path": "README.md", "module": "docs", "basis": "documentation of the project; the owner's docs/ rule extended to the root README"},
   {"path": "LICENSE", "module": "docs", "basis": "licence text is documentation"},
   {"path": "tests/test_actions.py", "module": "core", "basis": "tests the action planning in cockpit.py and logic.py; tests follow the code"},
