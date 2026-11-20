@@ -32,7 +32,7 @@
   "workers": 2,
   "day_cap": 60,
   "authority_mode": "skip",
-  "authority_labels": ["needs-approval", "needs-owner", "owner-decision", "approval", "constitutional", "legal", "security", "policy"],
+  "authority_labels": ["needs-approval", "needs-owner", "needs-manager", "needs-pa", "owner-decision", "approval", "constitutional", "legal", "security", "policy"],
   "protected_paths": ["claude.md", "constitution.md", "*/schema.sql", "schema.sql", ".github/workflows/*", "docs/owner-defaults.md"],
   "authority_skip_score": 3,
   "authority_maybe_score": 1,

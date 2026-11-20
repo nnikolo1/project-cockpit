@@ -36,7 +36,7 @@ DEFAULTS = dict(
     exclude_title_patterns=[r"\b(send|submit|withdraw|delete|drop|purchase|spend|spending|schema|ddl)\b"],
     # Authority need (ADR 0016): would the task dead-end for lack of an authority the job and its workers do not have?
     authority_mode="skip",  # "skip": do not release, the task stays an embryo; "flag": release but mark it (trail comment, decision log, summary)
-    authority_labels=["needs-approval", "needs-owner", "owner-decision", "approval", "constitutional", "legal", "security", "policy"],
+    authority_labels=["needs-approval", "needs-owner", "needs-manager", "needs-pa", "owner-decision", "approval", "constitutional", "legal", "security", "policy"],
     authority_strong_patterns=[  # an approval or a choice by the owner is required: a hit alone means needs_authority
         r"\b(needs?|requires?|awaits?|pending)\s+(explicit\s+|prior\s+|the\s+owner'?s?\s+|owner\s+|manager\s+)?(approval|sign-?off|decision|consent)\b",
         r"\b(owner|manager|user)\s+(decides|to\s+decide|must\s+decide|approves|to\s+approve|must\s+approve)\b",
