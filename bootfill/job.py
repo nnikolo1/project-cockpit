@@ -29,7 +29,8 @@ class Ctx:
         self.excl = excl or {}  # project name -> parsed exclusions
         self.mode = cfg["mode"]
         self.state_path = self.dir / f"state-{self.mode}.json"
-        self.decisions = self.dir / "decisions.jsonl"
+        self.decisions = self.dir / "decision-log.jsonl"  # own, richer log (ranking inputs, outcomes)
+        self.contract = pathlib.Path(cfg["budget_dir"]).expanduser() / "decisions.jsonl"  # budget-page contract
 
 
 def _io():
@@ -38,7 +39,13 @@ def _io():
 
 
 def _skip(ctx, now, idle, why, quota, triggers, text):
+    """Write the poll: one line to the poll log and one contract line to the budget page's decisions.jsonl."""
     plog.info(core.poll_line(now, idle, why, quota, triggers, text))
+    try:
+        ctx.contract.parent.mkdir(parents=True, exist_ok=True)
+        _io().append_jsonl(ctx.contract, core.contract_poll(now, bool(idle), why, quota, triggers, text))
+    except OSError as ex:
+        log.error("budget decision log not written: %s: %s", type(ex).__name__, ex)
     return text
 
 
@@ -98,7 +105,7 @@ def poll(ctx, now=None):
     else:
         core.mark_fired(state, dec, triggers)
         state["day_count"] += len(released)
-    plog.info(core.poll_line(now, idle, why, q, triggers, text))
+    _skip(ctx, now, idle, why, q, triggers, text)
     if q:
         start_workers(ctx, state, now, q)
     daily_summary(ctx, state, now)
@@ -147,11 +154,21 @@ def release_batch(ctx, state, now, dec, triggers):
                 state["queue"].append(dict(project=r["project"], key=r["task"]["key"], number=r["task"]["number"], title=r["task"]["title"], attempt=1))
         except Exception as ex:
             log.error("release of %s %s failed: %s: %s", r["project"], r["task"]["key"], type(ex).__name__, str(ex)[:200])
+            _contract(ctx, core.contract_release(rec, failed=True))
             continue
         A.append_jsonl(ctx.decisions, rec)
+        _contract(ctx, core.contract_release(rec))
         log.info("%s %s %s rank %d trigger %s", rec["state"], r["project"], r["task"]["key"], r["rank"], trig)
         out.append(r)
     return out
+
+
+def _contract(ctx, line):
+    try:
+        ctx.contract.parent.mkdir(parents=True, exist_ok=True)
+        _io().append_jsonl(ctx.contract, line)
+    except OSError as ex:
+        log.error("budget decision log not written: %s: %s", type(ex).__name__, ex)
 
 
 def project_cfg(cfg, name):

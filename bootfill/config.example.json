@@ -5,7 +5,8 @@
      "modules": null, "board": null, "exclusions": "~/.local/share/project-cockpit/widgets/bootfill-exclusions.json"}
   ],
   "tracking_issue": {"project": "widgets", "number": 1},
-  "quota_feed": "~/.local/share/project-cockpit/quota.json",
+  "quota_feed": "~/.local/share/project-cockpit/budget/quota.json",
+  "budget_dir": "~/.local/share/project-cockpit/budget",
   "quota_refresh_cmd": ["claude", "-p", "ok", "--model", "haiku"],
   "transcript_glob": "~/.claude/projects/**/*.jsonl",
   "judge_cmd": ["claude", "-p", "{prompt}", "--model", "haiku"],

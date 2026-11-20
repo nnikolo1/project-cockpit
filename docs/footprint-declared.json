@@ -38,6 +38,23 @@
     "retention": "browser localStorage only, never sent anywhere: key cockpit-project (selected project) and cockpit-reviewed:<repo> (review state of rule changes); kept until the user clears site data"
    }
   },
+  "bootfill": {
+   "_note": "declared for the boot-filling job (PC-19); the module map currently places bootfill/ under kit, so move this block there if the owner keeps that assignment",
+   "files": [
+    {"path": "~/.local/share/project-cockpit/budget/decisions.jsonl", "kind": "file", "personal_data": false, "written_by": "bootfill (the same file the budget panel reads, docs/contracts/budget-panel.md)", "volume": true,
+     "note": "append-only contract lines: one poll line every 30 minutes, one release line per released task; task title and number only"},
+    {"path": "~/.local/share/project-cockpit/bootfill", "kind": "dir", "personal_data": false, "written_by": "bootfill",
+     "volume": true, "note": "--data-dir default: decision-log.jsonl (append-only, with ranking inputs and outcomes), state-dry-run.json, state-real.json, PAUSE flag, workers/ (exit-code files and worker output, which may contain task work)"}
+   ],
+   "logging": [
+    {"logger": "bootfill.poll", "file": "poll.log", "rotation": "daily, 90 files kept (TimedRotatingFileHandler); one line per poll; no tokens, no task text"},
+    {"logger": "bootfill", "file": "job.log", "rotation": "daily, 90 files kept; skips, releases and failures with the error class; no tokens, task title and number only"}
+   ],
+   "policy": {
+    "backup": "undocumented",
+    "retention": "logs 90 days; decision logs and state kept until the owner deletes them (no pruning in the code)"
+   }
+  },
   "docs": {
    "files": [
     {

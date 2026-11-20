@@ -15,6 +15,7 @@ DEFAULTS = dict(
     summary_hour=20,  # local hour after which the daily summary is written
     tie_judgement=True,
     pause_label="pause",
+    budget_dir="~/.local/share/project-cockpit/budget",  # decisions.jsonl for the cockpit's budget page (docs/contracts/budget-panel.md)
     exclude_labels=["type:decision", "question"],
     exclude_title_patterns=[r"\b(send|submit|withdraw|delete|drop|purchase|spend|spending|schema|ddl)\b"],
 )
@@ -341,3 +342,25 @@ def worker_slots(running, max_workers, quota, stop_left):
     if min(100 - quota["five"][0], 100 - quota["week"][0]) <= stop_left:
         return 0
     return max(0, max_workers - running)
+
+
+# ---------- budget-panel contract (docs/contracts/budget-panel.md): decisions.jsonl lines for the cockpit ----------
+def contract_release(rec, failed=False):
+    """Own release record -> the contract's release line (kind, time, trigger, rank, project, issue, title, reason, state, dry_run)."""
+    i = rec["inputs"]
+    reason = f"{i['priority']}, due {i['deadline'] or 'none'} ({i['deadline_source']}), {'blocked' if i['blocked'] else 'unblocked'}, unblocks {i['unblocks']}, {i['cls']}"
+    if rec.get("judgement"):
+        reason += f"; judgement: {rec['judgement']}"
+    return dict(kind="release", time=rec["time"], trigger=rec["trigger"], rank=rec["rank"], project=rec["project"], issue=rec["number"],
+                title=rec["title"], reason=reason[:300], state="failed" if failed else ("would_release" if rec["mode"] == DRY else "released"),
+                dry_run=rec["mode"] == DRY)
+
+
+def contract_poll(now, idle, idle_reason, quota, triggers, decision):
+    """The contract's poll line. Unreadable quota -> the used/resets fields are left out (the page shows them as missing)."""
+    d = dict(kind="poll", time=iso(now), idle=bool(idle), idle_reason=idle_reason,
+             triggers=[dict(name=t["name"], verdict="fired" if t["verdict"] == "fire" else t["verdict"]) for t in triggers], decision=decision)
+    if quota:
+        d.update(five_hour_used=quota["five"][0], five_hour_resets_at=iso(quota["five"][1]),
+                 weekly_used=quota["week"][0], weekly_resets_at=iso(quota["week"][1]))
+    return d
