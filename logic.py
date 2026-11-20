@@ -774,3 +774,135 @@ def card_meta(texts, project=None, now=None):
         c.pop("data")
         out[kind] = c
     return out
+
+
+# ---------- budget panel: quota feed, usage report, boot-filling decision log (contract: docs/contracts/budget-panel.md) ----------
+QUOTA_STALE_MIN = 30   # a quota reading older than this (the boot-filling poll interval) is shown as stale
+USAGE_STALE_H = 24     # a usage report older than this is shown as stale
+QUOTA_WINDOWS = (("five_hour", "5-hour window"), ("seven_day", "Weekly window"))
+LOG_LIMIT = 50         # most recent entries kept per table
+TEXT_CAP = 300         # longest free text taken from the decision log
+
+
+def parse_ts(v):
+    """Epoch seconds (number) or ISO 8601 text -> aware UTC datetime, else None."""
+    try:
+        if isinstance(v, bool):
+            return None
+        if isinstance(v, (int, float)):
+            return dt.datetime.fromtimestamp(v, dt.timezone.utc)
+        if isinstance(v, str) and v.strip():
+            t = dt.datetime.fromisoformat(v.strip().replace("Z", "+00:00"))
+            return t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc)
+    except (ValueError, OverflowError, OSError):
+        pass
+    return None
+
+
+def _json_obj(text):
+    """-> (dict, None) or (None, reason). `text` None means the file does not exist."""
+    if text is None:
+        return None, "file not found"
+    try:
+        d = json.loads(text)
+    except ValueError as ex:
+        return None, f"not JSON ({str(ex)[:60]})"
+    return (d, None) if isinstance(d, dict) else (None, "not a JSON object")
+
+
+def _age_s(t, now):
+    return None if t is None else max(0, round((now - t).total_seconds()))
+
+
+def quota_view(text, mtime, now):
+    """Raw quota feed {five_hour, seven_day: {used_percentage, resets_at}} plus the file's modification time (datetime) ->
+    {status: ok|missing|invalid, reason, age_s, stale, windows: [...]}. Each window: key, label, used_pct, left_pct, resets_at,
+    resets_in_s, expired (the reset time has passed, so the reading belongs to a window that is over). Never raises."""
+    d, why = _json_obj(text)
+    if d is None:
+        return dict(status="missing" if text is None else "invalid", reason=why, age_s=None, stale=False, windows=[])
+    age = _age_s(mtime, now)
+    wins = []
+    for key, label in QUOTA_WINDOWS:
+        w = d.get(key)
+        if not isinstance(w, dict) or _num(w.get("used_percentage")) is None:
+            continue
+        used = min(max(float(w["used_percentage"]), 0.0), 100.0)
+        r = parse_ts(w.get("resets_at"))
+        left = None if r is None else round((r - now).total_seconds())
+        wins.append(dict(key=key, label=label, used_pct=round(used, 1), left_pct=round(100 - used, 1),
+                         resets_at=r and r.strftime("%Y-%m-%dT%H:%M:%SZ"), resets_in_s=None if left is None else max(left, 0), expired=left is not None and left < 0))
+    if not wins:
+        return dict(status="invalid", reason="no window with used_percentage", age_s=age, stale=False, windows=[])
+    return dict(status="ok", reason="", age_s=age, stale=age is None or age > QUOTA_STALE_MIN * 60, windows=wins)
+
+
+def usage_view(text, mtime, now, quota=None):
+    """Raw usage report {schema: 1, generated_at, windows: {five_hour|seven_day: {tokens_used, tokens_cap_estimate?}}} -> per window
+    tokens_used, tokens_cap (an ESTIMATE, always), cap_source ('reported' or 'derived' from the quota share when >= 1 percent) and tokens_left."""
+    d, why = _json_obj(text)
+    if d is None:
+        return dict(status="missing" if text is None else "invalid", reason=why, age_s=None, stale=False, windows={})
+    if d.get("schema") != 1 or not isinstance(d.get("windows"), dict):
+        return dict(status="invalid", reason="needs schema 1 and a windows object", age_s=None, stale=False, windows={})
+    t = parse_ts(d.get("generated_at")) or mtime
+    age = _age_s(t, now)
+    pct = {w["key"]: w["used_pct"] for w in (quota or {}).get("windows", [])}
+    out = {}
+    for key, _ in QUOTA_WINDOWS:
+        w = d["windows"].get(key)
+        used = _num(w.get("tokens_used")) if isinstance(w, dict) else None
+        if used is None:
+            continue
+        cap, src = _num(w.get("tokens_cap_estimate")), "reported"
+        if cap is None and pct.get(key, 0) >= 1:
+            cap, src = round(used / (pct[key] / 100)), "derived"
+        if cap is None:
+            src = None
+        out[key] = dict(tokens_used=used, tokens_cap=cap, cap_source=src, tokens_left=None if cap is None else max(round(cap - used), 0))
+    return dict(status="ok", reason="", age_s=age, stale=age is None or age > USAGE_STALE_H * 3600, windows=out)
+
+
+def _txt(v):
+    return None if v is None else str(v).strip()[:TEXT_CAP]
+
+
+def _release_row(d):
+    return dict(time=_txt(d.get("time")), trigger=_txt(d.get("trigger")), rank=_num(d.get("rank")), project=_txt(d.get("project")), issue=_num(d.get("issue")),
+                title=_txt(d.get("title")), reason=_txt(d.get("reason")), state=_txt(d.get("state")), dry_run=d.get("dry_run") is True)
+
+
+def _poll_row(d):
+    trig = [dict(name=_txt(x.get("name")), verdict=_txt(x.get("verdict"))) for x in (d.get("triggers") if isinstance(d.get("triggers"), list) else []) if isinstance(x, dict)]
+    return dict(time=_txt(d.get("time")), idle=d.get("idle") if isinstance(d.get("idle"), bool) else None, idle_reason=_txt(d.get("idle_reason")),
+                five_hour_used=_num(d.get("five_hour_used")), five_hour_resets_at=_txt(d.get("five_hour_resets_at")),
+                weekly_used=_num(d.get("weekly_used")), weekly_resets_at=_txt(d.get("weekly_resets_at")), triggers=trig, decision=_txt(d.get("decision")))
+
+
+def decision_view(text, limit=LOG_LIMIT):
+    """JSON-lines decision log (one object per line, `kind` is "release" or "poll") -> {status, releases, polls, skipped}, newest first,
+    at most `limit` each. A line that is not JSON, has no known kind or no readable `time` is counted in `skipped`, never raised."""
+    if text is None:
+        return dict(status="missing", releases=[], polls=[], skipped=0)
+    rel, polls, skipped = [], [], 0
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            d = json.loads(line)
+        except ValueError:
+            skipped += 1
+            continue
+        t = parse_ts(d.get("time")) if isinstance(d, dict) else None
+        kind = d.get("kind") if isinstance(d, dict) else None
+        if t is None or kind not in ("release", "poll"):
+            skipped += 1
+            continue
+        (rel if kind == "release" else polls).append((t, _release_row(d) if kind == "release" else _poll_row(d)))
+    newest = lambda rows: [r for _, r in sorted(rows, key=lambda x: x[0], reverse=True)[:limit]]
+    return dict(status="ok", releases=newest(rel), polls=newest(polls), skipped=skipped)
+
+
+def budget_view(quota_text, quota_mtime, usage_text, usage_mtime, log_text, now):
+    q = quota_view(quota_text, quota_mtime, now)
+    return dict(now=now.strftime("%Y-%m-%dT%H:%M:%SZ"), quota=q, usage=usage_view(usage_text, usage_mtime, now, q), log=decision_view(log_text))

@@ -172,3 +172,12 @@ def test_token_file_is_created_private_and_reused(tmp_path):
 
 def test_request_log_hides_the_token():
     assert C.redact('"GET /?t=abc_DEF-1 HTTP/1.1" 303 -') == '"GET /?t=<token> HTTP/1.1" 303 -'
+
+
+def test_submit_button_is_release_as_p2_without_deadline():
+    """The page's Submit column posts exactly {action: release, p: P2, d: ''}; Cancel posts {action: cancel}."""
+    ops, msg = plan(dict(action="release", n=1, p="P2", d=""))
+    assert ops == [["issue", "edit", "1", "-R", R, "--add-label", "released", "--add-label", "P2"]] and msg == "#1 released as P2"
+    with pytest.raises(ValueError):
+        plan(dict(action="release", n=2, p="P2", d=""))   # already released: a second Submit click is refused
+    assert plan(dict(action="cancel", n=2))[0][-1][:3] == ["issue", "close", "2"]
