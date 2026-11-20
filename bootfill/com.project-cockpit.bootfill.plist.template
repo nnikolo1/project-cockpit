@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Template: replace the three UPPERCASE placeholders, copy to ~/Library/LaunchAgents/, then
+<!-- Template: render it with `python3 -m bootfill.render_plist` (fills the four UPPERCASE placeholders from the config), or replace them by hand, copy to ~/Library/LaunchAgents/, then
      launchctl load ~/Library/LaunchAgents/com.project-cockpit.bootfill.plist
-     Remove with launchctl unload. Runs one poll every 1800 s; the default mode is dry-run. -->
+     Remove with launchctl unload. Runs one poll every POLL_SECONDS s (config key poll_minutes, default 10); the default mode is dry-run. -->
 <plist version="1.0">
 <dict>
   <key>Label</key><string>com.project-cockpit.bootfill</string>
@@ -15,7 +15,7 @@
     <string>--once</string>
   </array>
   <key>WorkingDirectory</key><string>COCKPIT_CHECKOUT</string>
-  <key>StartInterval</key><integer>1800</integer>
+  <key>StartInterval</key><integer>POLL_SECONDS</integer>
   <key>RunAtLoad</key><false/>
   <key>EnvironmentVariables</key>
   <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>

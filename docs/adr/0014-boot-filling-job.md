@@ -1,13 +1,14 @@
 # 0014. The boot-filling job releases ranked tasks to use quota that would expire
 
-Status: accepted (owner, 2026-11-20); not built yet (task PC-19)
+Status: accepted (owner, 2026-11-20); built (task PC-19); poll interval, idle definition and conflict-aware choice amended 2026-11-20
 Date: 2026-11-20
 
 ## Context
 Assistant quota that is not used before a window resets is lost. The owner wants idle time used to reduce the backlog, without a request for each task.
 
 ## Decision
-- A daemon polls every 30 minutes and acts only when the assistant is idle (no interactive session has written to its transcript for 10 minutes and none of the job's own workers is running).
+- A daemon polls every 10 minutes (configuration key `poll_minutes`; owner, 2026-11-20) and acts only when the assistant is idle: no Claude Code agent other than the job's own is active. Activity is a Claude Code transcript written within the idle window (`idle_minutes`, default 10) or a headless Claude Code process the job did not start; an open but silent interactive session is not running once its transcript is older than the window. Claude Web, the desktop chat app and the browser never count. The job's own agents (quota refresh, judge, workers) never count either, however recent their transcripts are, and own workers running do not block a poll; only the worker cap limits how many are started.
+- When a worker slot frees up, the next task is the first in rank order that is least likely to get in the way of the workers already running or chosen (same module, shared paths or labels; see ADR 0015); rank stays primary and a task is passed over at most `conflict_max_skips` times.
 - It refreshes the quota reading with one minimal headless call per poll, because the status-line feed is stale while no session is open.
 - Triggers, independent and each at most once per window: 5-hour window with more than 10 percent left and less than 2 hours to the reset releases 5 tasks; with more than 50 percent left it releases 20 (the larger wins); weekly window with more than 20 percent left and one day or less to the reset releases 50. These numbers are the owner's defaults and are configuration.
 - Ranking: priority label, due date, unblocked before blocked, what a task unblocks, must before nice, then a recorded judgement of value. A task without a priority counts as P2.

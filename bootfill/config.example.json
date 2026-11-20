@@ -15,6 +15,17 @@
     "branch_prefix": "boot/"
   },
   "notify_cmd": ["osascript", "-e", "display notification \"{message}\" with title \"{title}\""],
+  "poll_minutes": 10,
+  "idle_minutes": 10,
+  "process_check": true,
+  "process_names": ["claude"],
+  "process_exclude": ["*.app/*", "*Chrome*", "*Claude Helper*", "*Claude.app*"],
+  "transcript_exclude": ["*-wt-boot-*"],
+  "headless_dir": null,
+  "conflict_window": 6,
+  "conflict_max_skips": 3,
+  "conflict_labels": ["shared-files", "shared", "constitutional"],
+  "conflict_judgement": true,
   "workers": 2,
   "day_cap": 60
 }

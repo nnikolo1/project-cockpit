@@ -1,4 +1,4 @@
-"""One poll of the boot-filling job (ADR 0014), and the command line that launchd runs every 30 minutes.
+"""One poll of the boot-filling job (ADR 0014), and the command line that launchd runs every `poll_minutes` (default 10).
 
     python3 -m bootfill.job --config CONFIG.json --data-dir DIR [--once]
 
@@ -21,11 +21,12 @@ TRAIL = "Released by the boot-filling job ({mode}), trigger {trigger}, rank {ran
 
 class Ctx:
     """Everything a poll needs. hosting: tasks(project), labels(project, n), release(project, task, comment), comment(project, n, body);
-    quota.read(); idle.last_write(); workers: start(entry, project_cfg), poll(handle); judge(tasks); notify(title, msg)."""
+    quota.read(); idle.last_write(); procs() -> [(pid, ppid, cmd)] or None; workers: start(entry, project_cfg), poll(handle); judge(tasks); notify(title, msg)."""
 
-    def __init__(self, cfg, data_dir, hosting, quota, idle, workers, judge, notify, excl=None):
+    def __init__(self, cfg, data_dir, hosting, quota, idle, workers, judge, notify, excl=None, procs=None):
         self.cfg, self.dir = cfg, pathlib.Path(data_dir)
         self.hosting, self.quota, self.idle, self.workers, self.judge, self.notify = hosting, quota, idle, workers, judge, notify
+        self.procs = procs  # process lister for the other-agent check; None = not used
         self.excl = excl or {}  # project name -> parsed exclusions
         self.mode = cfg["mode"]
         self.state_path = self.dir / f"state-{self.mode}.json"
@@ -80,7 +81,7 @@ def poll(ctx, now=None):
         return quota
 
     supervise(ctx, state, now, get_quota)
-    idle, why = core.idle_verdict(now, ctx.idle.last_write(), len(state["running"]), cfg["idle_minutes"])
+    idle, why = check_idle(ctx, state, now)
     if not idle:
         text = _skip(ctx, now, idle, why, quota, [], "skip: not idle")
         A.write_json(ctx.state_path, state)
@@ -111,6 +112,22 @@ def poll(ctx, now=None):
     daily_summary(ctx, state, now)
     A.write_json(ctx.state_path, state)
     return text
+
+
+def check_idle(ctx, state, now):
+    """Idle = no agent other than the job's own is active. Own workers never block; other headless assistant processes and any
+    transcript written inside the idle window (own transcripts are excluded by the Idle adapter) do."""
+    cfg, others, ok = ctx.cfg, [], True
+    if ctx.procs is not None and cfg.get("process_check", True):
+        try:
+            own = [os.getpid()] + [w["handle"].get("pid") for w in state["running"] if w["handle"].get("pid")]
+            others = core.other_agent_processes(ctx.procs(), own, cfg["process_names"], cfg["process_exclude"])
+        except Exception as ex:
+            ok = False
+            log.warning("process check unavailable (%s: %s); using the transcript signal only", type(ex).__name__, str(ex)[:150])
+    elif ctx.procs is not None:
+        ok = False
+    return core.idle_verdict(now, ctx.idle.last_write(), cfg["idle_minutes"], others, len(state["running"]), ok)
 
 
 def release_batch(ctx, state, now, dec, triggers):
@@ -151,7 +168,8 @@ def release_batch(ctx, state, now, dec, triggers):
                 if r["judgement"]:
                     comment += f" Tie broken by value judgement: {r['judgement']}"
                 ctx.hosting.release(r["project"], r["task"], comment)
-                state["queue"].append(dict(project=r["project"], key=r["task"]["key"], number=r["task"]["number"], title=r["task"]["title"], attempt=1))
+                state["queue"].append(dict(project=r["project"], key=r["task"]["key"], number=r["task"]["number"], title=r["task"]["title"], attempt=1,
+                                           **core.entry_meta(r["task"])))
         except Exception as ex:
             log.error("release of %s %s failed: %s: %s", r["project"], r["task"]["key"], type(ex).__name__, str(ex)[:200])
             _contract(ctx, core.contract_release(rec, failed=True))
@@ -184,15 +202,25 @@ def start_workers(ctx, state, now, q):
     if not free:
         log.info("no worker started: %d running, stop threshold %s%%", len(state["running"]), ctx.cfg["worker_stop_left"])
         return
+    active = [w["entry"] for w in state["running"]]
+    counted = set()  # skips are counted once per task and poll
+    judge = ctx.judge if ctx.cfg.get("conflict_judgement", True) else None
     for _ in range(min(free, len(state["queue"]))):
-        e = state["queue"].pop(0)
+        idx, rec = core.choose_next(state["queue"], active, ctx.cfg, state.get("skips", {}), judge)
+        e = state["queue"].pop(idx)
         try:
             h = ctx.workers.start(e, project_cfg(ctx.cfg, e["project"]))
         except Exception as ex:
             log.error("worker start for %s failed: %s: %s", e["key"], type(ex).__name__, str(ex)[:200])
             state["queue"].append(e)
             break
+        state["skips"] = core.update_skips(state.get("skips", {}), rec, counted)
+        counted.update(rec["skipped"])
         state["running"].append(dict(entry=e, handle=h))
+        active.append(e)
+        if active[:-1] or rec["skipped"]:
+            A.append_jsonl(ctx.decisions, dict(rec, type="conflict_choice", time=core.iso(now), project=e["project"]))
+            log.info("worker choice %s: %s (skipped %s)", rec["chosen"], rec["reason"], ", ".join(rec["skipped"]) or "none")
         A.append_jsonl(ctx.decisions, core.outcome_record(now, e["project"], e["key"], e["number"], "resumed" if e["attempt"] > 1 else "running"))
 
 
@@ -252,8 +280,11 @@ def main(argv=None):
     excl = {}
     for p in cfg["projects"]:
         excl[p["name"]] = A.read_json(os.path.expanduser(p["exclusions"]), {}) if p.get("exclusions") else {}
-    ctx = Ctx(cfg, a.data_dir, A.Gh(cfg["projects"]), A.Quota(cfg["quota_feed"], cfg.get("quota_refresh_cmd")), A.Idle(cfg["transcript_glob"]),
-              A.Workers(cfg["worker"], a.data_dir), A.Judge(cfg["judge_cmd"]), A.Notifier(cfg.get("notify_cmd")), excl)
+    own_cwd = pathlib.Path(cfg.get("headless_dir") or pathlib.Path(a.data_dir) / "headless").expanduser().resolve()
+    own_cwd.mkdir(parents=True, exist_ok=True)  # the job's own headless calls run here, so their transcripts land in one recognisable, excluded folder
+    exclude = list(cfg["transcript_exclude"]) + [f"*{core.encode_cwd(own_cwd)}*"]
+    ctx = Ctx(cfg, a.data_dir, A.Gh(cfg["projects"]), A.Quota(cfg["quota_feed"], cfg.get("quota_refresh_cmd"), cwd=own_cwd), A.Idle(cfg["transcript_glob"], exclude),
+              A.Workers(cfg["worker"], a.data_dir), A.Judge(cfg["judge_cmd"], cwd=own_cwd), A.Notifier(cfg.get("notify_cmd")), excl, A.Processes())
     if ctx.mode == core.REAL:
         since = A.read_json(f"{a.data_dir}/state-{core.DRY}.json", {}).get("dry_run_since")
         if since is None or time.time() - since < 7 * 86400:

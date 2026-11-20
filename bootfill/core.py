@@ -2,11 +2,23 @@
 Everything here takes its inputs as arguments and is unit-tested; adapters.py and job.py do the I/O."""
 import datetime as dt
 import json
+import pathlib
 import re
 
 DEFAULTS = dict(
     mode="dry-run",  # "dry-run" only logs what would be released; the owner changes it to "real"
     idle_minutes=10,
+    poll_minutes=10,  # how often launchd starts a poll (the plist helper renders StartInterval from it; the cockpit's quota stale limit is 3 x this)
+    process_check=True,  # also look for headless assistant processes the job did not start (falls back to transcripts only when `ps` fails)
+    process_names=["claude"],  # exact executable name of the Claude Code command-line program (case-sensitive: the desktop app's binary is "Claude")
+    process_exclude=["*.app/*", "*Chrome*", "*Claude Helper*", "*Claude.app*"],  # fnmatch on the whole command line: desktop app, browser and their helpers never count
+    transcript_glob="~/.claude/projects/**/*.jsonl",  # Claude Code transcripts only; Claude Web and the desktop chat write none there
+    transcript_exclude=["*-wt-boot-*"],  # fnmatch patterns of transcript paths written by the job's own workers; the headless folder is added automatically
+    conflict_window=6,  # how many queued tasks (in rank order) are considered when a worker slot frees up
+    conflict_max_skips=3,  # a task passed over this many times is started next regardless of conflicts
+    conflict_threshold=3,  # a pair score at or above this counts as "would get in the way"
+    conflict_labels=["shared-files", "shared", "constitutional"],  # a label on both tasks means shared files
+    conflict_judgement=True,  # ask the model judge about unclear cases (titles and keys only)
     five_hour=dict(low_left=10, low_payload=5, high_left=50, high_payload=20, max_hours_to_reset=2),
     weekly=dict(min_left=20, max_hours_to_reset=24, payload=50),
     day_cap=60,
@@ -63,13 +75,74 @@ def window_key(reset):
 
 
 # ---------- idle, kill switch ----------
-def idle_verdict(now, last_transcript, workers_running, idle_minutes):
-    """-> (idle, reason). last_transcript: epoch seconds of the newest interactive transcript write, or None."""
-    if workers_running:
-        return False, f"{workers_running} own worker(s) running"
-    if last_transcript is not None and now - last_transcript < idle_minutes * 60:
-        return False, f"transcript written {int((now - last_transcript) // 60)} min ago"
-    return True, "idle" if last_transcript is None else f"no transcript write for {int((now - last_transcript) // 60)} min"
+def idle_verdict(now, last_transcript, idle_minutes, other_procs=(), own_running=0, process_check=True):
+    """-> (idle, reason). Idle means: NO CLAUDE CODE AGENT OTHER THAN THE JOB'S OWN is active (Claude Web, the desktop chat app and the browser never count). The job's own agents (quota refresh, judge, workers it
+    started) never count: their transcripts are excluded by the caller and their processes are not in `other_procs`.
+    last_transcript: epoch seconds of the newest transcript written by anyone else, or None. other_procs: pids of headless assistant
+    processes the job did not start. process_check=False: the process list was unavailable, so only the transcript signal was used."""
+    suffix = "" if process_check else " (process check unavailable: transcript signal only)"
+    if other_procs:
+        return False, f"other Claude Code agent active: {len(other_procs)} headless Claude Code process(es) not started by the job{suffix}"
+    if last_transcript is not None:
+        age = max(0.0, now - last_transcript)  # a write after `now` was taken (clock or timestamp-source offset) counts as "just now", never a negative age
+        if age < idle_minutes * 60:
+            return False, f"other Claude Code agent active: last write {int(age // 60)} min ago{suffix}"
+    own = f" ({own_running} own worker(s) running)" if own_running else ""
+    return True, f"only own Claude Code agents{own}{suffix}" if own_running else f"no other Claude Code agent active{suffix}"
+
+
+def parse_ps(text):
+    """`ps -axo pid=,ppid=,command=` output -> list of (pid, ppid, command); malformed lines are skipped."""
+    out = []
+    for line in (text or "").splitlines():
+        parts = line.strip().split(None, 2)
+        if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit():
+            out.append((int(parts[0]), int(parts[1]), parts[2]))
+    return out
+
+
+def other_agent_processes(procs, own_pids, names=("claude",), exclude=()):
+    """Headless Claude Code processes (executable name exactly in `names`, started with -p / --print, command line not matching an `exclude` pattern:
+    the desktop app, the browser and their helpers; Claude Web has no local process at all) that are not the job itself, not one of
+    `own_pids` and not a descendant of one. An interactive session (no -p) is judged by its transcript only: open but silent is not running.
+    -> sorted pids."""
+    parent = {pid: pp for pid, pp, _ in procs}
+    own = set(own_pids)
+
+    def is_own(pid):
+        seen = set()
+        while pid in parent and pid not in seen:
+            if pid in own:
+                return True
+            seen.add(pid)
+            pid = parent[pid]
+        return pid in own
+
+    out = []
+    for pid, _, cmd in procs:
+        tok = cmd.split()
+        if not tok or pathlib.PurePath(tok[0]).name not in names or transcript_excluded(cmd, exclude):
+            continue
+        if not ({"-p", "--print"} & set(tok[1:])) or is_own(pid):
+            continue
+        out.append(pid)
+    return sorted(out)
+
+
+def encode_cwd(path):
+    """Working directory -> the folder name the assistant CLI uses for its transcripts (every non-alphanumeric character becomes '-')."""
+    return re.sub(r"[^A-Za-z0-9]", "-", str(path))
+
+
+def transcript_excluded(path, patterns):
+    """True when a transcript path matches one of the fnmatch patterns (transcripts of the job's own calls and workers)."""
+    import fnmatch
+    return any(fnmatch.fnmatch(str(path), pat) for pat in patterns)
+
+
+def stale_minutes(poll_minutes):
+    """Age after which the quota reading counts as stale: the feed is refreshed once per poll, so three polls without a refresh is a fault."""
+    return 3 * max(1, int(poll_minutes))
 
 
 def kill_switch(flag_exists, tracking_labels, pause_label="pause"):
@@ -346,6 +419,148 @@ def worker_slots(running, max_workers, quota, stop_left):
     except (TypeError, ValueError):
         cap = DEFAULTS["workers"]  # an unusable value falls back to the default instead of failing the poll
     return max(0, cap - running)
+
+
+# ---------- conflict-aware choice of the next worker ----------
+_PATH = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)+[\w.-]*|[\w-]+(?:\.[\w-]+)*\.(?:py|js|ts|tsx|jsx|md|json|html|css|sql|sh|yml|yaml|toml|txt|plist|svg|cfg|ini|rs|go|java|rb))")
+
+
+def task_paths(text):
+    """File or folder paths named in a text (path-like tokens only), normalised: lower case, no trailing punctuation or slash. -> sorted list."""
+    out = set()
+    for m in _PATH.finditer(text or ""):
+        p = m.group(1).strip(".,;:)").rstrip("/").lower()
+        if len(p) >= 3 and re.search(r"[a-z]", p) and not re.fullmatch(r"\d+(\.\d+)+", p) and "://" not in p:
+            out.add(p)
+    return sorted(out)
+
+
+def entry_meta(task):
+    """What the queue remembers about a released task for the conflict choice: module, labels and the paths its text names (no text)."""
+    return dict(module=task.get("module") or "", labels=list(task.get("labels") or []),
+                paths=task_paths(task.get("title", "") + "\n" + (task.get("desc") or "")))
+
+
+def _paths_overlap(a, b):
+    """First pair of paths of the two sets that are equal or one is a folder prefix of the other, else None."""
+    for x in a:
+        for y in b:
+            if x == y or x.startswith(y + "/") or y.startswith(x + "/"):
+                return x if len(x) <= len(y) else y
+    return None
+
+
+def _module_known(m):
+    return bool(m) and m != "unassigned"
+
+
+def pair_conflict(a, b, cfg):
+    """How likely two tasks (queue/running entries: project, module, labels, paths) are to get in each other's way.
+    -> dict(score, signals, unclear). Cheap deterministic signals: different project (never conflicts); a shared path; a shared
+    'shared files' label; the same module (+3) or the same top-level module (+2); same project (+1). `unclear` = same project but
+    neither the module map nor paths nor labels say anything for at least one of the two, so only a judgement could tell."""
+    if a.get("project") != b.get("project"):
+        return dict(score=0, signals=["different project"], unclear=False)
+    score, sig = 1, ["same project"]
+    hit = _paths_overlap(a.get("paths") or [], b.get("paths") or [])
+    if hit:
+        score += 10
+        sig.append(f"shared path {hit}")
+    lab = sorted((set(a.get("labels") or []) & set(b.get("labels") or [])) & set(cfg["conflict_labels"]))
+    if lab:
+        score += 6
+        sig.append(f"shared-files label {lab[0]}")
+    ma, mb = a.get("module") or "", b.get("module") or ""
+    if _module_known(ma) and _module_known(mb):
+        if ma == mb:
+            score += 3
+            sig.append(f"same module {ma}")
+        elif ma.split("/")[0] == mb.split("/")[0]:
+            score += 2
+            sig.append(f"same top-level module {ma.split('/')[0]}")
+        else:
+            sig.append("different modules")
+    informative = lambda e: _module_known(e.get("module")) or e.get("paths") or (set(e.get("labels") or []) & set(cfg["conflict_labels"]))
+    unclear = not hit and not lab and not (informative(a) and informative(b))
+    if unclear:
+        sig.append("module or paths unknown")
+    return dict(score=score, signals=sig, unclear=unclear)
+
+
+def entry_conflict(cand, active, cfg):
+    """A candidate against everything running or already chosen -> dict(score, signals, unclear). The worst pair decides; unclear only when
+    no signal already reaches the threshold."""
+    if not active:
+        return dict(score=0, signals=["nothing running"], unclear=False)
+    pairs = [pair_conflict(cand, x, cfg) for x in active]
+    score = max(p["score"] for p in pairs)  # the worst pair decides (a sum would make many same-project workers conflict by baseline alone)
+    sig = [f"vs {x['key']}: " + ", ".join(p["signals"]) for x, p in zip(active, pairs)]
+    return dict(score=score, signals=sig, unclear=any(p["unclear"] for p in pairs) and score < cfg["conflict_threshold"])
+
+
+def conflict_prompt(running, candidates):
+    """Prompt for the conflict judgement: keys and titles only."""
+    r = "\n".join(f"- {t['key']}: {t['title']}" for t in running) or "- (nothing)"
+    c = "\n".join(f"- {t['key']}: {t['title']}" for t in candidates)
+    return ("These tasks are being worked on right now, in the same code base, by parallel workers:\n" + r +
+            "\nOrder the candidate tasks below by how unlikely they are to edit the same files or otherwise get in the way of the running ones "
+            "(least likely first), judging from the titles only. Answer with one JSON object: "
+            '{"order": ["KEY", ...], "reasoning": "one or two sentences"}.\n' + c)
+
+
+def choose_next(queue, active, cfg, skips=None, judge=None):
+    """Pick which queued entry starts next. Rank (queue order) stays primary: only the first `conflict_window` entries are considered
+    and the head wins unless it would get in the way of `active` (running or already chosen) and a later one would not.
+    A candidate already passed over `conflict_max_skips` times is taken at once. `judge(candidates, active) -> (ordered ids, reasoning)`
+    is asked only when the cheap signals leave the head and every alternative unclear.
+    -> (index in queue, record dict(chosen, skipped, signals, judgement, reason))."""
+    skips = skips or {}
+    win = list(queue[:max(1, int(cfg["conflict_window"]))])
+    ident = lambda e: f"{e['project']}/{e['key']}"
+    info = [entry_conflict(e, active, cfg) for e in win]
+    thr = cfg["conflict_threshold"]
+    ok = lambda i: info[i]["score"] < thr and not info[i]["unclear"]
+    judgement, reason, pick = None, "", 0
+    starved = next((i for i, e in enumerate(win) if skips.get(ident(e), 0) >= cfg["conflict_max_skips"]), None)
+    if starved is not None:
+        pick, reason = starved, f"passed over {skips[ident(win[starved])]} times: starvation limit {cfg['conflict_max_skips']}"
+    elif not active:
+        reason = "nothing running; rank order"
+    elif ok(0):
+        reason = "head does not conflict"
+    else:
+        alt = next((i for i in range(1, len(win)) if ok(i)), None)
+        if alt is not None:
+            pick, reason = alt, "skipped ahead to the first task without a conflict signal"
+        else:
+            unc = [i for i in range(len(win)) if info[i]["unclear"] and info[i]["score"] < thr]
+            if unc and judge is not None and cfg.get("conflict_judgement", True):
+                try:
+                    order, why = judge([dict(key=ident(win[i]), title=win[i]["title"]) for i in unc], active)
+                    pos = {k: j for j, k in enumerate(order)}
+                    pick = min(unc, key=lambda i: (pos.get(ident(win[i]), len(pos)), i))
+                    judgement, reason = why, "unclear signals; model judgement"
+                except Exception as ex:  # a failing judge never stops the job
+                    pick = min(range(len(win)), key=lambda i: (info[i]["score"], i))
+                    reason = f"judgement unavailable ({type(ex).__name__}); least conflicting by score"
+            else:
+                pick = min(range(len(win)), key=lambda i: (info[i]["score"], i))
+                reason = "every candidate conflicts or is unclear; least conflicting by score"
+    chosen = win[pick]
+    rec = dict(chosen=ident(chosen), number=chosen["number"], title=chosen["title"], queue_index=pick, skipped=[ident(e) for e in win[:pick]],
+               signals={ident(win[i]): info[i]["signals"] + [f"score {info[i]['score']}"] for i in range(len(win)) if i <= pick},
+               judgement=judgement, reason=reason, active=[x["key"] for x in active])
+    return pick, rec
+
+
+def update_skips(skips, rec, already=()):
+    """Count one skip for each task passed over by `rec` (once per poll: ids in `already` are not counted again); the chosen task's counter resets."""
+    skips = dict(skips)
+    skips.pop(rec["chosen"], None)
+    for k in rec["skipped"]:
+        if k not in already:
+            skips[k] = skips.get(k, 0) + 1
+    return skips
 
 
 # ---------- budget-panel contract (docs/contracts/budget-panel.md): decisions.jsonl lines for the cockpit ----------

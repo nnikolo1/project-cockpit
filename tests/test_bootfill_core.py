@@ -131,12 +131,177 @@ def test_mark_fired_and_roll_day():
 
 # ---- idle, kill switch ----
 def test_idle():
-    assert B.idle_verdict(NOW, None, 0, 10)[0]
-    assert B.idle_verdict(NOW, NOW - 11 * 60, 0, 10)[0]
-    ok, why = B.idle_verdict(NOW, NOW - 9 * 60, 0, 10)
-    assert not ok and "9 min" in why
-    ok, why = B.idle_verdict(NOW, None, 2, 10)
-    assert not ok and "2 own worker" in why
+    assert B.idle_verdict(NOW, None, 10)[0]
+    assert B.idle_verdict(NOW, NOW - 11 * 60, 10)[0]
+    ok, why = B.idle_verdict(NOW, NOW - 3 * 60, 10)
+    assert not ok and why == "other Claude Code agent active: last write 3 min ago"
+
+
+def test_own_workers_never_block_idleness():
+    ok, why = B.idle_verdict(NOW, None, 10, own_running=2)
+    assert ok and why == "only own Claude Code agents (2 own worker(s) running)"
+    assert B.idle_verdict(NOW, None, 10)[1] == "no other Claude Code agent active"
+
+
+def test_future_transcript_time_is_clamped_not_negative():
+    ok, why = B.idle_verdict(NOW, NOW + 45, 10)
+    assert not ok and why == "other Claude Code agent active: last write 0 min ago"
+
+
+def test_other_headless_process_blocks_and_fallback_is_stated():
+    ok, why = B.idle_verdict(NOW, None, 10, other_procs=[7])
+    assert not ok and "1 headless Claude Code process" in why
+    ok, why = B.idle_verdict(NOW, None, 10, process_check=False)
+    assert ok and "process check unavailable: transcript signal only" in why
+
+
+PS = """  1     0 /sbin/launchd
+ 100     1 python3 -m bootfill.job --once
+ 101   100 claude -p ok --model haiku
+ 200     1 sh -c claude -p work
+ 201   200 /usr/local/bin/claude -p work --allowedTools Read
+ 300     1 claude
+ 301     1 /opt/bin/claude --print triage
+ 302     1 vim claude -p
+garbage line
+"""
+
+
+def test_parse_ps_skips_malformed_lines():
+    procs = B.parse_ps(PS)
+    assert (101, 100, "claude -p ok --model haiku") in procs and len(procs) == 8
+
+
+def test_other_agent_processes_excludes_own_children_and_interactive_sessions():
+    procs = B.parse_ps(PS)
+    assert B.other_agent_processes(procs, [100, 200]) == [301]  # own refresh call and own worker excluded; pid 300 is interactive (judged by transcript); 302 is not an assistant
+    assert B.other_agent_processes(procs, [100]) == [201, 301]
+    assert B.other_agent_processes(procs, [100, 200], names=["other"]) == []
+
+
+def test_web_and_desktop_processes_are_ignored_only_claude_code_counts():
+    ex = B.DEFAULTS["process_exclude"]
+    procs = B.parse_ps("""
+ 10     1 /Applications/Claude.app/Contents/MacOS/Claude --print
+ 11    10 /Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper -p
+ 12     1 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome --print
+ 13     1 /usr/local/bin/claude -p background work
+ 14     1 /Applications/Claude.app/Contents/MacOS/claude -p inside an app bundle
+""")
+    assert B.other_agent_processes(procs, [], ["claude"], ex) == [13]
+    assert B.DEFAULTS["transcript_glob"].startswith("~/.claude/projects/")
+
+
+def test_encode_cwd_and_transcript_exclusion():
+    assert B.encode_cwd("/tmp/a.b/data_dir/headless") == "-tmp-a-b-data-dir-headless"
+    pats = ["*-wt-boot-*", "*-tmp-a-b-data-dir-headless*"]
+    assert B.transcript_excluded("/h/.claude/projects/-tmp-a-b-data-dir-headless/x.jsonl", pats)
+    assert B.transcript_excluded("/h/.claude/projects/-code-proj-wt-boot-12/x.jsonl", pats)
+    assert not B.transcript_excluded("/h/.claude/projects/-code-proj/x.jsonl", pats)
+
+
+def test_stale_minutes_is_three_polls():
+    assert B.stale_minutes(10) == 30 and B.stale_minutes(0) == 3
+
+
+# ---- conflict-aware choice ----
+CFG = B.merge_config(B.DEFAULTS, {})
+
+
+def ent(n, module="", project="p", labels=(), paths=(), key=None):
+    return dict(project=project, key=key or f"T-{n}", number=n, title=f"title {n}", module=module, labels=list(labels), paths=list(paths), attempt=1)
+
+
+def test_task_paths_finds_files_and_folders_only():
+    t = "Fix cockpit.py and docs/adr/0014.md; see https://x.org/a/b and version 1.2.3, also web/ folder"
+    assert B.task_paths(t) == ["cockpit.py", "docs/adr/0014.md", "web"]
+    assert B.entry_meta(dict(module="m", labels=["a"], title="x", desc="edit bootfill/core.py"))["paths"] == ["bootfill/core.py"]
+
+
+def test_pair_conflict_signals():
+    a = ent(1, "kit/a")
+    assert B.pair_conflict(a, ent(2, "kit/a"), CFG)["score"] == 4          # same project + same module
+    assert B.pair_conflict(a, ent(2, "kit/b"), CFG)["score"] == 3          # same top-level module
+    assert B.pair_conflict(a, ent(2, "web"), CFG)["score"] == 1            # different modules
+    assert B.pair_conflict(a, ent(2, "kit/a", project="q"), CFG)["score"] == 0
+    assert B.pair_conflict(ent(1, "m1", paths=["a/b"]), ent(2, "m2", paths=["a/b/c.py"]), CFG)["score"] >= 11  # folder prefix
+    assert B.pair_conflict(ent(1, "m1", labels=["shared-files"]), ent(2, "m2", labels=["shared-files"]), CFG)["score"] == 7
+    u = B.pair_conflict(ent(1, ""), ent(2, "unassigned"), CFG)
+    assert u["unclear"] and u["score"] == 1
+    assert not B.pair_conflict(a, ent(2, "web"), CFG)["unclear"]
+
+
+def test_choose_nothing_running_takes_head():
+    i, rec = B.choose_next([ent(1, "a"), ent(2, "a")], [], CFG)
+    assert i == 0 and rec["skipped"] == [] and "nothing running" in rec["reason"]
+
+
+def test_choose_skips_conflicting_head_for_independent_task():
+    q = [ent(1, "kit"), ent(2, "kit"), ent(3, "web")]
+    i, rec = B.choose_next(q, [ent(9, "kit")], CFG)
+    assert i == 2 and rec["skipped"] == ["p/T-1", "p/T-2"] and "same module kit" in " ".join(rec["signals"]["p/T-1"])
+    assert rec["chosen"] == "p/T-3" and rec["active"] == ["T-9"]
+
+
+def test_choose_other_project_is_independent():
+    i, _ = B.choose_next([ent(1, "kit"), ent(2, "kit", project="q")], [ent(9, "kit")], CFG)
+    assert i == 1
+
+
+def test_choose_head_wins_when_no_conflict_or_window_too_small():
+    assert B.choose_next([ent(1, "web"), ent(2, "kit")], [ent(9, "kit")], CFG)[0] == 0
+    q = [ent(1, "kit"), ent(2, "kit"), ent(3, "web")]
+    cfg = dict(CFG, conflict_window=2)
+    i, rec = B.choose_next(q, [ent(9, "kit")], cfg)
+    assert i == 0 and "least conflicting" in rec["reason"]  # outside the window is never considered
+
+
+def test_choose_starvation_limit_forces_the_passed_over_task():
+    q = [ent(1, "kit"), ent(2, "web")]
+    i, rec = B.choose_next(q, [ent(9, "kit")], CFG, {"p/T-1": 3})
+    assert i == 0 and "starvation" in rec["reason"]
+    assert B.choose_next(q, [ent(9, "kit")], CFG, {"p/T-1": 2})[0] == 1
+
+
+def test_choose_all_conflict_takes_least_conflicting_then_rank():
+    q = [ent(1, "kit/a", paths=["x/y.py"]), ent(2, "kit/a"), ent(3, "kit/b")]
+    i, _ = B.choose_next(q, [ent(9, "kit/a", paths=["x/y.py"])], CFG)
+    assert i == 2  # 3 (same top-level only) is the least conflicting
+
+
+def test_choose_unclear_uses_judge_with_reasoning_and_falls_back():
+    q = [ent(1, ""), ent(2, ""), ent(3, "")]
+    seen = []
+
+    def judge(cands, running):
+        seen.append(([c["key"] for c in cands], [r["key"] for r in running]))
+        return ["p/T-3", "p/T-1"], "T-3 looks unrelated"
+    i, rec = B.choose_next(q, [ent(9, "")], CFG, judge=judge)
+    assert i == 2 and rec["judgement"] == "T-3 looks unrelated" and seen == [(["p/T-1", "p/T-2", "p/T-3"], ["T-9"])]
+
+    def broken(c, r):
+        raise RuntimeError("down")
+    i, rec = B.choose_next(q, [ent(9, "")], CFG, judge=broken)
+    assert i == 0 and "judgement unavailable" in rec["reason"]
+    assert B.choose_next(q, [ent(9, "")], dict(CFG, conflict_judgement=False), judge=judge)[0] == 0
+
+
+def test_judge_not_asked_when_signals_are_clear():
+    def judge(c, r):
+        raise AssertionError("must not be called")
+    assert B.choose_next([ent(1, "kit"), ent(2, "web")], [ent(9, "kit")], CFG, judge=judge)[0] == 1
+
+
+def test_update_skips_counts_once_per_poll_and_resets_chosen():
+    rec = dict(chosen="p/T-3", skipped=["p/T-1", "p/T-2"])
+    s = B.update_skips({"p/T-3": 2}, rec)
+    assert s == {"p/T-1": 1, "p/T-2": 1}
+    assert B.update_skips(s, rec, already={"p/T-1"}) == {"p/T-1": 1, "p/T-2": 2}
+
+
+def test_conflict_prompt_has_keys_and_titles_only():
+    p = B.conflict_prompt([dict(key="A", title="ta")], [dict(key="B", title="tb")])
+    assert "- A: ta" in p and "- B: tb" in p and "order" in p
 
 
 def test_kill_switch():

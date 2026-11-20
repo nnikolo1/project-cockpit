@@ -69,23 +69,32 @@ def run(cmd, timeout=300, cwd=None):
 
 
 class Quota:
-    def __init__(self, feed_path, refresh_cmd):
-        self.feed_path, self.refresh_cmd = feed_path, refresh_cmd
+    def __init__(self, feed_path, refresh_cmd, cwd=None):
+        self.feed_path, self.refresh_cmd, self.cwd = feed_path, refresh_cmd, cwd  # cwd: the job's own headless folder, so its transcripts are recognisable
 
     def read(self):
         """One minimal headless call refreshes the status-line feed (it is stale while no session is open), then the feed is read."""
         if self.refresh_cmd:
-            run(self.refresh_cmd, timeout=120)
+            run(self.refresh_cmd, timeout=120, cwd=self.cwd)
         return core.parse_feed(json.loads(pathlib.Path(self.feed_path).expanduser().read_text()))
 
 
 class Idle:
-    def __init__(self, transcript_glob):
-        self.glob = transcript_glob
+    """Newest transcript write by anyone but the job: paths matching `exclude` (fnmatch; the job's own headless folder and worker worktrees) are ignored."""
+
+    def __init__(self, transcript_glob, exclude=()):
+        self.glob, self.exclude = transcript_glob, list(exclude)
 
     def last_write(self):
         files = glob.glob(os.path.expanduser(self.glob), recursive=True)
-        return max((os.path.getmtime(f) for f in files), default=None)
+        return max((os.path.getmtime(f) for f in files if not core.transcript_excluded(f, self.exclude)), default=None)
+
+
+class Processes:
+    """The process list (`ps`), parsed; raises RuntimeError when ps is unavailable so the caller can fall back and say so."""
+
+    def __call__(self):
+        return core.parse_ps(run(["ps", "-axo", "pid=,ppid=,command="], timeout=20))
 
 
 class Gh:
@@ -128,11 +137,13 @@ class Gh:
 class Judge:
     """Tie-break by one short headless model call; titles and keys only."""
 
-    def __init__(self, cmd):
-        self.cmd = cmd
+    def __init__(self, cmd, cwd=None):
+        self.cmd, self.cwd = cmd, cwd
 
-    def __call__(self, tasks):
-        out = run([x.replace("{prompt}", core.judge_prompt(tasks)) for x in self.cmd], timeout=180)
+    def __call__(self, tasks, running=None):
+        """running=None: tie-break by value. running given: order `tasks` by how unlikely they are to get in the way of `running`."""
+        prompt = core.judge_prompt(tasks) if running is None else core.conflict_prompt(running, tasks)
+        out = run([x.replace("{prompt}", prompt) for x in self.cmd], timeout=180, cwd=self.cwd)
         return core.parse_judgement(out, [t["key"] for t in tasks])
 
 

@@ -25,7 +25,7 @@ TYPES = ["feature", "bug", "decision", "research", "doc", "devops", "test"]
 # Global switches (steer, simulate) live in CFG. A project is a dict of PROJECT_KEYS plus its name; PROJECTS maps name -> project.
 # Without any registered project (tests, embedding) CFG itself doubles as the one project.
 CFG = dict(repo=None, manager=None, steer=False, simulate=False, project=None, git=None, modules=None, phases=None, code=None,
-           quota_feed=None, usage_report=None, decision_log=None)  # the last three: budget panel files (None = default under DATA_DIR/budget)
+           quota_feed=None, usage_report=None, decision_log=None, quota_stale_min=None)  # the last three: budget panel files (None = default under DATA_DIR/budget)
 PROJECT_KEYS = ("repo", "manager", "project", "git", "modules", "phases", "code")
 PROJECTS, DEFAULT = {}, None
 
@@ -531,7 +531,7 @@ def build_budget(now=None):
     q, qm = _read_with_mtime(budget_path("quota_feed"))
     u, um = _read_with_mtime(budget_path("usage_report"))
     lg, _ = _read_with_mtime(budget_path("decision_log"))
-    out = L.budget_view(q, qm, u, um, lg, now)
+    out = L.budget_view(q, qm, u, um, lg, now, CFG.get("quota_stale_min") or L.QUOTA_STALE_MIN)
     log.info("budget: quota %s, usage %s, decision log %s (%d releases, %d polls, %d lines skipped)", out["quota"]["status"], out["usage"]["status"], out["log"]["status"],
              len(out["log"]["releases"]), len(out["log"]["polls"]), out["log"]["skipped"])
     return out
@@ -669,6 +669,7 @@ def main():
     ap.add_argument("--code", help="code snapshot directory: metrics.json and erd|dataflow|deps|js.svg (see README)")
     ap.add_argument("--token-file", help="keep the access token in this file (created 0600 if missing), so the URL survives restarts")
     ap.add_argument("--quota-feed", help="budget panel: JSON {five_hour, seven_day: {used_percentage, resets_at}} (default <data dir>/budget/quota.json)")
+    ap.add_argument("--quota-stale-min", type=int, help="budget panel: minutes after which the quota reading is shown as stale (default 30; use 3 x the boot-filling poll_minutes)")
     ap.add_argument("--usage-report", help="budget panel: token usage report per window (default <data dir>/budget/usage.json)")
     ap.add_argument("--decision-log", help="budget panel: boot-filling decision log, JSON lines (default <data dir>/budget/decisions.jsonl)")
     ap.add_argument("--steer", action="store_true", help="enable actions (default: read-only)")
@@ -680,7 +681,7 @@ def main():
     except ValueError as ex:
         ap.error(str(ex))
     register(projects, default)
-    CFG.update(steer=a.steer, simulate=a.simulate_orchestrator, quota_feed=a.quota_feed, usage_report=a.usage_report, decision_log=a.decision_log)
+    CFG.update(steer=a.steer, simulate=a.simulate_orchestrator, quota_feed=a.quota_feed, usage_report=a.usage_report, decision_log=a.decision_log, quota_stale_min=a.quota_stale_min)
     steer = a.steer
     for p in projects:
         log.info("project %s: repo=%s project=%s manager=%s mode=%s", p["name"], p["repo"], p["project"], p["manager"], "STEERING" if steer else "READ-ONLY")

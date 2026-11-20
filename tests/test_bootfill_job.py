@@ -223,3 +223,121 @@ def test_jsonl_helpers_and_state_by_mode(tmp_path):
     A.write_json(tmp_path / "s.json", {"a": 1})
     assert A.read_json(tmp_path / "s.json", {}) == {"a": 1} and A.read_json(tmp_path / "nope", 5) == 5
     assert make(tmp_path / "a", [])[0].state_path.name == "state-dry-run.json"
+
+
+# ---- idle = no other agent; own transcripts excluded ----
+def test_own_running_workers_do_not_block_the_poll(tmp_path):
+    ctx, h, w, qu, _ = make(tmp_path, many(10), mode="real", q=quota_of(80, 1.0, week_used=90))
+    J.poll(ctx, NOW)
+    assert len(w.started) == 2
+    text = J.poll(ctx, NOW + 600)  # both workers still running: the job is idle-eligible, but the cap keeps it from starting more
+    st = A.read_json(ctx.state_path, {})
+    assert text != "skip: not idle" and len(st["running"]) == 2 and len(w.started) == 2
+    assert "only own Claude Code agents (2 own worker(s) running)" in contract(ctx)[-1]["idle_reason"]
+
+
+def test_other_headless_process_blocks_and_ps_failure_falls_back(tmp_path):
+    ctx, h, *_ = make(tmp_path, many(3), mode="real")
+    ctx.procs = lambda: [(500, 1, "claude -p something")]
+    assert J.poll(ctx, NOW) == "skip: not idle" and "other Claude Code agent active" in contract(ctx)[-1]["idle_reason"]
+    ctx2, *_ = make(tmp_path / "b", many(3))
+
+    def broken():
+        raise RuntimeError("ps missing")
+    ctx2.procs = broken
+    J.poll(ctx2, NOW)
+    assert "process check unavailable" in contract(ctx2)[-1]["idle_reason"] and contract(ctx2)[-1]["idle"] is True
+
+
+def test_own_worker_process_tree_is_not_another_agent(tmp_path):
+    ctx, h, w, *_ = make(tmp_path, many(10), mode="real", q=quota_of(80, 1.0, week_used=90))
+    ctx.procs = lambda: []
+    J.poll(ctx, NOW)
+    st = A.read_json(ctx.state_path, {})
+    st["running"][0]["handle"]["pid"] = 700
+    A.write_json(ctx.state_path, st)
+    ctx.procs = lambda: [(701, 700, "claude -p work"), (800, 1, "claude -p foreign")]
+    J.poll(ctx, NOW + 600)
+    assert "1 headless Claude Code process" in contract(ctx)[-1]["idle_reason"]  # only the foreign one counts
+
+
+def test_idle_adapter_ignores_excluded_transcripts(tmp_path):
+    import os
+    own, other = tmp_path / "-x-data-headless", tmp_path / "-y-proj"
+    wt = tmp_path / "-y-proj-wt-boot-5"
+    for d, age in ((own, 1), (wt, 2), (other, 600)):
+        d.mkdir()
+        f = d / "s.jsonl"
+        f.write_text("{}")
+        os.utime(f, (NOW - age, NOW - age))
+    pats = ["*-wt-boot-*", "*-x-data-headless*"]
+    idle = A.Idle(str(tmp_path / "*" / "*.jsonl"), pats)
+    assert idle.last_write() == NOW - 600  # own refresh and own worker transcripts do not count
+    assert A.Idle(str(tmp_path / "*" / "*.jsonl")).last_write() == NOW - 1
+    assert A.Idle(str(tmp_path / "nothing" / "*.jsonl"), pats).last_write() is None
+
+
+def test_own_call_directory_is_passed_to_the_headless_calls(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(A, "run", lambda cmd, timeout=300, cwd=None: seen.append(cwd) or '{"order": ["a/T-1"], "reasoning": "r"}')
+    feed = tmp_path / "q.json"
+    feed.write_text(json.dumps(dict(five_hour=dict(used_percentage=1, resets_at=NOW), seven_day=dict(used_percentage=1, resets_at=NOW))))
+    A.Quota(str(feed), ["x"], cwd="/own").read()
+    A.Judge(["x", "{prompt}"], cwd="/own")([dict(key="a/T-1", title="t")], [dict(key="T-9", title="u")])
+    A.Judge(["x", "{prompt}"], cwd="/own")([dict(key="a/T-1", title="t")])
+    assert seen == ["/own"] * 3
+
+
+# ---- conflict-aware worker choice in the poll ----
+def test_worker_choice_skips_conflict_and_is_logged(tmp_path):
+    tasks = [task(2, module="kit"), task(3, module="kit"), task(4, module="kit"), task(5, module="web")]
+    ctx, h, w, *_ = make(tmp_path, tasks, mode="real", q=quota_of(80, 1.0, week_used=90))
+    J.poll(ctx, NOW)
+    assert w.started == [2, 5]  # 2 first (nothing running), then 5 skips ahead of the same-module 3 and 4
+    st = A.read_json(ctx.state_path, {})
+    assert st["skips"] == {"p/T-3": 1, "p/T-4": 1}
+    rec = [r for r in A.read_jsonl(ctx.decisions) if r["type"] == "conflict_choice"]
+    assert len(rec) == 1 and rec[0]["chosen"] == "p/T-5" and rec[0]["skipped"] == ["p/T-3", "p/T-4"]
+    assert "same module kit" in " ".join(rec[0]["signals"]["p/T-3"]) and rec[0]["reason"]
+
+
+def test_worker_choice_starvation_limit_across_polls(tmp_path):
+    tasks = [task(2, module="kit"), task(3, module="kit"), task(4, module="web"), task(5, module="web2")]
+    ctx, h, w, qu, _ = make(tmp_path, tasks, mode="real", q=quota_of(80, 1.0, week_used=90), workers=1, conflict_max_skips=1)
+    J.poll(ctx, NOW)  # starts 2
+    w.rc = {2: 0}
+    J.poll(ctx, NOW + 600)  # 2 finished: nothing running, rank order -> 3
+    assert w.started == [2, 3]
+    w.rc = {2: 0, 3: None}
+    st = A.read_json(ctx.state_path, {})
+    assert st["running"][0]["entry"]["number"] == 3
+
+
+def test_entries_remember_module_labels_and_paths(tmp_path):
+    ctx, *_ = make(tmp_path, [task(2, module="kit", labels=["shared-files"], desc="edit docs/x.md")], mode="real", q=quota_of(80, 1.0, week_used=90))
+    J.poll(ctx, NOW)
+    e = A.read_json(ctx.state_path, {})["running"][0]["entry"]
+    assert e["module"] == "kit" and e["labels"] == ["shared-files"] and e["paths"] == ["docs/x.md"]
+
+
+# ---- plist helper ----
+def test_render_plist_uses_poll_minutes_and_escapes():
+    from bootfill import render_plist as R
+    tpl = R.TEMPLATE.read_text()
+    out = R.render(tpl, "/c/a&b.json", "/d", "/k", 10)
+    assert "<integer>600</integer>" in out and "a&amp;b.json" in out and "POLL_SECONDS" not in out and "CONFIG_PATH" not in out
+    assert "<integer>120</integer>" in R.render(tpl, "c", "d", "k", 2)
+    import pytest
+    with pytest.raises(ValueError):
+        R.render(tpl, "c", "d", "k", 0)
+
+
+def test_render_plist_cli_reads_config(tmp_path, capsys):
+    from bootfill import render_plist as R
+    cfg = tmp_path / "c.json"
+    cfg.write_text(json.dumps(dict(poll_minutes=15)))
+    R.main(["--config", str(cfg), "--data-dir", str(tmp_path), "--checkout", str(tmp_path), "--out", str(tmp_path / "o.plist")])
+    assert "<integer>900</integer>" in (tmp_path / "o.plist").read_text() and "--quota-stale-min 45" in capsys.readouterr().err
+    cfg.write_text("{}")
+    R.main(["--config", str(cfg), "--data-dir", str(tmp_path), "--checkout", str(tmp_path), "--out", str(tmp_path / "o.plist")])
+    assert "<integer>600</integer>" in (tmp_path / "o.plist").read_text()

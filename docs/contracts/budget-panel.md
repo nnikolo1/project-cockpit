@@ -19,7 +19,7 @@ The files are global (one quota per account, not per project). Write each atomic
  "seven_day": {"used_percentage": 55.5, "resets_at": "2026-11-24T09:00:00Z"}}
 ```
 - `used_percentage` 0 to 100 (clamped). `resets_at`: epoch seconds or ISO 8601 (UTC when no zone). A window without a usable `used_percentage` is not shown.
-- The feed carries no timestamp, so its **age is the file's modification time**. Older than **30 minutes** (the poll interval of the job): a stale warning. A `resets_at` already in the past: the window is over and the reading is flagged "already reset".
+- The feed carries no timestamp, so its **age is the file's modification time**. Older than **30 minutes** by default (three polls of the job at the default 10-minute interval; the cockpit flag `--quota-stale-min` sets it): a stale warning. A `resets_at` already in the past: the window is over and the reading is flagged "already reset".
 
 ## `usage.json` (optional)
 ```

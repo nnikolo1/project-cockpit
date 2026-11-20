@@ -113,3 +113,10 @@ def test_build_budget_reads_files_and_survives_absent_ones(tmp_path):
         assert (b["quota"]["status"], b["usage"]["status"], b["log"]["status"]) == ("missing",) * 3
     finally:
         C.CFG.update(old)
+
+
+def test_quota_stale_limit_is_a_parameter():
+    t = NOW - dt.timedelta(minutes=20)
+    assert not L.quota_view(txt("quota.json"), t, NOW)["stale"]
+    assert L.quota_view(txt("quota.json"), t, NOW, stale_min=15)["stale"]
+    assert L.budget_view(txt("quota.json"), t, None, None, None, NOW, stale_min=15)["quota"]["stale"]

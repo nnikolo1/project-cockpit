@@ -777,7 +777,7 @@ def card_meta(texts, project=None, now=None):
 
 
 # ---------- budget panel: quota feed, usage report, boot-filling decision log (contract: docs/contracts/budget-panel.md) ----------
-QUOTA_STALE_MIN = 30   # a quota reading older than this (the boot-filling poll interval) is shown as stale
+QUOTA_STALE_MIN = 30   # default: a quota reading older than this is shown as stale; the cockpit passes 3 x the poll interval (stale_min)
 USAGE_STALE_H = 24     # a usage report older than this is shown as stale
 QUOTA_WINDOWS = (("five_hour", "5-hour window"), ("seven_day", "Weekly window"))
 LOG_LIMIT = 50         # most recent entries kept per table
@@ -814,10 +814,10 @@ def _age_s(t, now):
     return None if t is None else max(0, round((now - t).total_seconds()))
 
 
-def quota_view(text, mtime, now):
+def quota_view(text, mtime, now, stale_min=QUOTA_STALE_MIN):
     """Raw quota feed {five_hour, seven_day: {used_percentage, resets_at}} plus the file's modification time (datetime) ->
     {status: ok|missing|invalid, reason, age_s, stale, windows: [...]}. Each window: key, label, used_pct, left_pct, resets_at,
-    resets_in_s, expired (the reset time has passed, so the reading belongs to a window that is over). Never raises."""
+    resets_in_s, expired (the reset time has passed, so the reading belongs to a window that is over). `stale_min`: age limit in minutes. Never raises."""
     d, why = _json_obj(text)
     if d is None:
         return dict(status="missing" if text is None else "invalid", reason=why, age_s=None, stale=False, windows=[])
@@ -834,7 +834,7 @@ def quota_view(text, mtime, now):
                          resets_at=r and r.strftime("%Y-%m-%dT%H:%M:%SZ"), resets_in_s=None if left is None else max(left, 0), expired=left is not None and left < 0))
     if not wins:
         return dict(status="invalid", reason="no window with used_percentage", age_s=age, stale=False, windows=[])
-    return dict(status="ok", reason="", age_s=age, stale=age is None or age > QUOTA_STALE_MIN * 60, windows=wins)
+    return dict(status="ok", reason="", age_s=age, stale=age is None or age > stale_min * 60, windows=wins)
 
 
 def usage_view(text, mtime, now, quota=None):
@@ -903,6 +903,6 @@ def decision_view(text, limit=LOG_LIMIT):
     return dict(status="ok", releases=newest(rel), polls=newest(polls), skipped=skipped)
 
 
-def budget_view(quota_text, quota_mtime, usage_text, usage_mtime, log_text, now):
-    q = quota_view(quota_text, quota_mtime, now)
+def budget_view(quota_text, quota_mtime, usage_text, usage_mtime, log_text, now, stale_min=QUOTA_STALE_MIN):
+    q = quota_view(quota_text, quota_mtime, now, stale_min)
     return dict(now=now.strftime("%Y-%m-%dT%H:%M:%SZ"), quota=q, usage=usage_view(usage_text, usage_mtime, now, q), log=decision_view(log_text))
