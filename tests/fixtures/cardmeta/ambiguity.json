@@ -1,0 +1,12 @@
+{
+  "schema": 1, "kind": "ambiguity", "project": "demo", "generated_at": "2026-11-20T06:00:00Z",
+  "modules": {
+    "module-a": {"own_files": 6, "sub_files": {"one": 3, "two": 0},
+                 "unsorted": [{"path": "module-a/shared.py", "candidates": ["module-a/one", "module-a/two"], "reason": "imported by both"},
+                              {"path": "module-a/util.py", "candidates": ["module-a/one", "module-a/two"], "reason": "no import evidence"},
+                              {"path": "module-a/misc.py", "candidates": ["module-a/two"], "reason": "name matches two"}]},
+    "module-b": {"own_files": 10, "sub_files": {}, "unsorted": []}
+  },
+  "module_level": [{"path": "common/helpers.py", "candidates": ["module-a", "module-b"], "reason": "used by both modules"}],
+  "unassigned_nondoc": 4
+}

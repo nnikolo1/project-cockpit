@@ -1,0 +1,14 @@
+{
+  "schema": 1, "kind": "footprint", "project": "demo", "generated_at": "2026-11-20T06:00:00Z",
+  "modules": {
+    "module-a": {
+      "tables": [{"name": "items", "rows": 1200, "owner": "module-a", "role": "primary", "bytes": 98304}, {"name": "item_log", "rows": 40, "owner": "module-b", "role": "reader", "bytes": 4096}],
+      "files": [{"path": "data/items.csv", "kind": "export", "size_bytes": 5120, "personal_data": false, "written_by": "module-a/one"},
+                {"path": "/var/lib/demo/profile", "kind": "dir", "count": 3, "personal_data": true, "written_by": "module-a"}],
+      "logging": [{"logger": "module_a", "file": "logs/a.log", "size_bytes": 2048, "rotation": "daily, 7 kept"}],
+      "volume": {"day": {"rows": 10, "bytes": 1024}, "week": {"rows": 70, "bytes": 7168}, "month": {"rows": 300, "bytes": 30720}},
+      "policy": {"backup": "nightly copy of the database file", "retention": "undocumented"}
+    },
+    "module-b": {"tables": [], "files": [], "logging": [], "volume": {}, "policy": {}}
+  }
+}
