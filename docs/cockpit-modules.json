@@ -49,7 +49,6 @@
   {"path": "tests/fixtures/cardmeta/", "module": "core", "basis": "synthetic inputs of tests/test_cardmeta.py"},
   {"path": "CLAUDE.md", "module": "internal/agents", "basis": "decided 2026-11-20 with the Internal restructure (issue 28): standing instructions for assistants are exactly what Internal/Agent policies holds; it was ambiguous only while no such module existed"},
   {"path": ".gitignore", "module": "internal/devops", "basis": "decided 2026-11-20: repository configuration is DevOps; it was ambiguous only while no such module existed"},
-  {"path": ".github/workflows/test.yml", "module": "internal/devops", "basis": "decided 2026-11-20: CI workflow is DevOps; it was ambiguous only while no such module existed"},
-  {"path": ".coverage", "module": null, "candidates": [], "basis": "generated coverage data that is tracked by mistake; it should be untracked rather than assigned"}
+  {"path": ".github/workflows/test.yml", "module": "internal/devops", "basis": "decided 2026-11-20: CI workflow is DevOps; it was ambiguous only while no such module existed"}
  ]
 }
