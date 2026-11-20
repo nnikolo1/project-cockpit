@@ -483,7 +483,7 @@ def card_metadata(p=None, now=None):
             texts[kind] = "\0unreadable"  # parse_card reports it as invalid
     out = L.card_meta(texts, p.get("name") or None, now)
     log.info("card metadata of %s from %s: %s", p.get("name", ""), d, {k: v["status"] for k, v in out.items()})
-    return dict(out, dir_configured=bool(p.get("meta")))
+    return dict(out, dir=str(d))
 
 
 # ---------- server ----------
@@ -602,7 +602,7 @@ def resolve(a):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--projects", help="JSON {default, projects:[{name, repo, project?, manager?, modules?, git?, code?, phases?}]}: serve several projects (replaces the single-project flags)")
+    ap.add_argument("--projects", help="JSON {default, projects:[{name, repo, project?, manager?, modules?, git?, code?, phases?, meta?}]}: serve several projects (replaces the single-project flags)")
     ap.add_argument("--repo", help="OWNER/REPO")
     ap.add_argument("--manager", help="the one login whose protected labels count (default: the repo owner)")
     ap.add_argument("--port", type=int, default=8795)
