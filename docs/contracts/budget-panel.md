@@ -29,6 +29,7 @@ The files are global (one quota per account, not per project). Write each atomic
 ```
 - `tokens_cap_estimate` is optional. The provider publishes percentages, not token limits, so **every cap shown is an estimate** and is labelled so. Without a reported cap the page derives one as `tokens_used / used share` when the quota share is at least 1 percent, and says "from used share". Tokens left = cap minus used (also an estimate).
 - Age: `generated_at` (file modification time when absent). Older than 24 hours: stale warning.
+- Extension (compatible, [ADR 0017](../adr/0017-boot-filling-quota-history.md)): a window may also carry `tokens_input`, `tokens_output`, `tokens_cache_creation`, `tokens_cache_read`, `messages`, `tokens_own` (tokens of the job's own calls), `window_start` (ISO 8601) and `window_basis` (`resets_at` or `rolling`). `tokens_used` is then the sum of the four kinds. Readers of version 1 ignore the extra fields; the boot-filling job rewrites the file atomically at every poll.
 
 ## `decisions.jsonl` (JSON lines, one object per line, append-only)
 Every line has `kind` (`"release"` or `"poll"`) and `time` (ISO 8601 UTC). A line that is not JSON, has another kind or no readable `time` is skipped and counted ("n unreadable lines skipped"). The page shows the newest 50 of each kind, newest first. Free text is cut to 300 characters; keep it short and free of personal data.

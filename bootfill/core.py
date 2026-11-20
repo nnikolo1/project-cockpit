@@ -22,6 +22,9 @@ DEFAULTS = dict(
     five_hour=dict(low_left=10, low_payload=5, high_left=50, high_payload=20, max_hours_to_reset=2),
     weekly=dict(min_left=20, max_hours_to_reset=24, payload=50),
     day_cap=60,
+    quota_history="quota-history.jsonl",  # ADR 0017: one record per poll; relative = inside the data folder, null = off
+    quota_history_days=400,  # rows older than this are pruned, at most once a day
+    usage_report=None,  # path of the budget page's usage.json; null = <budget_dir>/usage.json, "" = do not write it
     workers=2,  # how many workers may run at the same time (configuration key `workers`; 0 starts none)
     worker_stop_left=5,  # stop starting workers when either window has this percent or less left
     summary_hour=20,  # local hour after which the daily summary is written
@@ -604,7 +607,7 @@ def counts_per_trigger(rows):
     return out
 
 
-def poll_line(now, idle, idle_reason, quota, triggers, decision_text):
+def poll_line(now, idle, idle_reason, quota, triggers, decision_text, sources=None, tokens=None):
     """The one-line poll log entry: idle verdict and reason, both quota readings, each trigger's verdict, the decision."""
     def q(name):
         if not quota:
@@ -612,7 +615,8 @@ def poll_line(now, idle, idle_reason, quota, triggers, decision_text):
         used, reset = quota[name]
         return f"{name}_used={used:.0f}% {name}_reset_in={(reset - now) / 3600:.1f}h"
     trig = " ".join(f"{t['name']}={t['verdict']}" for t in triggers) or "triggers=not evaluated"
-    return f"idle={'yes' if idle else 'no'} ({idle_reason}) | {q('five')} {q('week')} | {trig} | decision: {decision_text}"
+    extra = (f" [{sources}]" if sources else "") + (f" | {tokens}" if tokens else "")
+    return f"idle={'yes' if idle else 'no'} ({idle_reason}) | {q('five')} {q('week')}{extra} | {trig} | decision: {decision_text}"
 
 
 def summary_text(rows, day, mode, needs=()):

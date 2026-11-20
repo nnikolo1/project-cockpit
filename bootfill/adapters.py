@@ -72,11 +72,18 @@ class Quota:
     def __init__(self, feed_path, refresh_cmd, cwd=None):
         self.feed_path, self.refresh_cmd, self.cwd = feed_path, refresh_cmd, cwd  # cwd: the job's own headless folder, so its transcripts are recognisable
 
+    def peek(self):
+        """The feed as the status line left it (no refresh call): -> (parsed quota, age in seconds from the file's modification time)."""
+        p = pathlib.Path(self.feed_path).expanduser()
+        age = max(time.time() - p.stat().st_mtime, 0.0)
+        return core.parse_feed(json.loads(p.read_text())), age
+
     def read(self):
         """One minimal headless call refreshes the status-line feed (it is stale while no session is open), then the feed is read."""
         if self.refresh_cmd:
             run(self.refresh_cmd, timeout=120, cwd=self.cwd)
-        return core.parse_feed(json.loads(pathlib.Path(self.feed_path).expanduser().read_text()))
+        parsed, self.last_age = self.peek()
+        return parsed
 
 
 class Idle:

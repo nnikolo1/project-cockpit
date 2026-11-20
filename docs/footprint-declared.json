@@ -44,7 +44,13 @@
     {"path": "~/.local/share/project-cockpit/budget/decisions.jsonl", "kind": "file", "personal_data": false, "written_by": "bootfill (the same file the budget panel reads, docs/contracts/budget-panel.md)", "volume": true,
      "note": "append-only contract lines: one poll line every 30 minutes, one release line per released task; task title and number only"},
     {"path": "~/.local/share/project-cockpit/bootfill", "kind": "dir", "personal_data": false, "written_by": "bootfill",
-     "volume": true, "note": "--data-dir default: decision-log.jsonl (append-only, with ranking inputs and outcomes), state-dry-run.json, state-real.json, PAUSE flag, workers/ (exit-code files and worker output, which may contain task work)"}
+     "volume": true, "note": "--data-dir default: decision-log.jsonl (append-only, with ranking inputs and outcomes), state-dry-run.json, state-real.json, PAUSE flag, workers/ (exit-code files and worker output, which may contain task work)"},
+    {"path": "~/.local/share/project-cockpit/bootfill/quota-history.jsonl", "kind": "file", "personal_data": false, "written_by": "bootfill (ADR 0017)", "volume": true,
+     "note": "append-only, one quota_snapshot record per poll (about 144 rows a day at the 10-minute default, a few hundred bytes each); quota percentages, reset times and token counts only, no transcript content, no paths; generated data, never committed"},
+    {"path": "~/.local/share/project-cockpit/bootfill/token-cache.json", "kind": "file", "personal_data": false, "written_by": "bootfill (ADR 0017)", "volume": true,
+     "note": "incremental scan cache: per-file offsets keyed by a path hash and the usage numbers of the last 8 days; rewritten when transcripts change; rebuildable, never committed"},
+    {"path": "~/.local/share/project-cockpit/budget/usage.json", "kind": "file", "personal_data": false, "written_by": "bootfill (ADR 0017)", "volume": true,
+     "note": "token totals per window for the budget page, replaced atomically at every poll"}
    ],
    "logging": [
     {"logger": "bootfill.poll", "file": "poll.log", "rotation": "daily, 90 files kept (TimedRotatingFileHandler); one line per poll; no tokens, no task text"},
@@ -52,7 +58,7 @@
    ],
    "policy": {
     "backup": "undocumented",
-    "retention": "logs 90 days; decision logs and state kept until the owner deletes them (no pruning in the code)"
+    "retention": "logs 90 days; quota-history.jsonl pruned by the job to quota_history_days (default 400) at most once a day and logged; token-cache.json keeps 8 days of usage numbers; usage.json is replaced at each poll; decision logs and state kept until the owner deletes them (no pruning in the code)"
    }
   },
   "docs": {
