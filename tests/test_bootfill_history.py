@@ -167,7 +167,7 @@ def test_refresh_failure_falls_back_to_the_stale_feed_with_reason(tmp_path):
     ctx = ctx_with(tmp_path, fq)
     J.poll(ctx, NOW)
     w = history(ctx)[-1]["windows"]["five_hour"]
-    assert w["source"] == "feed" and w["reading_age_s"] == 5000 and "refresh failed" in w["reason"]
+    assert w["source"] == "stale" and w["used_percentage"] is None and w["reading_age_s"] == 5000 and "refresh failed" in w["reason"]
 
 
 def test_feed_unavailable_gives_rolling_tokens_and_reason(tmp_path):

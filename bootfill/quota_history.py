@@ -135,6 +135,10 @@ class TokenScanner:
     def window(self, start, end):
         return window_totals(self.events.values(), start, end)
 
+    def first_event_at_or_after(self, ts):
+        """Epoch of the earliest scanned message at or after `ts`, or None (used to place an estimated 5-hour window)."""
+        return min((e[0] for e in self.events.values() if e[0] >= ts), default=None)
+
 
 def window_totals(events, start, end):
     """Sum of the events with start <= timestamp <= end. A window with no events gives zeros and a note."""
@@ -162,7 +166,9 @@ def window_bounds(resets_at, length, now):
 
 
 def build_record(now, mode, idle, idle_reason, decision, readings, scanner_windows):
-    """The history record. readings: {five|week: dict(used, resets_at, age, source, reason)} (missing keys = unavailable).
+    """The history record. readings: {five|week: dict(used, resets_at, age, source, reason, estimated, est_used, est_resets_at, est_basis)}
+    (missing keys = unavailable). `used`/`resets_at` are set ONLY for a fresh feed reading; a stale or missing one has used_percentage null
+    and, when a cap is known, an estimate labelled `estimated: true` with its basis (ADR 0018).
     scanner_windows: {five_hour|seven_day: dict(start, basis, tokens)} or {} when the scan failed (then each window says why)."""
     rec = dict(kind="quota_snapshot", schema=1, time=core.iso(now), mode=mode, idle=None if idle is None else bool(idle),
                idle_reason=str(idle_reason)[:80], decision=str(decision)[:120], windows={})
@@ -171,7 +177,13 @@ def build_record(now, mode, idle, idle_reason, decision, readings, scanner_windo
         w = dict(used_percentage=r.get("used"), resets_at=None if r.get("resets_at") is None else core.iso(r["resets_at"]),
                  reading_age_s=None if r.get("age") is None else round(r["age"]), source=r["source"])
         if r.get("reason"):
-            w["reason"] = r["reason"][:120]
+            w["reason"] = r["reason"][:160]
+        if r.get("estimated"):
+            w.update(estimated=True, estimated_percentage=round(r["est_used"], 1), estimate_basis=r["est_basis"])
+            if r.get("est_resets_at") is not None:
+                w["estimated_resets_at"] = core.iso(r["est_resets_at"])
+        elif r.get("est_note"):
+            w["estimate_note"] = r["est_note"]
         sw = scanner_windows.get(name)
         if sw:
             w.update(window_start=core.iso(sw["start"]), window_basis=sw["basis"], tokens=sw["tokens"])
@@ -182,15 +194,125 @@ def build_record(now, mode, idle, idle_reason, decision, readings, scanner_windo
     return rec
 
 
+# ---------- stale or missing readings (ADR 0018) ----------
+def classify(parsed, age, stale_s, ran_refresh, advanced, refresh_error=None):
+    """Per-window state of one quota reading. parsed: core.parse_feed output (a window may be None) or None when the feed is unreadable;
+    age: seconds since the feed was last written; ran_refresh/advanced: the refresh call ran this poll / the feed's observation time moved
+    after it (the source is 'refreshed' only then). -> {five|week: dict(state, used, resets_at, age, source, reason)}.
+    States: fresh (used and resets_at set), stale (feed too old), missing (no such window in the feed), unavailable (feed unreadable)."""
+    out = {}
+    stale = age is not None and age > stale_s
+    notes = []
+    if refresh_error:
+        notes.append("refresh failed, " + refresh_error)
+    elif ran_refresh and not advanced:
+        notes.append("refresh did not update the feed")
+    for k in ("five", "week"):
+        w = None if parsed is None else parsed.get(k)
+        r = dict(state="unavailable", used=None, resets_at=None, age=age, source="unavailable", reason="; ".join(notes) or None)
+        if parsed is None:
+            pass
+        elif stale:
+            r.update(state="stale", source="stale", reason="; ".join([f"feed {age / 60:.0f} min old (limit {stale_s / 60:.0f})"] + notes))
+        elif w is None:
+            r.update(state="missing", source="missing", reason="; ".join(["no 5-hour window in the feed"] + notes))
+        else:
+            r.update(state="fresh", used=w[0], resets_at=w[1], source="refreshed" if ran_refresh and advanced else "feed", reason="; ".join(notes) or None)
+        out[k] = r
+    return out
+
+
+def remember_good(good, name, now, r, tokens, start, basis):
+    """Update `good` (the last good reading per window, kept in the data folder) from a fresh reading with at least 1 percent used and some
+    tokens; cap = tokens / used share. -> True when changed."""
+    if r["state"] != "fresh" or r["used"] < 1 or not tokens or tokens.get("total", 0) <= 0:
+        return False
+    good[name] = dict(time=core.iso(now), used=r["used"], resets_at=r["resets_at"], tokens=tokens["total"], window_start=core.iso(start),
+                      window_basis=basis, cap=round(tokens["total"] / (r["used"] / 100)))
+    return True
+
+
+def estimate_reset(length, last_reset, now, first_after):
+    """Reset time of the window that is running now, for a window whose feed reading is stale: the last known reset if still ahead; weekly
+    windows repeat every 7 days; 5-hour windows start at the first message after the previous reset (first_after(ts) -> epoch or None) and
+    last 5 hours. None when unknown (no usage since, or no last reset known)."""
+    if last_reset is None:
+        return None
+    if last_reset > now:
+        return last_reset
+    if length >= 7 * 86400:
+        return last_reset + (int((now - last_reset) // length) + 1) * length
+    cursor = last_reset
+    for _ in range(400):
+        s = first_after(cursor)
+        if s is None or s > now:
+            return None
+        if s + length > now:
+            return s + length
+        cursor = s + length
+    return None
+
+
+def estimate(now, r, tokens, good_w, length, first_after):
+    """Estimate for a window without a fresh reading: window tokens / cap, cap = tokens / used share at the last good reading.
+    -> dict: estimated True with est_used, est_resets_at, est_basis; or estimated False with est_note (why none: no cap yet, no token count)."""
+    if r["state"] == "fresh":
+        return dict(estimated=False)
+    if not good_w or not good_w.get("cap"):
+        return dict(estimated=False, est_note="no cap known yet (no good reading with tokens and at least 1 percent used)")
+    if not tokens:
+        return dict(estimated=False, est_note="no token count, so no estimate")
+    cap = good_w["cap"]
+    used = min(100.0, tokens["total"] / cap * 100)
+    try:
+        reset = estimate_reset(length, good_w.get("resets_at"), now, first_after)
+    except Exception:  # an estimate of the reset must never break the poll
+        reset = None
+    at = core.parse_time(good_w["time"])
+    basis = dict(formula="rolling-window tokens / cap; cap = tokens / used share at the last good reading", window_tokens=tokens["total"], window_basis="rolling",
+                 cap_tokens=cap, cap_from=good_w["time"], cap_age_s=round(max(now - at, 0)), cap_used_percentage=good_w["used"])
+    return dict(estimated=True, est_used=used, est_resets_at=reset, est_basis=basis)
+
+
+def effective(r):
+    """The (used, resets_at) the triggers and the stop threshold act on: the measured reading when fresh, else the estimate, else None
+    (unknown: nothing fires, nothing new starts). resets_at may be None for an estimate (no window known to be running)."""
+    if r["state"] == "fresh":
+        return r["used"], r["resets_at"]
+    if r.get("estimated"):
+        return r["est_used"], r.get("est_resets_at")
+    return None
+
+
+def quota_notes(readings):
+    """Sentences for the poll log and the decision text: which windows are estimated or unknown and why."""
+    out = []
+    for k, label in (("five", "5-hour"), ("week", "weekly")):
+        r = readings[k]
+        if r["state"] == "fresh":
+            continue
+        if r.get("estimated"):
+            out.append(f"{label} window ESTIMATED {r['est_used']:.0f}% (feed {r['state']}: {r.get('reason') or 'no reading'}; cap {r['est_basis']['cap_tokens']} tokens from {r['est_basis']['cap_from']})")
+        else:
+            out.append(f"{label} window UNKNOWN ({r['state']}: {r.get('reason') or 'no reading'}; {r.get('est_note', 'no estimate')}): conservative, "
+                       f"no {label} trigger fires and no new worker starts")
+    return out
+
+
 def usage_report(now, rec):
-    """The budget page's usage.json (docs/contracts/budget-panel.md): tokens_used per window plus compatible extra fields."""
+    """The budget page's usage.json (docs/contracts/budget-panel.md): tokens_used per window plus compatible extra fields. A window whose
+    percentage is an estimate also carries `estimated: true`, `used_percentage` (the estimate), `estimate_basis` and `tokens_cap_estimate`."""
     out = dict(schema=1, generated_at=core.iso(now), windows={})
     for name, w in rec["windows"].items():
         t = w.get("tokens")
         if t:
-            out["windows"][name] = dict(tokens_used=t["total"], tokens_input=t["input"], tokens_output=t["output"], tokens_cache_creation=t["cache_creation"],
-                                        tokens_cache_read=t["cache_read"], messages=t["messages"], tokens_own=t["own_total"],
-                                        window_start=w["window_start"], window_basis=w["window_basis"])
+            d = dict(tokens_used=t["total"], tokens_input=t["input"], tokens_output=t["output"], tokens_cache_creation=t["cache_creation"],
+                     tokens_cache_read=t["cache_read"], messages=t["messages"], tokens_own=t["own_total"],
+                     window_start=w["window_start"], window_basis=w["window_basis"])
+            if w.get("estimated"):
+                d.update(estimated=True, used_percentage=w["estimated_percentage"], estimate_basis=w["estimate_basis"],
+                         tokens_cap_estimate=w["estimate_basis"]["cap_tokens"])
+            out["windows"][name] = d
     return out
 
 
@@ -204,15 +326,17 @@ def token_text(rec):
 
 
 def reading_text(rec):
-    """Poll line part for the source and age of each reading: five=feed/3min (refreshed = by the minimal call just now)."""
+    """Poll line part for the source and age of each reading: five=feed/3min (refreshed = the feed moved after the refresh call),
+    stale/missing windows say so, and an estimate is marked: five=stale/62min est. 41%."""
     parts = []
     for name, short in (("five_hour", "five"), ("seven_day", "week")):
         w = rec["windows"][name]
-        if w["used_percentage"] is None:
+        age = "" if w["reading_age_s"] is None else f"/{w['reading_age_s'] / 60:.0f}min"
+        if w["source"] == "unavailable":
             parts.append(f"{short}=unavailable ({w.get('reason', 'no reading')})")
         else:
-            age = "" if w["reading_age_s"] is None else f"/{w['reading_age_s'] / 60:.0f}min"
-            parts.append(f"{short}={w['source']}{age}")
+            est = f" est. {w['estimated_percentage']:.0f}%" if w.get("estimated") else ""
+            parts.append(f"{short}={w['source']}{age}{est}")
     return " ".join(parts)
 
 

@@ -20,3 +20,4 @@ Short records of why the cockpit is the way it is. One decision per file, one sc
 | [0014](0014-boot-filling-job.md) | The boot-filling job releases ranked tasks to use quota that would expire (idle only, 30-minute poll, fixed payloads, limits, full log) | accepted |
 | [0015](0015-boot-filling-implementation-choices.md) | Boot-filling job: implementation choices beyond ADR 0014 (proposed) | proposed |
 | [0017](0017-boot-filling-quota-history.md) | Boot-filling job: quota history with token counts, one record per poll (proposed) | proposed |
+| [0018](0018-boot-filling-stale-quota-readings.md) | Boot-filling job: stale or missing quota readings are unknown or estimated, never invented (amends 0017) | proposed |

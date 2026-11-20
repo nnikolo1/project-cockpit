@@ -484,12 +484,13 @@ def test_parse_feed_accepts_the_wrapped_status_line_shape():
     assert B.parse_feed(wrapped) == B.parse_feed(bare) == {"five": (26.0, 1795185600.0), "week": (20.0, 1795453200.0)}
 
 
-def test_parse_feed_without_an_active_five_hour_window():
+def test_parse_feed_without_an_active_five_hour_window_is_unknown_not_synthetic():
     feed = {"rate_limits": {"seven_day": {"used_percentage": 21, "resets_at": 1795453200}}}
     q = B.parse_feed(feed, now=1000.0)
-    assert q["five"] == (0.0, 1000.0 + 5 * 3600) and q["week"] == (21.0, 1795453200.0)
-    # a feed with neither window is still a failure
+    assert q["five"] is None and q["week"] == (21.0, 1795453200.0)  # ADR 0018: an explicit unknown, never an invented fresh window
+    # a feed with neither window, or without the weekly one, is still a failure
     import pytest
     with pytest.raises(ValueError):
         B.parse_feed({"rate_limits": {}}, now=1000.0)
-
+    with pytest.raises(ValueError):
+        B.parse_feed({"rate_limits": {"five_hour": {"used_percentage": 1, "resets_at": 5}}})

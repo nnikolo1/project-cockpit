@@ -19,6 +19,7 @@
   },
   "notify_cmd": ["osascript", "-e", "display notification \"{message}\" with title \"{title}\""],
   "poll_minutes": 10,
+  "feed_stale_minutes": null,
   "idle_minutes": 10,
   "process_check": true,
   "process_names": ["claude"],

@@ -30,6 +30,7 @@ The files are global (one quota per account, not per project). Write each atomic
 - `tokens_cap_estimate` is optional. The provider publishes percentages, not token limits, so **every cap shown is an estimate** and is labelled so. Without a reported cap the page derives one as `tokens_used / used share` when the quota share is at least 1 percent, and says "from used share". Tokens left = cap minus used (also an estimate).
 - Age: `generated_at` (file modification time when absent). Older than 24 hours: stale warning.
 - Extension (compatible, [ADR 0017](../adr/0017-boot-filling-quota-history.md)): a window may also carry `tokens_input`, `tokens_output`, `tokens_cache_creation`, `tokens_cache_read`, `messages`, `tokens_own` (tokens of the job's own calls), `window_start` (ISO 8601) and `window_basis` (`resets_at` or `rolling`). `tokens_used` is then the sum of the four kinds. Readers of version 1 ignore the extra fields; the boot-filling job rewrites the file atomically at every poll.
+- Extension (compatible, [ADR 0018](../adr/0018-boot-filling-stale-quota-readings.md)): while the quota feed is stale a window may carry `estimated: true`, `used_percentage` (the ESTIMATE: window tokens / cap), `estimate_basis` (formula, window tokens, cap, when and from what share the cap was taken, its age) and `tokens_cap_estimate` (that cap). A window with `estimated: true` is never a measurement; show it labelled as an estimate. `window_basis` is `rolling` then.
 
 ## `decisions.jsonl` (JSON lines, one object per line, append-only)
 Every line has `kind` (`"release"` or `"poll"`) and `time` (ISO 8601 UTC). A line that is not JSON, has another kind or no readable `time` is skipped and counted ("n unreadable lines skipped"). The page shows the newest 50 of each kind, newest first. Free text is cut to 300 characters; keep it short and free of personal data.
@@ -51,6 +52,7 @@ Every line has `kind` (`"release"` or `"poll"`) and `time` (ISO 8601 UTC). A lin
  "decision": "release 20"}
 ```
 - `idle`: boolean (anything else shows "?"). `five_hour_used`, `weekly_used`: percent as read at poll time (numbers). `*_resets_at`: text, ISO 8601 preferred. `triggers`: the verdict of every trigger evaluated (`verdict` `fired` is highlighted). `decision`: the outcome in words, for example `release 20` or `skip: not idle`.
+- Extension ([ADR 0018](../adr/0018-boot-filling-stale-quota-readings.md)): when a window has no fresh reading the job leaves out its `*_used` and `*_resets_at` (shown as missing) and, if it can estimate, writes the estimated share as `five_hour_est_used` or `weekly_est_used` (with `*_resets_at` when an estimated reset is known). Readers of version 1 ignore these fields.
 
 **Authority line** (extension, added with [ADR 0016](../adr/0016-boot-filling-authority-judgement.md); one per task the job did not release because it needs an owner decision or approval, or released flagged):
 ```

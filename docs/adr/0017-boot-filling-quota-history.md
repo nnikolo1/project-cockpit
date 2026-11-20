@@ -3,6 +3,7 @@
 Status: proposed (builder); the owner confirms or changes
 Date: 2026-11-20
 Modules: internal/bootfilling
+Amended by: [0018](0018-boot-filling-stale-quota-readings.md) (source `refreshed` only when the feed moved; stale and missing readings; estimates)
 
 ## Context
 The owner wants the job to record the quota utilisation at the moment of firing, including token counts (2026-11-20). The status-line feed is overwritten each time and has no history; the poll log showed `n/a` whenever a poll skipped before the quota step; the provider publishes percentages, not token limits.

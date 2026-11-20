@@ -4,7 +4,6 @@ import datetime as dt
 import json
 import pathlib
 import re
-import time
 
 DEFAULTS = dict(
     mode="dry-run",  # "dry-run" only logs what would be released; the owner changes it to "real"
@@ -27,6 +26,7 @@ DEFAULTS = dict(
     quota_history_days=400,  # rows older than this are pruned, at most once a day
     usage_report=None,  # path of the budget page's usage.json; null = <budget_dir>/usage.json, "" = do not write it
     workers=2,  # how many workers may run at the same time (configuration key `workers`; 0 starts none)
+    feed_stale_minutes=None,  # ADR 0018: a quota feed older than this is stale (null = 3 x poll_minutes); stale windows are estimated, never shown as measured
     worker_stop_left=5,  # stop starting workers when either window has this percent or less left
     summary_hour=20,  # local hour after which the daily summary is written
     tie_judgement=True,
@@ -85,16 +85,16 @@ def parse_time(v):
 
 
 def parse_feed(obj, now=None):
-    """{five_hour, seven_day: {used_percentage, resets_at}} -> {'five': (used, resets_at), 'week': (used, resets_at)}.
-    Raises ValueError on a missing or out-of-range field, so a broken feed is a logged failure, never a guess."""
+    """{five_hour, seven_day: {used_percentage, resets_at}} -> {'five': (used, resets_at) or None, 'week': (used, resets_at)}.
+    A missing 5-hour window (the status line omits it after a reset until the next interactive use) is None = unknown (ADR 0018): never a
+    synthetic window. Raises ValueError on any other missing or out-of-range field, so a broken feed is a logged failure, never a guess.
+    `now` is accepted for compatibility and unused."""
     if isinstance(obj, dict) and isinstance(obj.get("rate_limits"), dict):
         obj = obj["rate_limits"]  # the status line writes {observed_at, rate_limits: {five_hour, seven_day}}; a bare object is accepted too
     out = {}
     for name, key in (("five", "five_hour"), ("week", "seven_day")):
         if key == "five_hour" and isinstance(obj, dict) and obj.get(key) in (None, {}) and isinstance(obj.get("seven_day"), dict):
-            # No active 5-hour window (the status line omits it after a reset until the next use): a fresh window is ahead,
-            # nothing used, ending 5 hours after its first use, so it is at best 5 hours from its reset and no 5-hour trigger fires.
-            out[name] = (0.0, (time.time() if now is None else float(now)) + 5 * 3600)
+            out[name] = None
             continue
         try:
             w = obj[key]
@@ -105,6 +105,20 @@ def parse_feed(obj, now=None):
             raise ValueError(f"quota feed: {key} used_percentage {used} out of range")
         out[name] = (used, reset)
     return out
+
+
+def feed_observed_at(obj):
+    """The status line's own `observed_at` stamp (epoch seconds) or None."""
+    try:
+        return parse_time(obj["observed_at"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def feed_stale_s(cfg):
+    """Feed age (seconds) above which a reading counts as stale: `feed_stale_minutes`, default 3 x poll_minutes."""
+    m = cfg.get("feed_stale_minutes")
+    return (stale_minutes(cfg.get("poll_minutes", 10)) if m is None else float(m)) * 60
 
 
 def window_key(reset):
@@ -195,15 +209,21 @@ def kill_switch(flag_exists, tracking_labels, pause_label="pause"):
 # ---------- triggers ----------
 def evaluate_triggers(quota, now, cfg, fired):
     """-> list of dict(name, holds, verdict, payload, key). `fired` maps trigger name -> window key it last fired in.
-    Verdicts: fire, below_threshold, too_early, already_fired. A window is the quota's resets_at."""
+    Verdicts: fire, below_threshold, too_early, already_fired, unknown. A window is the quota's resets_at. A window that is None or has no
+    reset time (feed stale and no cap known, ADR 0018) gives 'unknown': it never fires."""
     f5, wk = cfg["five_hour"], cfg["weekly"]
     out = []
-    used, reset = quota["five"]
-    left, hours = 100 - used, (reset - now) / 3600
+    w = quota["five"]
     for name, min_left, payload in (("five_low", f5["low_left"], f5["low_payload"]), ("five_high", f5["high_left"], f5["high_payload"])):
-        out.append(_trigger(name, left, min_left, hours, f5["max_hours_to_reset"], payload, window_key(reset), fired, strict_hours=True))
-    used, reset = quota["week"]
-    out.append(_trigger("weekly", 100 - used, wk["min_left"], (reset - now) / 3600, wk["max_hours_to_reset"], wk["payload"], window_key(reset), fired, strict_hours=False))
+        if w is None or w[1] is None:
+            out.append(dict(name=name, verdict="unknown", payload=payload, key="", holds=False))
+        else:
+            out.append(_trigger(name, 100 - w[0], min_left, (w[1] - now) / 3600, f5["max_hours_to_reset"], payload, window_key(w[1]), fired, strict_hours=True))
+    w = quota["week"]
+    if w is None or w[1] is None:
+        out.append(dict(name="weekly", verdict="unknown", payload=wk["payload"], key="", holds=False))
+    else:
+        out.append(_trigger("weekly", 100 - w[0], wk["min_left"], (w[1] - now) / 3600, wk["max_hours_to_reset"], wk["payload"], window_key(w[1]), fired, strict_hours=False))
     return out
 
 
@@ -615,13 +635,18 @@ def counts_per_trigger(rows):
     return out
 
 
-def poll_line(now, idle, idle_reason, quota, triggers, decision_text, sources=None, tokens=None):
-    """The one-line poll log entry: idle verdict and reason, both quota readings, each trigger's verdict, the decision."""
+def poll_line(now, idle, idle_reason, quota, triggers, decision_text, sources=None, tokens=None, estimated=()):
+    """The one-line poll log entry: idle verdict and reason, both quota readings (an estimate is marked 'est.'), each trigger's verdict, the decision."""
     def q(name):
         if not quota:
             return f"{name}=n/a"
-        used, reset = quota[name]
-        return f"{name}_used={used:.0f}% {name}_reset_in={(reset - now) / 3600:.1f}h"
+        w = quota[name]
+        if w is None:
+            return f"{name}=unknown"
+        used, reset = w
+        est = name in estimated
+        out = f"{name}_used={'~' if est else ''}{used:.0f}%{' est.' if est else ''}"
+        return out + ("" if reset is None else f" {name}_reset_in={(reset - now) / 3600:.1f}h")
     trig = " ".join(f"{t['name']}={t['verdict']}" for t in triggers) or "triggers=not evaluated"
     extra = (f" [{sources}]" if sources else "") + (f" | {tokens}" if tokens else "")
     return f"idle={'yes' if idle else 'no'} ({idle_reason}) | {q('five')} {q('week')}{extra} | {trig} | decision: {decision_text}"
@@ -638,6 +663,8 @@ def summary_text(rows, day, mode, needs=()):
 
 def worker_slots(running, max_workers, quota, stop_left):
     """How many more workers may start: 0 when either window has stop_left percent or less left."""
+    if quota["five"] is None or quota["week"] is None:
+        return 0  # a window with no reading and no estimate (ADR 0018): conservative, nothing new starts
     if min(100 - quota["five"][0], 100 - quota["week"][0]) <= stop_left:
         return 0
     try:
@@ -801,11 +828,16 @@ def contract_release(rec, failed=False):
                 dry_run=rec["mode"] == DRY)
 
 
-def contract_poll(now, idle, idle_reason, quota, triggers, decision):
-    """The contract's poll line. Unreadable quota -> the used/resets fields are left out (the page shows them as missing)."""
+def contract_poll(now, idle, idle_reason, quota, triggers, decision, estimated=()):
+    """The contract's poll line. Unreadable or unknown quota -> the used/resets fields are left out (the page shows them as missing).
+    An estimated window is NOT written as `*_used` (that field means measured): it goes to the extension field `*_est_used`."""
     d = dict(kind="poll", time=iso(now), idle=bool(idle), idle_reason=idle_reason,
              triggers=[dict(name=t["name"], verdict="fired" if t["verdict"] == "fire" else t["verdict"]) for t in triggers], decision=decision)
-    if quota:
-        d.update(five_hour_used=quota["five"][0], five_hour_resets_at=iso(quota["five"][1]),
-                 weekly_used=quota["week"][0], weekly_resets_at=iso(quota["week"][1]))
+    for name, key in (("five", "five_hour"), ("week", "weekly")):
+        w = quota.get(name) if quota else None
+        if w is None:
+            continue
+        d[f"{key}_est_used" if name in estimated else f"{key}_used"] = w[0]
+        if w[1] is not None:
+            d[f"{key}_resets_at"] = iso(w[1])
     return d

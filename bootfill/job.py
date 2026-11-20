@@ -29,7 +29,9 @@ class Ctx:
         self.authority_judge = authority_judge  # (task, signals) -> (verdict, reason); None = no judge: 'maybe' tasks are skipped conservatively
         self.last_authority = dict(needs=[], flagged=0, judged=0)
         self.scanner = scanner  # quota_history.TokenScanner or None (then the history records say tokens were not computed)
-        self.qinfo = None  # how this poll's quota was read: dict(source='refreshed', age) or dict(refresh_error)
+        self.qinfo = None  # how this poll's quota was read: dict(source='refreshed', age, advanced) or dict(refresh_error)
+        self.raw_quota = None  # the parsed feed of this poll after the refresh call (windows may be None), None when unreadable
+        self.assessed = None  # this poll's quota assessment (see assess), computed once per poll
         self.procs = procs  # process lister for the other-agent check; None = not used
         self.excl = excl or {}  # project name -> parsed exclusions
         self.mode = cfg["mode"]
@@ -43,14 +45,15 @@ def _io():
     return adapters
 
 
-def _readings(ctx, quota):
-    """Readings of both windows with source and age. Refreshed (the minimal call ran this poll) or the feed read as is, which needs no
-    refresh call: the status line keeps it fresh while sessions run. -> (readings, parsed quota or None)."""
-    info = ctx.qinfo or {}
+def _readings(ctx):
+    """Classified readings of both windows (fresh, stale, missing, unavailable; source and age). Uses the feed as read after the refresh call
+    when it ran this poll, else the feed as it is (the status line keeps it fresh while sessions run). -> (readings, parsed or None)."""
+    info, quota = ctx.qinfo or {}, ctx.raw_quota
+    stale_s = core.feed_stale_s(ctx.cfg)
     if quota and info.get("source") == "refreshed":
-        src, age, parsed = "refreshed", info.get("age"), quota
+        age, parsed, ran, adv = info.get("age"), quota, True, info.get("advanced", True)
     else:
-        src, age, parsed = "feed", None, None
+        age, parsed, ran, adv = None, None, False, None
         peek = getattr(ctx.quota, "peek", None)
         try:
             if peek is None:
@@ -59,41 +62,76 @@ def _readings(ctx, quota):
         except Exception as ex:
             reason = f"{type(ex).__name__}: {str(ex)[:80]}"
             log.warning("quota feed not readable: %s", reason)
-            return {k: dict(source="unavailable", reason=reason) for k in ("five", "week")}, None
-    note = ("refresh failed, " + info["refresh_error"]) if info.get("refresh_error") else None
-    return {k: dict(used=parsed[k][0], resets_at=parsed[k][1], age=age, source=src, reason=note) for k in ("five", "week")}, parsed
+            return {k: dict(state="unavailable", used=None, resets_at=None, age=None, source="unavailable", reason=reason) for k in ("five", "week")}, None
+    return QH.classify(parsed, age, stale_s, ran, adv, info.get("refresh_error")), parsed
 
 
-def snapshot(ctx, now, idle, why, quota, text):
+def assess(ctx, now):
+    """Everything the poll knows about the quota, computed once per poll (cached in ctx.assessed): the classified readings, the token counts of
+    the windows (the feed's own window when fresh, else the rolling last 5 hours / 7 days: they come from the transcripts and do not depend on
+    the feed), the estimates for windows without a fresh reading, and `eff`, the quota the triggers and the stop threshold act on
+    ({five, week}: (used, resets_at) or None = unknown; the whole thing None when the feed is unreadable). ADR 0018. Never raises."""
+    if ctx.assessed is not None:
+        return ctx.assessed
+    A = _io()
+    readings, parsed = _readings(ctx)
+    wins = {}
+    if ctx.scanner is None:
+        wins["error"] = "no transcript scanner"
+    else:
+        try:
+            ctx.scanner.scan(now - QH.KEEP_DAYS_CACHE * 86400)
+            for name, short, length in QH.WINDOWS:
+                r = readings[short]
+                start, basis = QH.window_bounds(r["resets_at"] if r["state"] == "fresh" else None, length, now)
+                wins[name] = dict(start=start, basis=basis, tokens=ctx.scanner.window(start, now))
+        except Exception as ex:
+            wins = dict(error=f"scan failed: {type(ex).__name__}")
+            log.error("token scan failed: %s: %s", type(ex).__name__, str(ex)[:150])
+    gpath = ctx.dir / "last-good-quota.json"
+    try:
+        good = A.read_json(gpath, {})
+    except ValueError:
+        good = {}
+    changed = False
+    first_after = getattr(ctx.scanner, "first_event_at_or_after", lambda ts: None)
+    for name, short, length in QH.WINDOWS:
+        r, w = readings[short], wins.get(name)
+        tokens = w["tokens"] if w else None
+        r.update(QH.estimate(now, r, tokens, good.get(name), length, first_after))
+        if w:
+            changed |= QH.remember_good(good, name, now, r, tokens, w["start"], w["basis"])
+    if changed:
+        try:
+            A.write_json(gpath, good)
+        except OSError as ex:
+            log.error("last good quota not written: %s: %s", type(ex).__name__, ex)
+    eff = {k: QH.effective(r) for k, r in readings.items()}
+    if all(r["state"] == "unavailable" for r in readings.values()):
+        eff = None
+    est = {k for k, r in readings.items() if r.get("estimated")}
+    ctx.assessed = dict(readings=readings, parsed=parsed, wins=wins, eff=eff, est=est, notes=QH.quota_notes(readings) if eff is not None else [])
+    return ctx.assessed
+
+
+def snapshot(ctx, now, idle, why, text):
     """The quota history record of this poll (also for skipped polls) plus usage.json. Never raises: a failure is logged and the poll goes on.
-    -> (record or None, parsed quota or None)."""
+    -> record or None."""
     A = _io()
     try:
-        readings, parsed = _readings(ctx, quota)
-        wins = {}
-        if ctx.scanner is None:
-            wins["error"] = "no transcript scanner"
-        else:
-            try:
-                ctx.scanner.scan(now - QH.KEEP_DAYS_CACHE * 86400)
-                for name, short, length in QH.WINDOWS:
-                    start, basis = QH.window_bounds(parsed[short][1] if parsed else None, length, now)
-                    wins[name] = dict(start=start, basis=basis, tokens=ctx.scanner.window(start, now))
-            except Exception as ex:
-                wins = dict(error=f"scan failed: {type(ex).__name__}")
-                log.error("token scan failed: %s: %s", type(ex).__name__, str(ex)[:150])
-        rec = QH.build_record(now, ctx.mode, idle, why, text, readings, wins)
+        a = assess(ctx, now)
+        rec = QH.build_record(now, ctx.mode, idle, why, text, a["readings"], a["wins"])
         hist = ctx.cfg.get("quota_history")
         if hist:
             hp = ctx.dir / hist
             A.append_jsonl(hp, rec)
             _prune_history(ctx, hp, now)
-        if wins.get("five_hour"):
+        if a["wins"].get("five_hour"):
             _write_usage(ctx, now, rec)
-        return rec, parsed
+        return rec
     except Exception as ex:
         log.error("quota history not written: %s: %s", type(ex).__name__, str(ex)[:200])
-        return None, None
+        return None
 
 
 def _write_usage(ctx, now, rec):
@@ -122,14 +160,15 @@ def _prune_history(ctx, hp, now):
         log.error("quota history prune failed: %s: %s", type(ex).__name__, ex)
 
 
-def _skip(ctx, now, idle, why, quota, triggers, text):
+def _skip(ctx, now, idle, why, triggers, text):
     """Write the poll: the quota history record, one line to the poll log and one contract line to the budget page's decisions.jsonl."""
-    rec, parsed = snapshot(ctx, now, idle, why, quota, text)
-    shown = quota or parsed
-    plog.info(core.poll_line(now, idle, why, shown, triggers, text, QH.reading_text(rec) if rec else None, QH.token_text(rec) if rec else None))
+    rec = snapshot(ctx, now, idle, why, text)
+    a = ctx.assessed
+    shown, est = (a["eff"], a["est"]) if a else (None, ())
+    plog.info(core.poll_line(now, idle, why, shown, triggers, text, QH.reading_text(rec) if rec else None, QH.token_text(rec) if rec else None, est))
     try:
         ctx.contract.parent.mkdir(parents=True, exist_ok=True)
-        _io().append_jsonl(ctx.contract, core.contract_poll(now, bool(idle), why, quota, triggers, text))
+        _io().append_jsonl(ctx.contract, core.contract_poll(now, bool(idle), why, shown, triggers, text, est))
     except OSError as ex:
         log.error("budget decision log not written: %s: %s", type(ex).__name__, ex)
     return text
@@ -140,7 +179,7 @@ def poll(ctx, now=None):
     A = _io()
     now = time.time() if now is None else now
     cfg, state = ctx.cfg, A.read_json(ctx.state_path, {})
-    ctx.qinfo = None
+    ctx.qinfo, ctx.raw_quota, ctx.assessed = None, None, None
     core.roll_day(state, dt.date.fromtimestamp(now).isoformat())
     state.setdefault("dry_run_since", now) if ctx.mode == core.DRY else None
     state.setdefault("queue", []), state.setdefault("running", [])
@@ -150,18 +189,19 @@ def poll(ctx, now=None):
         stop = core.kill_switch((ctx.dir / cfg.get("kill_flag", "PAUSE")).exists(), labels, cfg["pause_label"])
     except Exception as ex:
         log.error("kill-switch check failed: %s: %s", type(ex).__name__, str(ex)[:200])
-        return _skip(ctx, now, None, "unknown", None, [], f"skip: cannot read the pause label ({type(ex).__name__}); doing nothing")
+        return _skip(ctx, now, None, "unknown", [], f"skip: cannot read the pause label ({type(ex).__name__}); doing nothing")
     if stop:
         log.warning("%s", stop)
-        return _skip(ctx, now, None, "not checked", None, [], f"skip: {stop}")
+        return _skip(ctx, now, None, "not checked", [], f"skip: {stop}")
     quota, qerr = None, None
 
     def get_quota():
         nonlocal quota, qerr
         if quota is None and qerr is None:
             try:
-                quota = ctx.quota.read()
-                ctx.qinfo = dict(source="refreshed", age=getattr(ctx.quota, "last_age", 0.0))
+                ctx.raw_quota = ctx.quota.read()
+                ctx.qinfo = dict(source="refreshed", age=getattr(ctx.quota, "last_age", 0.0), advanced=getattr(ctx.quota, "advanced", True))
+                quota = assess(ctx, now)["eff"]
             except Exception as ex:
                 qerr = f"{type(ex).__name__}: {str(ex)[:150]}"
                 ctx.qinfo = dict(refresh_error=qerr[:80])
@@ -171,19 +211,19 @@ def poll(ctx, now=None):
     supervise(ctx, state, now, get_quota)
     idle, why = check_idle(ctx, state, now)
     if not idle:
-        text = _skip(ctx, now, idle, why, quota, [], "skip: not idle")
+        text = _skip(ctx, now, idle, why, [], "skip: not idle")
         A.write_json(ctx.state_path, state)
         return text
     q = get_quota()
     if q is None:
-        text = _skip(ctx, now, idle, why, None, [], f"skip: quota feed unreadable ({qerr})")
+        text = _skip(ctx, now, idle, why, [], f"skip: quota feed unreadable ({qerr})")
         A.write_json(ctx.state_path, state)
         return text
     triggers = core.evaluate_triggers(q, now, cfg, state.get("fired", {}))
     dec = core.decide(triggers, cfg, state["day_count"])
     if not dec["n"]:
-        text = "skip: " + "; ".join(dec["reasons"] + [f"{t['name']} {t['verdict']}" for t in triggers if t["verdict"] != "fire"][:3])
-        _skip(ctx, now, idle, why, q, triggers, text)
+        text = "skip: " + "; ".join(dec["reasons"] + [f"{t['name']} {t['verdict']}" for t in triggers if t["verdict"] != "fire"][:3]) + _notes(ctx)
+        _skip(ctx, now, idle, why, triggers, text)
         daily_summary(ctx, state, now)
         A.write_json(ctx.state_path, state)
         return text
@@ -195,13 +235,19 @@ def poll(ctx, now=None):
     else:
         core.mark_fired(state, dec, triggers)
         state["day_count"] += len(released)
-    text += auth
-    _skip(ctx, now, idle, why, q, triggers, text)
+    text += auth + _notes(ctx)
+    _skip(ctx, now, idle, why, triggers, text)
     if q:
         start_workers(ctx, state, now, q)
     daily_summary(ctx, state, now)
     A.write_json(ctx.state_path, state)
     return text
+
+
+def _notes(ctx):
+    """Decision-text addition: which quota windows are estimated or unknown (ADR 0018); empty when the feed is fresh."""
+    n = ctx.assessed["notes"] if ctx.assessed else []
+    return " | quota: " + "; ".join(n) if n else ""
 
 
 def check_idle(ctx, state, now):
@@ -330,7 +376,8 @@ def start_workers(ctx, state, now, q):
         return
     free = core.worker_slots(len(state["running"]), ctx.cfg["workers"], q, ctx.cfg["worker_stop_left"])
     if not free:
-        log.info("no worker started: %d running, stop threshold %s%%", len(state["running"]), ctx.cfg["worker_stop_left"])
+        why = "a window is unknown (feed stale, no cap yet)" if q["five"] is None or q["week"] is None else f"stop threshold {ctx.cfg['worker_stop_left']}%"
+        log.info("no worker started: %d running, %s", len(state["running"]), why)
         return
     active = [w["entry"] for w in state["running"]]
     counted = set()  # skips are counted once per task and poll

@@ -72,17 +72,34 @@ class Quota:
     def __init__(self, feed_path, refresh_cmd, cwd=None):
         self.feed_path, self.refresh_cmd, self.cwd = feed_path, refresh_cmd, cwd  # cwd: the job's own headless folder, so its transcripts are recognisable
 
-    def peek(self):
-        """The feed as the status line left it (no refresh call): -> (parsed quota, age in seconds from the file's modification time)."""
+    def _load(self):
+        """-> (parsed feed, observed epoch, age in seconds). The observation time is the status line's own `observed_at` when present,
+        else the file's modification time; the age is measured from it."""
         p = pathlib.Path(self.feed_path).expanduser()
-        age = max(time.time() - p.stat().st_mtime, 0.0)
-        return core.parse_feed(json.loads(p.read_text())), age
+        raw = json.loads(p.read_text())
+        obs = core.feed_observed_at(raw)
+        if obs is None:
+            obs = p.stat().st_mtime
+        return core.parse_feed(raw), obs, max(time.time() - obs, 0.0)
+
+    def peek(self):
+        """The feed as the status line left it (no refresh call): -> (parsed quota, age in seconds). A window may be None (missing)."""
+        parsed, _, age = self._load()
+        return parsed, age
 
     def read(self):
-        """One minimal headless call refreshes the status-line feed (it is stale while no session is open), then the feed is read."""
+        """One minimal headless call tries to refresh the status-line feed (it is stale while no interactive session runs), then the feed is
+        read. `self.advanced` says whether the feed's observation time really moved after the call: the headless call usually does NOT
+        update it, and the job must not claim a refresh that did not happen (ADR 0018)."""
+        before = None
+        try:
+            before = self._load()[1]
+        except (OSError, ValueError):
+            pass
         if self.refresh_cmd:
             run(self.refresh_cmd, timeout=120, cwd=self.cwd)
-        parsed, self.last_age = self.peek()
+        parsed, obs, self.last_age = self._load()
+        self.advanced = bool(self.refresh_cmd) and (before is None or obs > before)
         return parsed
 
 
