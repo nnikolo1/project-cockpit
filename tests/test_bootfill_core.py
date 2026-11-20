@@ -476,3 +476,10 @@ def test_workers_default_is_two_and_unusable_values_fall_back():
     q = quota(10)
     assert B.worker_slots(0, B.DEFAULTS["workers"], q, 5) == 2
     assert B.worker_slots(0, 0, q, 5) == 0 and B.worker_slots(0, "x", q, 5) == 2 and B.worker_slots(0, None, q, 5) == 2
+
+
+def test_parse_feed_accepts_the_wrapped_status_line_shape():
+    wrapped = {"observed_at": 1, "rate_limits": {"five_hour": {"used_percentage": 26, "resets_at": 1795185600}, "seven_day": {"used_percentage": 20, "resets_at": 1795453200}}}
+    bare = wrapped["rate_limits"]
+    assert B.parse_feed(wrapped) == B.parse_feed(bare) == {"five": (26.0, 1795185600.0), "week": (20.0, 1795453200.0)}
+

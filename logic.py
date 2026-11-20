@@ -822,6 +822,8 @@ def quota_view(text, mtime, now, stale_min=QUOTA_STALE_MIN):
     if d is None:
         return dict(status="missing" if text is None else "invalid", reason=why, age_s=None, stale=False, windows=[])
     age = _age_s(mtime, now)
+    if isinstance(d.get("rate_limits"), dict):
+        d = d["rate_limits"]  # the status line wraps the windows in rate_limits; a bare object is accepted too
     wins = []
     for key, label in QUOTA_WINDOWS:
         w = d.get(key)

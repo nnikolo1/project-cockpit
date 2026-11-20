@@ -86,6 +86,8 @@ def parse_time(v):
 def parse_feed(obj):
     """{five_hour, seven_day: {used_percentage, resets_at}} -> {'five': (used, resets_at), 'week': (used, resets_at)}.
     Raises ValueError on a missing or out-of-range field, so a broken feed is a logged failure, never a guess."""
+    if isinstance(obj, dict) and isinstance(obj.get("rate_limits"), dict):
+        obj = obj["rate_limits"]  # the status line writes {observed_at, rate_limits: {five_hour, seven_day}}; a bare object is accepted too
     out = {}
     for name, key in (("five", "five_hour"), ("week", "seven_day")):
         try:

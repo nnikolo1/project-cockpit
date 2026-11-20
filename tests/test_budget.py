@@ -120,3 +120,12 @@ def test_quota_stale_limit_is_a_parameter():
     assert not L.quota_view(txt("quota.json"), t, NOW)["stale"]
     assert L.quota_view(txt("quota.json"), t, NOW, stale_min=15)["stale"]
     assert L.budget_view(txt("quota.json"), t, None, None, None, NOW, stale_min=15)["quota"]["stale"]
+
+
+def test_quota_view_accepts_the_wrapped_status_line_shape():
+    import datetime as dt, json
+    now = dt.datetime(2026, 11, 20, 13, 0, tzinfo=dt.timezone.utc)
+    raw = json.dumps({"observed_at": 1, "rate_limits": {"five_hour": {"used_percentage": 26, "resets_at": 1795185600}, "seven_day": {"used_percentage": 20, "resets_at": 1795453200}}})
+    v = L.quota_view(raw, now, now)
+    assert v["status"] == "ok" and [w["key"] for w in v["windows"]] == ["five_hour", "seven_day"]
+
