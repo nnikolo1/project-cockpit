@@ -34,6 +34,7 @@
   "keep_awake_minutes": null,
   "workers": 2,
   "day_cap": 60,
+  "rerelease_guard_days": 30,
   "authority_mode": "skip",
   "authority_labels": ["needs-approval", "needs-owner", "needs-manager", "needs-pa", "owner-decision", "approval", "constitutional", "legal", "security", "policy"],
   "protected_paths": ["claude.md", "constitution.md", "*/schema.sql", "schema.sql", ".github/workflows/*", "docs/owner-defaults.md"],

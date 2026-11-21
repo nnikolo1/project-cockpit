@@ -22,6 +22,8 @@ DEFAULTS = dict(
     five_hour=dict(low_left=10, low_payload=5, high_left=50, high_payload=20, max_hours_to_reset=2),
     weekly=dict(min_left=20, max_hours_to_reset=24, payload=50),
     day_cap=60,
+    rerelease_guard_days=30,  # ADR 0019: a task the job already released (real mode) within this many days is never released again
+    max_attempts=1,  # kept for old configs; a worker is never started twice by a poll, a redo needs a `requeue` record (ADR 0019)
     quota_history="quota-history.jsonl",  # ADR 0017: one record per poll; relative = inside the data folder, null = off
     quota_history_days=400,  # rows older than this are pruned, at most once a day
     usage_report=None,  # path of the budget page's usage.json; null = <budget_dir>/usage.json, "" = do not write it
@@ -606,9 +608,106 @@ def release_record(now, project, row, trigger, mode, run):
                 state="would_release" if mode == DRY else "queued")
 
 
-def outcome_record(now, project, key, number, state, note=""):
-    """Later outcome of a released task: queued -> running -> finished | unfinished -> resumed (append-only)."""
-    return dict(type="outcome", time=iso(now), project=project, key=key, number=number, state=state, note=note[:200])
+def outcome_record(now, project, key, number, state, note="", pr=None):
+    """Later outcome of a released task (append-only; ADR 0019): queued -> running -> finished -> awaiting_acceptance (+ `pr`) | needs_you;
+    also start_failed (the worker could not be started) and skipped_already_worked."""
+    rec = dict(type="outcome", time=iso(now), project=project, key=key, number=number, state=state, note=note[:200])
+    if pr is not None:
+        rec["pr"] = pr
+    return rec
+
+
+# ---------- never twice (ADR 0019) ----------
+WORKER_STATES = ("running", "resumed", "finished", "unfinished", "awaiting_acceptance", "needs_you", "start_failed")
+WORKER_STARTED = ("running", "resumed")
+
+
+def parse_iso(s):
+    return dt.datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc).timestamp()
+
+
+def last_real_release(lines, project, number):
+    """ISO time of the latest REAL release of the issue in the decision log (dry-run `would_release` rows do not count), else None."""
+    ts = [r["time"] for r in lines if r.get("type") == "release" and r.get("project") == project and r.get("number") == number and r.get("mode") == REAL]
+    return max(ts) if ts else None
+
+
+def worked_at(lines, project, number):
+    """ISO time of the latest worker outcome of the issue (started, finished, failed to start ...), else None. No expiry."""
+    ts = [r["time"] for r in lines if r.get("type") == "outcome" and r.get("project") == project and r.get("number") == number and r.get("state") in WORKER_STATES]
+    return max(ts) if ts else None
+
+
+def requeue_record(now, project, number, by, reason):
+    """The explicit decision to work an already-worked task again. Only the Orchestrator or the Manager may write it (bootfill.requeue)."""
+    if by not in ("orchestrator", "manager"):
+        raise ValueError("by must be 'orchestrator' or 'manager'")
+    if not str(reason or "").strip():
+        raise ValueError("a requeue needs a reason")
+    return dict(type="requeue", time=iso(now), project=project, number=int(number), by=by, reason=str(reason)[:200])
+
+
+def pending_requeues(lines):
+    """-> [(project, number, record)] whose latest requeue record is newer than the issue's latest worker START (not yet acted on)."""
+    last, started = {}, {}
+    for r in lines:
+        k = (r.get("project"), r.get("number"))
+        if r.get("type") == "requeue":
+            last[k] = r
+        elif r.get("type") == "outcome" and r.get("state") in WORKER_STARTED:
+            started[k] = max(started.get(k, ""), r["time"])
+    return [(k[0], k[1], r) for k, r in last.items() if r["time"] > started.get(k, "")]
+
+
+def release_guard(project, task, lines, queue, running, now, days):
+    """-> None when the task may be released, else the plain reason it is skipped. Independent of the cockpit's stage and policy:
+    (a) its RAW labels carry released or cancelled; (b) the job's own history shows a real release within `days`; (c) it is queued or running."""
+    for lab in ("released", "cancelled"):
+        if lab in (task.get("labels") or []):
+            return f"already carries the {lab} label"
+    t = last_real_release(lines, project, task["number"])
+    if t and now - parse_iso(t) < days * 86400:
+        return f"already released at {t}"
+    if any(e["project"] == project and e["number"] == task["number"] for e in list(queue) + [w["entry"] for w in running]):
+        return "already queued or running"
+    return None
+
+
+def worker_candidates(queue, running, lines):
+    """Split the queue into (startable, dropped[(entry, reason)]): an entry is dropped when a worker already ran for it (no expiry) unless it carries
+    `requeue` (set only from a requeue record), when it is already running, or when it repeats an earlier entry."""
+    busy = {(w["entry"]["project"], w["entry"]["number"]) for w in running}
+    ok, drop, seen = [], [], set()
+    for e in queue:
+        k = (e["project"], e["number"])
+        if k in busy or k in seen:
+            drop.append((e, "already running or queued")); continue
+        seen.add(k)
+        t = worked_at(lines, *k)
+        if t and not e.get("requeue"):
+            drop.append((e, f"already worked at {t}; a redo needs a requeue record"))
+        else:
+            ok.append(e)
+    return ok, drop
+
+
+def worker_prompt(entry, project_cfg):
+    """The task prompt of a worker (ADR 0019). First action: mark the issue in progress by assigning it to the Manager login (what the cockpit reads
+    as stage `in progress`); then the work, a DRAFT pull request, and the standing limits. The job never does the assignment itself."""
+    return (f"FIRST ACTION, before reading or changing anything else: run `gh issue edit {entry['number']} -R {project_cfg['repo']} --add-assignee {project_cfg['manager']}` "
+            f"to mark issue {entry['number']} in progress. Then work on issue {entry['number']} of {project_cfg['repo']} (title: {entry['title']}). "
+            "Read it with gh, do the work on this branch, commit, push the branch and open a DRAFT pull request. Do not merge, do not remove any label or assignment, "
+            "do not set released, priority, due or cancelled labels, do not send, submit or delete anything outside this repository. Stop when the pull request is open.")
+
+
+def contract_worker(now, project, number, title, state, pr=None, note=""):
+    """Budget-contract extension line `worker` (ignored by older readers): in_progress | awaiting_acceptance (+ pr) | needs_you | start_failed."""
+    d = dict(kind="worker", time=iso(now), project=project, issue=number, title=title, state=state, reason=note[:300])
+    if state in ("needs_you", "start_failed"):
+        d["status"] = STATUS
+    if pr is not None:
+        d["pr"] = pr
+    return d
 
 
 def iso(epoch):

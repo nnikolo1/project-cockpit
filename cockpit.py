@@ -104,28 +104,76 @@ def run_gh(args):
     return r.stdout
 
 
-GQL = """query($o:String!,$r:String!,$after:String){repository(owner:$o,name:$r){issues(first:100,after:$after,orderBy:{field:CREATED_AT,direction:ASC}){
- pageInfo{hasNextPage endCursor} nodes{number databaseId title url body state stateReason createdAt closedAt author{login}
+PAGE = 20  # issues per GraphQL page. GitHub silently thins the nested timelineItems of a big page (ADR 0019): 100 issues -> 5 events each, 50 -> 7, 30 -> complete
+TL_BATCH = 10  # issues per on-demand timeline query
+TIMELINE = """timelineItems(last:100,itemTypes:[LABELED_EVENT,UNLABELED_EVENT,ASSIGNED_EVENT,CLOSED_EVENT]){nodes{__typename
+  ... on LabeledEvent{createdAt actor{login} label{name}} ... on UnlabeledEvent{createdAt actor{login} label{name}}
+  ... on AssignedEvent{createdAt actor{login} assignee{... on User{login}}} ... on ClosedEvent{createdAt actor{login}}}}"""
+GQL = """query($o:String!,$r:String!,$after:String,$n:Int!){repository(owner:$o,name:$r){issues(first:$n,after:$after,orderBy:{field:CREATED_AT,direction:ASC}){
+ pageInfo{hasNextPage endCursor} nodes{number databaseId title url body state stateReason createdAt updatedAt closedAt author{login}
  labels(first:50){nodes{name}} assignees(first:5){nodes{login}} parent{number} blockedBy(first:50){nodes{number}}
  comments(last:10){nodes{body createdAt author{login}}}
- timelineItems(last:100,itemTypes:[LABELED_EVENT,UNLABELED_EVENT,ASSIGNED_EVENT,CLOSED_EVENT]){nodes{__typename
-  ... on LabeledEvent{createdAt actor{login} label{name}} ... on UnlabeledEvent{createdAt actor{login} label{name}}
-  ... on AssignedEvent{createdAt actor{login} assignee{... on User{login}}} ... on ClosedEvent{createdAt actor{login}}}}}}}}"""
+ """ + TIMELINE + "}}}}"
 
 
 def fetch_issues(p):
-    """All issues of the repo in 100-issue GraphQL pages -> (raw issues, events). One call per 100 issues."""
+    """All issues of the repo in PAGE-issue GraphQL pages -> (raw issues, events). The events are then checked and, where a protected
+    label has no determinable event, completed per issue (repair_events)."""
     owner, name = p["repo"].split("/")
     issues, events, after = [], [], None
     while True:
-        args = ["api", "graphql", "-f", f"query={GQL}", "-f", f"o={owner}", "-f", f"r={name}"] + (["-f", f"after={after}"] if after else [])
+        args = ["api", "graphql", "-f", f"query={GQL}", "-f", f"o={owner}", "-f", f"r={name}", "-F", f"n={PAGE}"] + (["-f", f"after={after}"] if after else [])
         page = json.loads(run_gh(args))["data"]["repository"]["issues"]
         for n in page["nodes"]:
             issues.append(L.norm_issue(n))
             events += L.norm_events(n)
         if not page["pageInfo"]["hasNextPage"]:
-            return issues, events
+            return issues, repair_events(p, issues, events)
         after = page["pageInfo"]["endCursor"]
+
+
+def fetch_timelines(p, numbers):
+    """Label/assign/close events of the given issues, TL_BATCH issues per query (small enough that GitHub does not thin the timeline) -> {number: [events]}."""
+    owner, name = p["repo"].split("/")
+    out = {}
+    for k in range(0, len(numbers), TL_BATCH):
+        chunk = numbers[k:k + TL_BATCH]
+        body = " ".join(f"i{n}:issue(number:{n}){{number stateReason {TIMELINE}}}" for n in chunk)
+        data = json.loads(run_gh(["api", "graphql", "-f", f"query=query($o:String!,$r:String!){{repository(owner:$o,name:$r){{{body}}}}}", "-f", f"o={owner}", "-f", f"r={name}"]))["data"]["repository"]
+        for n in chunk:
+            if data.get(f"i{n}"):
+                out[n] = L.norm_events(data[f"i{n}"])
+    return out
+
+
+_TL = {}  # (repo, issue, updatedAt, protected labels) -> events fetched on demand; a changed issue has a new updatedAt, so it is fetched again
+
+
+def repair_events(p, issues, events, fetch=None, cache=None):
+    """GitHub silently returns a thinned timeline for large GraphQL pages (ADR 0019), so a protected label may have no event in `events`
+    although its actor is on record. For each issue whose protected label has no `labeled` event as its latest one, fetch that issue's own
+    timeline (bounded: only those issues, TL_BATCH per call, cached per issue and updatedAt). A label that STILL has no event stays without actor,
+    so policy() keeps flagging it. A failed fetch leaves the events as they are (conservative: flagged), never raises."""
+    cache = _TL if cache is None else cache
+    need = L.issues_needing_timeline(issues, events)
+    if not need:
+        return events
+    by = {i["number"]: i for i in issues}
+    key = lambda n: (p["repo"], n, by[n].get("updated_at"), tuple(sorted(l for l in by[n]["labels"] if L.is_protected(l))))
+    todo = [n for n in need if key(n) not in cache]
+    if todo:
+        try:
+            got = (fetch or (lambda nums: fetch_timelines(p, nums)))(todo)
+        except Exception as ex:
+            log.warning("timeline repair of %d issue(s) failed: %s: %s; their protected labels stay unverified", len(todo), type(ex).__name__, str(ex)[:150])
+            got = {}
+        if len(cache) > 5000:
+            cache.clear()
+        for n, evs in got.items():
+            cache[key(n)] = evs
+        log.info("timeline repair: %d of %d issue(s) with a protected label lacking an event fetched (%d got events)", len(todo), len(need), len(got))
+    fixed = {n: cache[key(n)] for n in need if key(n) in cache}
+    return [e for e in events if e["number"] not in fixed] + [e for evs in fixed.values() for e in evs]
 
 
 def fetch_project(p):

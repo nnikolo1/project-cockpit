@@ -19,6 +19,7 @@ def task(n, **kw):
 class Hosting:
     def __init__(self, tasks, labels=()):
         self.t, self.l, self.released, self.comments, self.fail = tasks, list(labels), [], [], set()
+        self.marked, self.prs = set(), {}  # marked: issues whose worker has assigned them (the fake worker's first action)
 
     def tasks(self, project):
         return self.t
@@ -34,12 +35,20 @@ class Hosting:
     def comment(self, project, n, body):
         self.comments.append((project, n, body))
 
+    def assignees(self, project, n):
+        return ["m"] if n in self.marked else []
+
+    def find_pr(self, project, branch):
+        return self.prs.get(int(branch.rsplit("/", 1)[1]))
+
 
 class Workers:
     def __init__(self):
-        self.started, self.rc = [], {}
+        self.started, self.rc, self.fail, self.log = [], {}, set(), None
 
     def start(self, e, pc):
+        if e["number"] in self.fail:
+            raise RuntimeError("cannot spawn")
         self.started.append(e["number"])
         return dict(id=e["number"])
 
@@ -181,21 +190,163 @@ def test_release_failure_is_recorded_and_others_continue(tmp_path):
     assert 2 not in [r["number"] for r in B.release_list(A.read_jsonl(ctx.decisions))]
 
 
-def test_workers_stop_when_threshold_crossed_and_resume(tmp_path):
-    ctx, h, w, qu, _ = make(tmp_path, many(10), mode="real", q=quota_of(80, 1.0, week_used=90))
+def test_workers_stop_when_threshold_crossed_and_no_retry(tmp_path):
+    ctx, h, w, qu, notes = make(tmp_path, many(10), mode="real", q=quota_of(80, 1.0, week_used=90))
+    h.prs[2] = 77
     J.poll(ctx, NOW)
     assert w.started == [2, 3]
-    w.rc = {2: 0, 3: 1}  # one finished, one failed
+    h.marked = {2, 3}  # both fake workers took their first action
+    w.rc = {2: 0, 3: 1}  # one finished with a pull request, one failed
     qu.q = quota_of(97, 1.0, week_used=90)  # window nearly spent: nothing new starts
     J.poll(ctx, NOW + 1800)
     st = A.read_json(ctx.state_path, {})
     assert w.started == [2, 3] and len(st["running"]) == 0
-    assert any(e["number"] == 3 and e["attempt"] == 2 for e in st["queue"])  # unfinished goes back to the queue
+    assert not any(e["number"] in (2, 3) for e in st["queue"])  # no retry, ever
     states = {r["number"]: r["state"] for r in B.release_list(A.read_jsonl(ctx.decisions))}
-    assert states[2] == "finished" and states[3] == "unfinished"
+    assert states[2] == "awaiting_acceptance" and states[3] == "needs_you"
+    aw = [r for r in A.read_jsonl(ctx.decisions) if r.get("state") == "awaiting_acceptance"][0]
+    assert aw["pr"] == 77
+    wk = {x["issue"]: x for x in contract(ctx) if x["kind"] == "worker"}
+    assert any(x["kind"] == "worker" and x["state"] == "in_progress" and x["issue"] == 2 for x in contract(ctx))
+    assert wk[2]["state"] == "awaiting_acceptance" and wk[2]["pr"] == 77 and wk[3]["state"] == "needs_you" and wk[3]["status"] == "NEEDS YOU"
+    assert any(t == "NEEDS YOU" and "no retry" in m for t, m in notes)
     qu.q = quota_of(10, 4.0, week_used=90)  # after the reset
     J.poll(ctx, NOW + 3600)
-    assert w.started[2:] == [4, 5]  # after the reset the queue moves on; the failed one waits at the back for its retry
+    assert w.started[2:] == [4, 5]  # the queue moves on; the failed task is not started again
+
+
+def test_exit_zero_without_pull_request_needs_you(tmp_path):
+    ctx, h, w, qu, _ = make(tmp_path, many(3), mode="real", q=quota_of(80, 1.0, week_used=90))
+    J.poll(ctx, NOW)
+    w.rc = {2: 0}
+    J.poll(ctx, NOW + 1800)
+    assert {r["number"]: r["state"] for r in B.release_list(A.read_jsonl(ctx.decisions))}[2] == "needs_you"
+
+
+def test_worker_start_failure_is_recorded_and_never_retried(tmp_path):
+    ctx, h, w, qu, _ = make(tmp_path, many(3), mode="real", q=quota_of(80, 1.0, week_used=90))
+    w.fail = {2}
+    J.poll(ctx, NOW)
+    assert w.started == [3]
+    recs = [r for r in A.read_jsonl(ctx.decisions) if r.get("state") == "start_failed"]
+    assert recs and recs[0]["number"] == 2 and "cannot spawn" in recs[0]["note"]
+    assert any(x["kind"] == "worker" and x["state"] == "start_failed" for x in contract(ctx))
+    w.fail = set()
+    J.poll(ctx, NOW + 7200)
+    assert 2 not in w.started  # no retry without a requeue record
+
+
+def test_job_checks_the_workers_mark_and_never_assigns(tmp_path):
+    ctx, h, w, *_ = make(tmp_path, many(2), mode="real", q=quota_of(80, 1.0, week_used=90))
+    J.poll(ctx, NOW)
+    assert not hasattr(h, "assign")  # the hosting client has no write for assignment at all
+    h.marked = {2}  # worker 2 marked its issue, worker 3 did not
+    J.poll(ctx, NOW + 600)
+    J.poll(ctx, NOW + 1200)
+    recs = [r for r in A.read_jsonl(ctx.decisions) if r["type"] == "outcome" and r["state"] in ("in_progress", "not_in_progress")]
+    assert [(r["number"], r["state"]) for r in recs] == [(2, "in_progress"), (3, "not_in_progress")]  # one record each, no repeats
+    assert recs[1]["note"] == "worker did not mark in progress"
+    assert [x for x in contract(ctx) if x["kind"] == "worker" and x["state"] == "needs_you" and x["status"] == "NEEDS YOU"]
+    assert w.started == [2, 3]  # nothing else: no retry
+
+
+def test_worker_prompt_makes_marking_in_progress_the_first_action():
+    p = B.worker_prompt(dict(number=7, title="t"), dict(repo="o/r", manager="m"))
+    assert p.startswith("FIRST ACTION") and "gh issue edit 7 -R o/r --add-assignee m" in p
+    assert p.index("--add-assignee") < p.index("Read it with gh") and "DRAFT pull request" in p
+
+
+def test_worked_task_is_never_started_again_without_requeue(tmp_path):
+    ctx, h, w, qu, _ = make(tmp_path, many(2), mode="real", q=quota_of(80, 1.0, week_used=90))
+    J.poll(ctx, NOW)
+    assert w.started == [2, 3]
+    w.rc = {2: 0, 3: 0}
+    J.poll(ctx, NOW + 1800)
+    st = A.read_json(ctx.state_path, {})
+    st["queue"].append(dict(project="p", key="T-2", number=2, title="title 2", attempt=1))  # a stray duplicate entry (e.g. old state file)
+    A.write_json(ctx.state_path, st)
+    J.poll(ctx, NOW + 3600)
+    assert w.started == [2, 3]
+    assert any(r.get("state") == "skipped_already_worked" and r["number"] == 2 for r in A.read_jsonl(ctx.decisions))
+    A.append_jsonl(ctx.decisions, B.requeue_record(NOW + 3700, "p", 2, "manager", "redo after review"))
+    J.poll(ctx, NOW + 3800)
+    assert w.started == [2, 3, 2] and "resumed" in [r["state"] for r in A.read_jsonl(ctx.decisions) if r.get("number") == 2 and r["type"] == "outcome"]
+    J.poll(ctx, NOW + 3900)
+    assert w.started == [2, 3, 2]  # the requeue is used up once the worker has started
+
+
+def test_requeue_record_needs_orchestrator_or_manager_and_a_reason():
+    import pytest
+    with pytest.raises(ValueError):
+        B.requeue_record(NOW, "p", 2, "daemon", "x")
+    with pytest.raises(ValueError):
+        B.requeue_record(NOW, "p", 2, "manager", " ")
+    from bootfill import requeue as R
+
+
+def test_requeue_tool_writes_the_record(tmp_path):
+    from bootfill import requeue as R
+    R.main(["--data-dir", str(tmp_path), "--project", "p", "--number", "9", "--by", "orchestrator", "--reason", "PR rejected"])
+    (rec,) = A.read_jsonl(tmp_path / "decision-log.jsonl")
+    assert rec["type"] == "requeue" and rec["number"] == 9 and rec["by"] == "orchestrator"
+
+
+def test_guard_raw_released_label_skips_with_record(tmp_path):
+    t = task(2, labels=["released"])  # stage embryo although the raw label is there: the policy dropped it as unauthorised
+    ctx, h, w, *_ = make(tmp_path, [t, task(3)], mode="real", q=quota_of(80, 1.0, week_used=90))
+    J.poll(ctx, NOW)
+    assert [x[1] for x in h.released] == [3]
+    sk = [r for r in A.read_jsonl(ctx.decisions) if r["type"] == "release_skip"]
+    assert sk and sk[0]["number"] == 2 and "released label" in sk[0]["reason"]
+    J.poll(ctx, NOW + 7200)
+    assert len([r for r in A.read_jsonl(ctx.decisions) if r["type"] == "release_skip"]) == 1  # one record per change, not per poll
+
+
+def test_guard_history_blocks_rerelease_within_days_then_expires(tmp_path):
+    ctx, h, w, qu, _ = make(tmp_path, [task(2)], mode="real", q=quota_of(80, 1.0, week_used=90), rerelease_guard_days=30)
+    A.append_jsonl(ctx.decisions, dict(type="release", time=B.iso(NOW - 5 * 86400), project="p", key="T-2", number=2, title="x", mode="real", state="queued"))
+    J.poll(ctx, NOW)
+    assert h.released == []
+    assert any("already released at" in r["reason"] for r in A.read_jsonl(ctx.decisions) if r["type"] == "release_skip")
+    A.append_jsonl(ctx.decisions, dict(type="release", time=B.iso(NOW - 40 * 86400), project="p", key="T-3", number=3, title="x", mode="real", state="queued"))
+    ctx2, h2, *_ = make(tmp_path / "b", [task(3)], mode="real", q=quota_of(80, 1.0, week_used=90))
+    A.append_jsonl(ctx2.decisions, dict(type="release", time=B.iso(NOW - 40 * 86400), project="p", key="T-3", number=3, title="x", mode="real", state="queued"))
+    J.poll(ctx2, NOW)
+    assert [x[1] for x in h2.released] == [3]  # older than the window: allowed again
+
+
+def test_guard_dry_run_history_does_not_block(tmp_path):
+    ctx, h, *_ = make(tmp_path, [task(2)], mode="real", q=quota_of(80, 1.0, week_used=90))
+    A.append_jsonl(ctx.decisions, dict(type="release", time=B.iso(NOW - 3600), project="p", key="T-2", number=2, title="x", mode="dry-run", state="would_release"))
+    J.poll(ctx, NOW)
+    assert [x[1] for x in h.released] == [2]
+
+
+def test_gh_release_never_unlabels_a_task_that_carries_the_label(monkeypatch):
+    import cockpit as C
+    calls = []
+    monkeypatch.setattr(C, "run_gh", lambda args, *a, **k: calls.append(args) or "{}")
+    monkeypatch.setattr(C, "gh_user", lambda: "m")
+    monkeypatch.setattr(C, "execute", lambda ops, run=None: calls.extend(ops))
+    g = A.Gh([dict(name="p", repo="o/r", manager="m")])
+    monkeypatch.setattr(g, "_cockpit", lambda: C)
+    flagged = dict(key="T-1", number=1, labels=["released"], bad={"released": "unknown"})
+    import pytest
+    with pytest.raises(RuntimeError, match="already carries"):
+        g.release("p", flagged, "trail")
+    assert calls == []  # not even a comment: no edit, no remove-label
+    g.release("p", dict(key="T-2", number=2, labels=[], bad={}), "trail")
+    assert not any("--remove-label" in c for c in calls) and any("--add-label" in c for c in calls)
+
+
+def test_gh_reads_assignees_and_pr_only(monkeypatch):
+    import cockpit as C
+    calls = []
+    monkeypatch.setattr(C, "run_gh", lambda args, *a, **k: calls.append(args) or "[]")
+    g = A.Gh([dict(name="p", repo="o/r", manager="m")])
+    monkeypatch.setattr(g, "_cockpit", lambda: C)
+    assert g.assignees("p", 5) == [] and g.find_pr("p", "boot/5") is None
+    assert not hasattr(g, "assign") and not any("edit" in c for c in calls)
 
 
 def test_daily_summary_once_per_day_and_notification(tmp_path):

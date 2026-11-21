@@ -97,6 +97,17 @@ def policy(issues, events, manager):
     return out
 
 
+def issues_needing_timeline(issues, events):
+    """Numbers of issues that carry a protected label whose latest labeled/unlabeled event is missing or is not `labeled`: the event list
+    is incomplete for them (GitHub thins large GraphQL pages, ADR 0019), so their own timeline must be fetched. A label with a real event
+    by someone else is NOT listed: that is a genuine unauthorised change."""
+    latest = {}
+    for e in sorted((e for e in events if e["kind"] in ("labeled", "unlabeled")), key=lambda e: e["t"]):
+        latest[(e["number"], e["name"])] = e
+    return [i["number"] for i in issues
+            if any(is_protected(n) and (latest.get((i["number"], n)) or {}).get("kind") != "labeled" for n in i["labels"])]
+
+
 def stage(issue, eff):
     if "cancelled" in eff or (issue["state"] == "closed" and issue.get("state_reason") == "not_planned"):
         return "cancelled"
@@ -408,7 +419,7 @@ def code_view(metrics):
 def norm_issue(n):
     """One GraphQL issue node -> the raw issue dict derive() takes."""
     return dict(number=n["number"], id=n.get("databaseId"), title=n["title"], url=n["url"], state=n["state"].lower(),
-                state_reason=(n.get("stateReason") or "").lower() or None, created_at=n["createdAt"], closed_at=n.get("closedAt"),
+                state_reason=(n.get("stateReason") or "").lower() or None, created_at=n["createdAt"], updated_at=n.get("updatedAt"), closed_at=n.get("closedAt"),
                 author=(n.get("author") or {}).get("login"), labels=[l["name"] for l in n["labels"]["nodes"]],
                 assignees=[a["login"] for a in n["assignees"]["nodes"]], parent=(n.get("parent") or {}).get("number"),
                 blocked_by=[b["number"] for b in n["blockedBy"]["nodes"]], body=n.get("body") or "",
@@ -881,7 +892,7 @@ def _poll_row(d):
                 weekly_used=_num(d.get("weekly_used")), weekly_resets_at=_txt(d.get("weekly_resets_at")), triggers=trig, decision=_txt(d.get("decision")))
 
 
-IGNORED_DECISION_KINDS = ("authority_skip",)
+IGNORED_DECISION_KINDS = ("authority_skip", "worker")
 
 
 def decision_view(text, limit=LOG_LIMIT):

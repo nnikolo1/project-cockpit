@@ -63,5 +63,13 @@ Every line has `kind` (`"release"` or `"poll"`) and `time` (ISO 8601 UTC). A lin
 - `status` is always `NEEDS YOU`; `action` is `skipped` (stays an embryo) or `flagged` (released anyway, `authority_mode` flag); `reason` is the job's one wording, cut to 300 characters.
 - Compatibility: readers of version 1 count an unknown `kind` as an unreadable line (this was always the rule above). The cockpit's `logic.decision_view` ignores `authority_skip` lines without counting them, shows only `release` and `poll`, and still counts any other unknown kind as unreadable (tested).
 
+**Worker line** (extension, added with [ADR 0019](../adr/0019-boot-filling-never-twice.md); one per change of a worker's state):
+```
+{"kind": "worker", "time": "2026-11-21T10:30:00Z", "project": "demo", "issue": 7, "title": "Add a widget",
+ "state": "awaiting_acceptance", "pr": 12, "reason": "draft pull request #12 is open; ..."}
+```
+- `state`: `in_progress` (the worker marked the issue), `awaiting_acceptance` (exit 0, draft pull request `pr` open; the Orchestrator or the Manager merges or rejects it), `needs_you` or `start_failed` (these two also carry `status: "NEEDS YOU"`). `pr` only with `awaiting_acceptance`.
+- Compatibility: `decision_view` ignores `worker` lines without counting them; readers of version 1 count them as unreadable, as for any unknown kind.
+
 ## What the page does with them
 Two window cards (used share bar, time to reset, reset time, tokens when a usage report exists, age and stale marker per source), a table of released tasks and a table of the latest polls. Missing files are reported per source. Fixtures for tests: `tests/fixtures/budget/`.

@@ -287,6 +287,7 @@ def release_batch(ctx, state, now, dec, triggers):
     rows, run_id = [], f"{int(now)}"
     cache, logged, open_ = state.setdefault("authority_cache", {}), state.setdefault("authority_logged", {}), state.setdefault("authority_open", {})
     needs, judged, budget = [], 0, [cfg["authority_judge_max"]]
+    hist, guarded = A.read_jsonl(ctx.decisions), state.setdefault("guard_logged", {})
     for pr in cfg["projects"]:
         name = pr["name"]
         try:
@@ -303,6 +304,13 @@ def release_batch(ctx, state, now, dec, triggers):
         for t in tasks:
             good, reason = core.eligibility(t, cfg, excl, track.get("number") if track.get("project") == name else None)
             if good:
+                why = core.release_guard(name, t, hist, state["queue"], state["running"], now, cfg["rerelease_guard_days"])
+                if why:  # defence in depth (ADR 0019): never silently, once per change
+                    if guarded.get(f"{name}/{t['number']}") != why:
+                        guarded[f"{name}/{t['number']}"] = why
+                        A.append_jsonl(ctx.decisions, dict(type="release_skip", time=core.iso(now), project=name, key=t["key"], number=t["number"], title=t["title"], reason=why))
+                        plog.warning("not released: %s #%s %s: %s", name, t["number"], t["title"], why)
+                    continue
                 ad = core.authority_decide(t, cfg, excl, by_key, by_number, ctx.authority_judge, cache, now, budget)
                 judged += ad["judged"] and not ad["cached"]
                 if not ad["release"]:
@@ -394,6 +402,13 @@ def start_workers(ctx, state, now, q):
         why = "a window is unknown (feed stale, no cap yet)" if q["five"] is None or q["week"] is None else f"stop threshold {ctx.cfg['worker_stop_left']}%"
         log.info("no worker started: %d running, %s", len(state["running"]), why)
         return
+    lines = A.read_jsonl(ctx.decisions)
+    state["queue"], dropped = core.worker_candidates(state["queue"], state["running"], lines)
+    for e, why in dropped:  # never twice: a worker ran for this issue already (or it repeats an entry); recorded, never silent
+        log.warning("no worker for %s %s: %s", e["project"], e["key"], why)
+        A.append_jsonl(ctx.decisions, core.outcome_record(now, e["project"], e["key"], e["number"], "skipped_already_worked", why))
+    if not state["queue"]:
+        return
     active = [w["entry"] for w in state["running"]]
     counted = set()  # skips are counted once per task and poll
     judge = ctx.judge if ctx.cfg.get("conflict_judgement", True) else None
@@ -402,10 +417,13 @@ def start_workers(ctx, state, now, q):
         e = state["queue"].pop(idx)
         try:
             h = ctx.workers.start(e, project_cfg(ctx.cfg, e["project"]))
-        except Exception as ex:
-            log.error("worker start for %s failed: %s: %s", e["key"], type(ex).__name__, str(ex)[:200])
-            state["queue"].append(e)
-            break
+        except Exception as ex:  # nothing was assigned, nothing is undone; no retry: the Orchestrator or the Manager decides (requeue record)
+            why = f"{type(ex).__name__}: {str(ex)[:150]}"
+            log.error("worker start for %s failed: %s", e["key"], why)
+            plog.warning("%s: worker for %s %s could not be started (%s); the task stays released, no retry", core.STATUS, e["project"], e["key"], why)
+            A.append_jsonl(ctx.decisions, core.outcome_record(now, e["project"], e["key"], e["number"], "start_failed", why))
+            _contract(ctx, core.contract_worker(now, e["project"], e["number"], e["title"], "start_failed", note=why))
+            continue
         state["skips"] = core.update_skips(state.get("skips", {}), rec, counted)
         counted.update(rec["skipped"])
         state["running"].append(dict(entry=e, handle=h))
@@ -413,25 +431,85 @@ def start_workers(ctx, state, now, q):
         if active[:-1] or rec["skipped"]:
             A.append_jsonl(ctx.decisions, dict(rec, type="conflict_choice", time=core.iso(now), project=e["project"]))
             log.info("worker choice %s: %s (skipped %s)", rec["chosen"], rec["reason"], ", ".join(rec["skipped"]) or "none")
-        A.append_jsonl(ctx.decisions, core.outcome_record(now, e["project"], e["key"], e["number"], "resumed" if e["attempt"] > 1 else "running"))
+        A.append_jsonl(ctx.decisions, core.outcome_record(now, e["project"], e["key"], e["number"], "resumed" if e.get("requeue") else "running"))
+
+
+def apply_requeues(ctx, state, now):
+    """An explicit requeue record (Orchestrator or Manager) puts the task back into the queue ONCE; nothing else ever does (ADR 0019)."""
+    A = _io()
+    lines = A.read_jsonl(ctx.decisions)
+    rel = {(r["project"], r["number"]): r for r in lines if r.get("type") == "release"}
+    for project, number, rq in core.pending_requeues(lines):
+        if any(e["project"] == project and e["number"] == number for e in [w["entry"] for w in state["running"]] + state["queue"]):
+            continue
+        r = rel.get((project, number), {})
+        state["queue"].append(dict(project=project, key=r.get("key", f"#{number}"), number=number, title=r.get("title", ""), attempt=1, requeue=True,
+                                   module="", labels=[], paths=[]))
+        log.info("requeue of %s #%s by %s: %s", project, number, rq["by"], rq["reason"])
+
+
+def check_marked(ctx, w, now):
+    """The worker's FIRST action is to assign the issue to the Manager login (stage in progress, the signal the cockpit reads). The job only checks and records:
+    marked -> one `in_progress` line; not marked -> ONE NEEDS YOU record 'worker did not mark in progress'. It never assigns, never retries."""
+    A, e = _io(), w["entry"]
+    if w.get("marked"):
+        return
+    try:
+        marked = bool(ctx.hosting.assignees(e["project"], e["number"]))
+    except Exception as ex:
+        log.error("in-progress check of %s failed: %s: %s", e["key"], type(ex).__name__, str(ex)[:150])
+        return
+    if marked:
+        w["marked"] = True
+        A.append_jsonl(ctx.decisions, core.outcome_record(now, e["project"], e["key"], e["number"], "in_progress", "the worker marked the issue in progress"))
+        _contract(ctx, core.contract_worker(now, e["project"], e["number"], e["title"], "in_progress"))
+    elif not w.get("flagged"):
+        w["flagged"] = True
+        note = "worker did not mark in progress"
+        A.append_jsonl(ctx.decisions, core.outcome_record(now, e["project"], e["key"], e["number"], "not_in_progress", note))
+        _contract(ctx, core.contract_worker(now, e["project"], e["number"], e["title"], "needs_you", note=note))
+        plog.warning("%s: %s %s: %s", core.STATUS, e["project"], e["key"], note)
 
 
 def supervise(ctx, state, now, get_quota):
-    """Reap finished workers (outcome records). An unfinished one goes back to the queue once per attempt and resumes after a reset."""
+    """Reap finished workers. Exit 0 and a pull request: AWAITING ACCEPTANCE (the Orchestrator or the Manager merges or rejects it). Anything else:
+    NEEDS YOU, the task stays in progress. Never a retry, never back to the queue (ADR 0019)."""
     A = _io()
     still = []
     for w in state["running"]:
         rc = ctx.workers.poll(w["handle"])
         e = w["entry"]
+        check_marked(ctx, w, now)
         if rc is None:
             still.append(w)
-        elif rc == 0:
-            A.append_jsonl(ctx.decisions, core.outcome_record(now, e["project"], e["key"], e["number"], "finished"))
+            continue
+        P, K, N, T = e["project"], e["key"], e["number"], e["title"]
+        if rc == 0:
+            A.append_jsonl(ctx.decisions, core.outcome_record(now, P, K, N, "finished", "exit code 0"))
+            try:
+                pr = ctx.hosting.find_pr(P, f"{ctx.cfg.get('worker', {}).get('branch_prefix', 'boot/')}{N}")
+            except Exception as ex:
+                pr = None
+                log.error("pull request lookup for %s failed: %s: %s", K, type(ex).__name__, str(ex)[:150])
+            if pr is not None:
+                note = f"draft pull request #{pr} is open; the Orchestrator or the Manager reviews and merges it (the issue then closes) or rejects it"
+                A.append_jsonl(ctx.decisions, core.outcome_record(now, P, K, N, "awaiting_acceptance", note, pr=pr))
+                _contract(ctx, core.contract_worker(now, P, N, T, "awaiting_acceptance", pr=pr, note=note))
+                continue
+            why = "the worker exited 0 but no pull request was found"
         else:
-            A.append_jsonl(ctx.decisions, core.outcome_record(now, e["project"], e["key"], e["number"], "unfinished", f"exit code {rc}"))
-            if e["attempt"] < ctx.cfg.get("max_attempts", 2):
-                state["queue"].append(dict(e, attempt=e["attempt"] + 1))
+            A.append_jsonl(ctx.decisions, core.outcome_record(now, P, K, N, "unfinished", f"exit code {rc}"))
+            why = f"the worker failed (exit code {rc})"
+        note = f"{why}; the task stays in progress, no retry"
+        A.append_jsonl(ctx.decisions, core.outcome_record(now, P, K, N, "needs_you", note))
+        _contract(ctx, core.contract_worker(now, P, N, T, "needs_you", note=note))
+        plog.warning("%s: %s %s: %s", core.STATUS, P, K, note)
+        try:
+            ctx.notify(core.STATUS, f"{P} {K}: {note}")
+        except Exception as ex:
+            log.warning("notification failed: %s", ex)
     state["running"] = still
+    apply_requeues(ctx, state, now)
     if state["queue"] and ctx.mode == core.REAL:
         q = get_quota()
         if q:

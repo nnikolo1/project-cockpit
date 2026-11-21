@@ -151,8 +151,22 @@ class Gh:
         p = self.projects[project]
         if C.gh_user() != p["manager"]:
             raise PermissionError(f"gh is logged in as {C.gh_user()}, not the Manager {p['manager']}")
+        for lab in ("released", "cancelled"):  # never touch a task that already carries the label: _edit would unlabel and re-add it (ADR 0019)
+            if lab in (task.get("labels") or []):
+                raise RuntimeError(f"refused: {task['key']} already carries the {lab} label")
         ops = C._edit(p["repo"], task, ["released"], []) + [["issue", "comment", str(task["number"]), "-R", p["repo"], "--body", comment]]
         C.execute(ops)
+
+    def assignees(self, project, number):
+        """Assignee logins of the issue: the cockpit's signal for the stage `in progress`. Read only; the job never assigns or unassigns."""
+        out = self._cockpit().run_gh(["issue", "view", str(number), "-R", self.projects[project]["repo"], "--json", "assignees", "--jq", "[.assignees[].login]"])
+        return json.loads(out or "[]")
+
+    def find_pr(self, project, branch):
+        """Number of the newest pull request (any state) from `branch`, or None."""
+        out = self._cockpit().run_gh(["pr", "list", "-R", self.projects[project]["repo"], "--head", branch, "--state", "all", "--json", "number", "--limit", "1"])
+        rows = json.loads(out or "[]")
+        return rows[0]["number"] if rows else None
 
     def comment(self, project, number, body):
         self._cockpit().run_gh(["issue", "comment", str(number), "-R", self.projects[project]["repo"], "--body", body])
@@ -209,9 +223,7 @@ class Workers:
         wt = repo_dir.parent / f"{repo_dir.name}-wt-boot-{entry['number']}"
         if not wt.exists():
             run(["git", "-C", str(repo_dir), "worktree", "add", str(wt), "-b", branch], timeout=60)
-        prompt = (f"Work on issue {entry['number']} of {project_cfg['repo']} (title: {entry['title']}). Read it with gh, do the work on this branch, "
-                  "commit, push the branch and open a DRAFT pull request. Do not merge, do not set released, priority, due or cancelled labels, "
-                  "do not send, submit or delete anything outside this repository. Stop when the pull request is open.")
+        prompt = core.worker_prompt(entry, project_cfg)
         cmd = [x.replace("{prompt}", prompt) for x in self.cfg["command"]]
         rc = self.dir / f"{wid}.rc"
         sh = "{ " + " ".join(_q(x) for x in cmd) + f" ; }} > {_q(str(self.dir / (wid + '.out')))} 2>&1 ; echo $? > {_q(str(rc))}"
