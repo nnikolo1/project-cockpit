@@ -11,7 +11,7 @@ The owner is a solo developer who builds software with AI coding assistants, acr
 
 - A thin, local client. It shows, for each project, the tasks (hosting-service issues), the open questions waiting for the owner, the rules in force, the state of the unattended work and metadata about the code (activity, persistence footprint, ambiguity). It holds no project data of its own; a project supplies its data through generic contracts (files and the hosting service). Its own state is a cache that can be rebuilt.
 - The template for all of the owner's assistant-supported projects: generic agent policies, skills, instruction-file sections and tooling live in CP; a project starts from them and adds its own.
-- Principles the owner has set and that any answer must respect: adopt over build (use what the community already solved); no single source of truth (every fact has exactly one owner and is never copied; a disagreement is reported, not auto-corrected); fail clearly (every dead end is a visible state with a reason and a named action, never silent); every state and transition explainable in one plain sentence; least privilege by role; the owner keeps authority over what matters (releases, schema changes, deletions, approvals) and is told, not surprised.
+- Principles the owner has set and that any answer must respect: adopt over build (use what the community already solved); a single source of truth is preferred (the hosting service for task state); every fact has one owner and is not copied needlessly, and a disagreement is reported, not auto-corrected; fail clearly (every dead end is a visible state with a reason and a named action, never silent); every state and transition explainable in one plain sentence; least privilege by role; the owner keeps authority over what matters (releases, schema changes, deletions, approvals) and is told, not surprised.
 
 ## 3. The goal: unattended execution
 
@@ -43,7 +43,7 @@ The owner stresses that the boot-filling part of CP is, in many ways, the classi
 4. Lazy execution: materialise only what is ranked and needed.
 5. A small concurrency limit (a few workers) and an externally supplied budget gate (the assistants' quota, evaluated every few minutes; the reading can be stale and is then estimated).
 6. Human approval nodes, which may wait for days.
-7. The hosting service owns the task state; a small local journal of the job's own actions is acceptable; no mirror of hosting data.
+7. The hosting service owns the task state and is preferably the single source of truth. A local store (a journal of the job's own actions, or more) exists only as a COMPROMISE for the case that the hosting service is unreachable. The owner considers that case unlikely (the assistant sessions need network access to the model service anyway, so a fully offline laptop does no work at all) and is unsure the compromise is worth its cost, which is a second source and the synchronisation that comes with it. The study must assess it: what an outage of the hosting service alone (the model service still reachable) would break with and without a local store, how long such outages typically are, and whether simply waiting and reporting 'hosting service unreachable' is enough. It must also say how a hosting service that silently returns incomplete data should be guarded against without a second store (validated queries, completeness checks).
 8. Minimal infrastructure and maintenance: one machine that may sleep, tens of tasks, no cluster, no always-on server if avoidable, permissive licence.
 9. A status display that stays a thin client.
 10. Failing clearly.
@@ -56,7 +56,7 @@ What stays specific to this problem and will remain custom in any case: the quot
 
 ## 6a. Pending design questions the study must inform
 
-- Whether flow state should live in a small local journal (and what exactly it may hold) or stay in labels and the hosting service.
+- Whether any flow state should live in a local store at all (a compromise against hosting outages, see need 7) or whether the hosting service stays the single source of truth.
 - A salvo computation: building sets of combinable tasks, with a permissive notion of interference.
 - Where control is exercised: before a task is released, or before it is set to in progress.
 - Related, not part of this study: identity separation on the hosting service, database roles, and an operating-system sandbox for workers.
