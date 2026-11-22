@@ -58,7 +58,7 @@ For the recommendation: say which two or three of these ideas would carry the mo
 4. Lazy execution: materialise only what is ranked and needed.
 5. A small concurrency limit (a few workers) and an externally supplied budget gate (the assistants' quota, evaluated every few minutes; the reading can be stale and is then estimated).
 6. Human approval nodes, which may wait for days.
-7. The hosting service owns the task state and is preferably the single source of truth. A local store (a journal of the job's own actions, or more) exists only as a COMPROMISE for the case that the hosting service is unreachable. The owner considers that case unlikely (the assistant sessions need network access to the model service anyway, so a fully offline laptop does no work at all) and is unsure the compromise is worth its cost, which is a second source and the synchronisation that comes with it. The study must assess it: what an outage of the hosting service alone (the model service still reachable) would break with and without a local store, how long such outages typically are, and whether simply waiting and reporting 'hosting service unreachable' is enough. It must also say how a hosting service that silently returns incomplete data should be guarded against without a second store (validated queries, completeness checks).
+7. The hosting service owns the task state and is the single source of truth (owner decision, 2026-11-22). A local store for resilience against an unreachable hosting service is NOT wanted: a fully offline laptop cannot reach the model service either, so it does no work at all, and an outage of the hosting service alone is rare and short; the job simply waits and reports 'hosting service unreachable' (failing clearly). The study should still say how a hosting service that silently returns incomplete data is guarded against without a second store (validated queries, completeness checks), and may note any local record that is genuinely needed for something the hosting service cannot hold (for example the job's own audit trail), but not as a second source of task state.
 8. Minimal infrastructure and maintenance: one machine that may sleep, tens of tasks, no cluster, no always-on server if avoidable, permissive licence.
 9. A status display that stays a thin client.
 10. Failing clearly.
@@ -71,7 +71,7 @@ What stays specific to this problem and will remain custom in any case: the quot
 
 ## 6a. Pending design questions the study must inform
 
-- Whether any flow state should live in a local store at all (a compromise against hosting outages, see need 7) or whether the hosting service stays the single source of truth.
+- Settled by the owner: the hosting service is the single source of truth for task state (see need 7); open: whether a local audit trail of the job's own actions is worth having at all.
 - A salvo computation: building sets of combinable tasks, with a permissive notion of interference.
 - Where control is exercised: before a task is released, or before it is set to in progress.
 - Related, not part of this study: identity separation on the hosting service, database roles, and an operating-system sandbox for workers.
