@@ -471,6 +471,28 @@ def check_marked(ctx, w, now):
         plog.warning("%s: %s %s: %s", core.STATUS, e["project"], e["key"], note)
 
 
+def publish_branch(ctx, e):
+    """After a worker ended with exit 0 (ADR 0020): the JOB, not the worker, pushes the branch and opens the DRAFT pull request. -> (pr number, reason when None).
+    A pull request that already exists is reused; a branch without a new commit gets none (recorded plainly); the push is restricted to the branch prefix."""
+    P, N, K = e["project"], e["number"], e["key"]
+    branch = f"{ctx.cfg.get('worker', {}).get('branch_prefix', 'boot/')}{N}"
+    pc = project_cfg(ctx.cfg, P)
+    try:
+        pr = ctx.hosting.find_pr(P, branch)
+        if pr is not None:
+            return pr, ""
+        if not ctx.workers.commits_ahead(e, pc):
+            log.warning("no pull request for %s: branch %s has no new commit", K, branch)
+            return None, "the worker exited 0 but committed nothing (no new commit on its branch); no pull request was opened"
+        ctx.workers.push(e, pc)
+        pr = ctx.hosting.open_draft_pr(P, branch, f"{e['title']} (#{N})", f"Draft pull request opened by the boot-filling job for issue #{N}, from the worker's commits on `{branch}`. Not merged by the job.")
+        log.info("pushed %s and opened draft pull request #%s for %s", branch, pr, K)
+        return pr, ""
+    except Exception as ex:
+        log.error("push or pull request for %s failed: %s: %s", K, type(ex).__name__, str(ex)[:200])
+        return None, f"the worker committed, but the job could not push or open the pull request ({type(ex).__name__}: {str(ex)[:120]})"
+
+
 def supervise(ctx, state, now, get_quota):
     """Reap finished workers. Exit 0 and a pull request: AWAITING ACCEPTANCE (the Orchestrator or the Manager merges or rejects it). Anything else:
     NEEDS YOU, the task stays in progress. Never a retry, never back to the queue (ADR 0019)."""
@@ -486,17 +508,12 @@ def supervise(ctx, state, now, get_quota):
         P, K, N, T = e["project"], e["key"], e["number"], e["title"]
         if rc == 0:
             A.append_jsonl(ctx.decisions, core.outcome_record(now, P, K, N, "finished", "exit code 0"))
-            try:
-                pr = ctx.hosting.find_pr(P, f"{ctx.cfg.get('worker', {}).get('branch_prefix', 'boot/')}{N}")
-            except Exception as ex:
-                pr = None
-                log.error("pull request lookup for %s failed: %s: %s", K, type(ex).__name__, str(ex)[:150])
+            pr, why = publish_branch(ctx, e)
             if pr is not None:
                 note = f"draft pull request #{pr} is open; the Orchestrator or the Manager reviews and merges it (the issue then closes) or rejects it"
                 A.append_jsonl(ctx.decisions, core.outcome_record(now, P, K, N, "awaiting_acceptance", note, pr=pr))
                 _contract(ctx, core.contract_worker(now, P, N, T, "awaiting_acceptance", pr=pr, note=note))
                 continue
-            why = "the worker exited 0 but no pull request was found"
         else:
             A.append_jsonl(ctx.decisions, core.outcome_record(now, P, K, N, "unfinished", f"exit code {rc}"))
             why = f"the worker failed (exit code {rc})"

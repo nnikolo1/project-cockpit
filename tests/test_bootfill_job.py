@@ -41,10 +41,19 @@ class Hosting:
     def find_pr(self, project, branch):
         return self.prs.get(int(branch.rsplit("/", 1)[1]))
 
+    def open_draft_pr(self, project, branch, title, body):
+        n = int(branch.rsplit("/", 1)[1])
+        self.opened = getattr(self, "opened", []) + [(branch, title)]
+        if getattr(self, "pr_fail", False):
+            raise RuntimeError("gh down")
+        self.prs[n] = 500 + n
+        return 500 + n
+
 
 class Workers:
     def __init__(self):
         self.started, self.rc, self.fail, self.log = [], {}, set(), None
+        self.ahead, self.pushed = {}, []  # ahead: issue -> commits on the worker branch (default 0)
 
     def start(self, e, pc):
         if e["number"] in self.fail:
@@ -54,6 +63,12 @@ class Workers:
 
     def poll(self, h):
         return self.rc.get(h["id"])
+
+    def commits_ahead(self, e, pc):
+        return self.ahead.get(e["number"], 0)
+
+    def push(self, e, pc):
+        self.pushed.append(e["number"])
 
 
 def quota_of(five_used=40, five_in=1.0, week_used=50, week_in=100.0):
@@ -253,7 +268,7 @@ def test_job_checks_the_workers_mark_and_never_assigns(tmp_path):
 def test_worker_prompt_makes_marking_in_progress_the_first_action():
     p = B.worker_prompt(dict(number=7, title="t"), dict(repo="o/r", manager="m"))
     assert p.startswith("FIRST ACTION") and "gh issue edit 7 -R o/r --add-assignee m" in p
-    assert p.index("--add-assignee") < p.index("Read it with gh") and "DRAFT pull request" in p
+    assert p.index("--add-assignee") < p.index("Read it with gh") and "Do not push, do not open a pull request" in p
 
 
 def test_worked_task_is_never_started_again_without_requeue(tmp_path):

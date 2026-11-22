@@ -699,15 +699,14 @@ DEFAULT_WORKER_RULES = (
     "and never by DDL that needs the owner's approval (table structure, new or dropped tables): prepare the exact statement and file a question issue instead. "
     "Creating indexes, triggers and views is allowed, in IF NOT EXISTS form. "
     "(2) File a question issue only when an existing ADR or standing rule makes the solution impossible, or a privilege is missing; never file a task. "
-    "(3) When you stop without a pull request, leave a comment on the task issue that starts with `[boot-worker stopped]` and says why. "
-    "(4) Never merge. "
+    "(3) When you stop without a commit, leave one comment on the task issue that starts with `[boot-worker stopped]` and says why. "
+    "(4) Never merge, never push, never open a pull request: commit in this worktree only; the Orchestrator pushes your branch and opens the draft pull request. "
     "(5) Commit only files that belong to the task (no archived memories, no session-report edits unless the task is about them).")
 
 
 def worker_prompt(entry, project_cfg, rules=None):
     """The task prompt of a worker (ADR 0019). First action: mark the issue in progress by assigning it to the Manager login (what the cockpit reads
-    as stage `in progress`); then the rules block (`worker_rules`, ADR 0020; None = the default, a config value replaces it); then the work, a DRAFT
-    pull request, and the standing limits. The job never does the assignment itself."""
+    as stage `in progress`); then the rules block (`worker_rules`, ADR 0020; None = the default, a config value replaces it); then the work (local commits only; the job pushes and opens the draft pull request, ADR 0020) and the standing limits. The job never does the assignment itself."""
     if rules is None:
         rules = DEFAULT_WORKER_RULES
     elif not isinstance(rules, str):
@@ -715,8 +714,8 @@ def worker_prompt(entry, project_cfg, rules=None):
     rules = (rules.strip() + " ") if rules.strip() else ""
     return (f"FIRST ACTION, before reading or changing anything else: run `gh issue edit {entry['number']} -R {project_cfg['repo']} --add-assignee {project_cfg['manager']}` "
             f"to mark issue {entry['number']} in progress. {rules}Then work on issue {entry['number']} of {project_cfg['repo']} (title: {entry['title']}). "
-            "Read it with gh, do the work on this branch, commit, push the branch and open a DRAFT pull request. Do not merge, do not remove any label or assignment, "
-            "do not set released, priority, due or cancelled labels, do not send, submit or delete anything outside this repository. Stop when the pull request is open.")
+            "Read it with gh, do the work on this branch and commit it here. Do not push, do not open a pull request, do not merge, do not remove any label or assignment, "
+            "do not set released, priority, due or cancelled labels, do not send, submit or delete anything outside this repository. Stop when the work is committed.")
 
 
 def worker_command(worker_cfg, prompt):
@@ -728,6 +727,20 @@ def worker_command(worker_cfg, prompt):
     if deny:
         cmd += ["--disallowedTools", ",".join(deny)]
     return cmd
+
+
+def default_branch(git):
+    """Default branch name via `git` (a callable taking the argument list, raising RuntimeError on failure): origin/HEAD, else `main`."""
+    try:
+        return git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]).strip().split("/", 1)[-1] or "main"
+    except RuntimeError:
+        return "main"
+
+
+def check_push_target(branch, prefix, default):
+    """The job pushes only a branch that carries the worker prefix and is not the default branch (ADR 0020); anything else raises."""
+    if not prefix or not branch.startswith(prefix) or branch == default or ":" in branch or branch.startswith("-"):
+        raise RuntimeError(f"refused to push {branch!r}: only {prefix!r}* branches, never the default branch {default!r}")
 
 
 def find_symlinks(root):

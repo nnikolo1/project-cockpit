@@ -168,6 +168,14 @@ class Gh:
         rows = json.loads(out or "[]")
         return rows[0]["number"] if rows else None
 
+    def open_draft_pr(self, project, branch, title, body):
+        """The Orchestrator's act (ADR 0020): a DRAFT pull request from `branch` against the repository's default branch -> its number."""
+        out = self._cockpit().run_gh(["pr", "create", "--draft", "-R", self.projects[project]["repo"], "--head", branch, "--title", title, "--body", body])
+        digits = (out or "").strip().rstrip("/").rsplit("/", 1)[-1]
+        if not digits.isdigit():
+            raise RuntimeError(f"could not read the pull request number from: {(out or '')[:120]}")
+        return int(digits)
+
     def comment(self, project, number, body):
         self._cockpit().run_gh(["issue", "comment", str(number), "-R", self.projects[project]["repo"], "--body", body])
 
@@ -236,6 +244,25 @@ class Workers:
         sh = "{ " + " ".join(_q(x) for x in cmd) + f" ; }} > {_q(str(self.dir / (wid + '.out')))} 2>&1 ; echo $? > {_q(str(rc))}"
         p = subprocess.Popen(["sh", "-c", sh], cwd=wt, start_new_session=True, env={**os.environ, **self.env})
         return dict(id=wid, pid=p.pid, rc=str(rc))
+
+    def _paths(self, entry, project_cfg):
+        repo_dir = pathlib.Path(project_cfg["dir"]).expanduser()
+        return repo_dir, repo_dir.parent / f"{repo_dir.name}-wt-boot-{entry['number']}", f"{self.cfg.get('branch_prefix', 'boot/')}{entry['number']}"
+
+    def commits_ahead(self, entry, project_cfg):
+        """Number of commits on the worker's branch that the default branch does not have (0 = the worker committed nothing)."""
+        repo_dir, _, branch = self._paths(entry, project_cfg)
+        base = core.default_branch(lambda c: run(["git", "-C", str(repo_dir)] + c, timeout=30))
+        return int(run(["git", "-C", str(repo_dir), "rev-list", "--count", f"{base}..{branch}"], timeout=30).strip() or 0)
+
+    def push(self, entry, project_cfg):
+        """The job's own push of the worker's branch (ADR 0020), only to its own `branch_prefix` branch and never to the default branch;
+        the explicit refspec cannot name another target. -> the branch name."""
+        repo_dir, _, branch = self._paths(entry, project_cfg)
+        core.check_push_target(branch, self.cfg.get("branch_prefix", "boot/"),
+                               core.default_branch(lambda c: run(["git", "-C", str(repo_dir)] + c, timeout=30)))
+        run(["git", "-C", str(repo_dir), "push", "origin", f"refs/heads/{branch}:refs/heads/{branch}"], timeout=120)
+        return branch
 
     def poll(self, h):
         """None while running, else the exit code."""
