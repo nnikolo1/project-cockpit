@@ -1,6 +1,6 @@
 # Research brief: orchestration of unattended assistant work
 
-Status: brief for two independent studies, 2026-11-22. Generic wording on purpose (public repository).
+Status: SUPERSEDED on 2026-11-22 by the owner's own brief `brief-owner-2026.11.22.md` and the context digest `context-digest-owner-2026.11.22.md`. This assistant-written brief steered the first three studies and the reviewer (their reports exist on branches fit-gap-orchestration, fit-gap-orchestration-b, sota-ai-orchestration and review-orchestration); the owner found it too wordy and too steering (it fixed constraints, for example a single source of truth, that the owner wants open to challenge). Kept as history only; new studies must not use it.
 Modules: docs
 
 ## 1. Why this study exists
