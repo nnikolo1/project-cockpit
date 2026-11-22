@@ -212,8 +212,11 @@ class Workers:
     a tool allowlist from the config, and the gh login (the Manager); it is told to open a DRAFT pull request and never to merge.
     The exit code lands in a file next to the log, so a later poll can tell finished from unfinished without a live parent."""
 
-    def __init__(self, cfg, data_dir):
+    def __init__(self, cfg, data_dir, env=None, rules=None):
+        """env: `worker_env` (None = the default role marker; a mapping replaces it); rules: `worker_rules` (None = the default block)."""
         self.cfg, self.dir = cfg, pathlib.Path(data_dir) / "workers"
+        self.env = dict(core.DEFAULT_WORKER_ENV if env is None else env)
+        self.rules = rules
         self.dir.mkdir(parents=True, exist_ok=True)
 
     def start(self, entry, project_cfg):
@@ -223,11 +226,15 @@ class Workers:
         wt = repo_dir.parent / f"{repo_dir.name}-wt-boot-{entry['number']}"
         if not wt.exists():
             run(["git", "-C", str(repo_dir), "worktree", "add", str(wt), "-b", branch], timeout=60)
-        prompt = core.worker_prompt(entry, project_cfg)
-        cmd = [x.replace("{prompt}", prompt) for x in self.cfg["command"]]
+        links = core.find_symlinks(wt)  # ADR 0020: no worker in a worktree with symbolic links; nothing is changed or removed
+        if links:
+            raise RuntimeError("symbolic link(s) in the worktree, worker NOT started: " + ", ".join(f"{n} -> {t}" for n, t in links[:5])
+                               + f". To fix: remove the link(s) from {wt} (or the branch) by hand and requeue the task")
+        prompt = core.worker_prompt(entry, project_cfg, self.rules)
+        cmd = core.worker_command(self.cfg, prompt)
         rc = self.dir / f"{wid}.rc"
         sh = "{ " + " ".join(_q(x) for x in cmd) + f" ; }} > {_q(str(self.dir / (wid + '.out')))} 2>&1 ; echo $? > {_q(str(rc))}"
-        p = subprocess.Popen(["sh", "-c", sh], cwd=wt, start_new_session=True)
+        p = subprocess.Popen(["sh", "-c", sh], cwd=wt, start_new_session=True, env={**os.environ, **self.env})
         return dict(id=wid, pid=p.pid, rc=str(rc))
 
     def poll(self, h):

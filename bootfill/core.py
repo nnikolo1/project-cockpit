@@ -691,13 +691,67 @@ def worker_candidates(queue, running, lines):
     return ok, drop
 
 
-def worker_prompt(entry, project_cfg):
+DEFAULT_WORKER_ENV = {"BOOTFILL_ROLE": "worker"}
+
+DEFAULT_WORKER_RULES = (
+    "RULES (the repository's instruction file applies in full): "
+    "(1) The real database may be changed only by insert and update through the project's sanctioned writer functions, never by deletion "
+    "and never by DDL that needs the owner's approval (table structure, new or dropped tables): prepare the exact statement and file a question issue instead. "
+    "Creating indexes, triggers and views is allowed, in IF NOT EXISTS form. "
+    "(2) File a question issue only when an existing ADR or standing rule makes the solution impossible, or a privilege is missing; never file a task. "
+    "(3) When you stop without a pull request, leave a comment on the task issue that starts with `[boot-worker stopped]` and says why. "
+    "(4) Never merge. "
+    "(5) Commit only files that belong to the task (no archived memories, no session-report edits unless the task is about them).")
+
+
+def worker_prompt(entry, project_cfg, rules=None):
     """The task prompt of a worker (ADR 0019). First action: mark the issue in progress by assigning it to the Manager login (what the cockpit reads
-    as stage `in progress`); then the work, a DRAFT pull request, and the standing limits. The job never does the assignment itself."""
+    as stage `in progress`); then the rules block (`worker_rules`, ADR 0020; None = the default, a config value replaces it); then the work, a DRAFT
+    pull request, and the standing limits. The job never does the assignment itself."""
+    if rules is None:
+        rules = DEFAULT_WORKER_RULES
+    elif not isinstance(rules, str):
+        rules = " ".join(str(r) for r in rules)
+    rules = (rules.strip() + " ") if rules.strip() else ""
     return (f"FIRST ACTION, before reading or changing anything else: run `gh issue edit {entry['number']} -R {project_cfg['repo']} --add-assignee {project_cfg['manager']}` "
-            f"to mark issue {entry['number']} in progress. Then work on issue {entry['number']} of {project_cfg['repo']} (title: {entry['title']}). "
+            f"to mark issue {entry['number']} in progress. {rules}Then work on issue {entry['number']} of {project_cfg['repo']} (title: {entry['title']}). "
             "Read it with gh, do the work on this branch, commit, push the branch and open a DRAFT pull request. Do not merge, do not remove any label or assignment, "
             "do not set released, priority, due or cancelled labels, do not send, submit or delete anything outside this repository. Stop when the pull request is open.")
+
+
+def worker_command(worker_cfg, prompt):
+    """The final worker command line (ADR 0020): `command` with {prompt} and {branch_prefix} filled in, plus `--disallowedTools` rendered from
+    `disallowed` (comma-joined; a deny rule beats an allow rule in the assistant CLI). A config value replaces the defaults; nothing is merged."""
+    prefix = worker_cfg.get("branch_prefix", "boot/")
+    cmd = [x.replace("{prompt}", prompt).replace("{branch_prefix}", prefix) for x in worker_cfg["command"]]
+    deny = [d.replace("{branch_prefix}", prefix) for d in (worker_cfg.get("disallowed") or [])]
+    if deny:
+        cmd += ["--disallowedTools", ",".join(deny)]
+    return cmd
+
+
+def find_symlinks(root):
+    """Symbolic links directly in `root` or one level down (the `.git` entry is skipped) -> list of (relative path, target text).
+    A link into a database, or out of the worktree, must never reach a worker (ADR 0020); the job only reads, never changes."""
+    import os
+    found = []
+    try:
+        top = sorted(os.scandir(root), key=lambda e: e.name)
+    except OSError as ex:
+        raise RuntimeError(f"worktree not readable: {ex}") from None
+    for e in top:
+        if e.name == ".git":
+            continue
+        if e.is_symlink():
+            found.append((e.name, os.readlink(e.path)))
+        elif e.is_dir(follow_symlinks=False):
+            try:
+                for c in sorted(os.scandir(e.path), key=lambda c: c.name):
+                    if c.is_symlink():
+                        found.append((f"{e.name}/{c.name}", os.readlink(c.path)))
+            except OSError:
+                pass
+    return found
 
 
 def contract_worker(now, project, number, title, state, pr=None, note=""):

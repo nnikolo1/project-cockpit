@@ -22,3 +22,4 @@ Short records of why the cockpit is the way it is. One decision per file, one sc
 | [0017](0017-boot-filling-quota-history.md) | Boot-filling job: quota history with token counts, one record per poll (proposed) | proposed |
 | [0018](0018-boot-filling-stale-quota-readings.md) | Boot-filling job: stale or missing quota readings are unknown or estimated, never invented (amends 0017) | proposed |
 | [0019](0019-boot-filling-never-twice.md) | Boot-filling job: released once, worked once; silent GitHub timeline thinning fixed; the worker marks in progress (amends 0014, 0015) | proposed |
+| [0020](0020-boot-filling-worker-privileges-tier-a.md) | Boot-filling job: worker privileges tier A (tool lists, no symlinks, role marker, rules block); what is enforced and what is not | proposed |

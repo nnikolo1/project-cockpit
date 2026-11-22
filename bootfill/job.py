@@ -559,7 +559,7 @@ def main(argv=None):
     own_cwd.mkdir(parents=True, exist_ok=True)  # the job's own headless calls run here, so their transcripts land in one recognisable, excluded folder
     exclude = list(cfg["transcript_exclude"]) + [f"*{core.encode_cwd(own_cwd)}*"]
     ctx = Ctx(cfg, a.data_dir, A.Gh(cfg["projects"]), A.Quota(cfg["quota_feed"], cfg.get("quota_refresh_cmd"), cwd=own_cwd), A.Idle(cfg["transcript_glob"], exclude),
-              A.Workers(cfg["worker"], a.data_dir), A.Judge(cfg["judge_cmd"], cwd=own_cwd), A.Notifier(cfg.get("notify_cmd")), excl, A.Processes(),
+              A.Workers(cfg["worker"], a.data_dir, env=cfg.get("worker_env"), rules=cfg.get("worker_rules")), A.Judge(cfg["judge_cmd"], cwd=own_cwd), A.Notifier(cfg.get("notify_cmd")), excl, A.Processes(),
               A.AuthorityJudge(cfg["judge_cmd"], cfg["authority_excerpt_chars"], cwd=own_cwd),
               QH.TokenScanner(cfg["transcript_glob"], exclude, pathlib.Path(a.data_dir) / "token-cache.json"))
     ctx.keep_awake = A.KeepAwake()
