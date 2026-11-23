@@ -52,6 +52,9 @@
   {"path": "tests/fixtures/cardmeta/", "module": "core", "basis": "synthetic inputs of tests/test_cardmeta.py"},
   {"path": "CLAUDE.md", "module": "internal/agents", "basis": "decided 2026-11-20 with the Internal restructure (issue 28): standing instructions for assistants are exactly what Internal/Agent policies holds; it was ambiguous only while no such module existed"},
   {"path": ".gitignore", "module": "internal/devops", "basis": "decided 2026-11-20: repository configuration is DevOps; it was ambiguous only while no such module existed"},
-  {"path": ".github/workflows/test.yml", "module": "internal/devops", "basis": "decided 2026-11-20: CI workflow is DevOps; it was ambiguous only while no such module existed"}
+  {"path": ".github/workflows/test.yml", "module": "internal/devops", "basis": "decided 2026-11-20: CI workflow is DevOps; it was ambiguous only while no such module existed"},
+  {"path": ".claude/", "module": "internal/agents", "basis": "agent policies and skills (owner, 2026-11-23: the agent-brief skill)"},
+  {"path": "tools/check_brief.py", "module": "internal/agents", "basis": "the check the agent-brief skill runs before a background agent is launched; its test tests/tools/test_check_brief.py follows it"},
+  {"path": "tests/tools/test_check_brief.py", "module": "internal/agents", "basis": "test of tools/check_brief.py"}
  ]
 }
