@@ -2,6 +2,7 @@
 
 Status: draft, owner-authored
 Date: 2026-11-23
+Source of truth: this file (owner decision, 2026-11-23; the earlier Google Doc is no longer maintained)
 Modules: internal/bootfilling
 
 Every requirement below is the owner's own statement or was approved by the owner. The sub-points carry letters because the text refers to them (for example 3i, 4f, 4q).
