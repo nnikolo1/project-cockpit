@@ -35,13 +35,14 @@ Every requirement below is the owner's own statement or was approved by the owne
 - 3f. As of now, no retries of failed jobs are foreseen; this can be changed via "Settings" in the Cockpit UI.
 - 3g. At each Dispatcher firing a heartbeat line records: the time; the Workers running and what the firing did (started a Worker, nothing to do, or skipped, with the reason); the host's memory pressure level, free disk on the data volume, CPU load average and power source (AC or battery); and the container's memory and CPU use against its limits, if the container tool can report them. The line is written to the processing log.
 - 3h. The Dispatcher also monitors the quota. Ideally, this shall be from the proxy counts for each Worker. If, for whatever reason, this is not feasible, it maintains running estimates which start from the last interactive session and are incremented with the tokens reported in the good-bye notes. The quota utilisation is just statistics visualised in the UI. At this stage, no decisions are to be based on it.
-- 3i. A Worker running more than 20 minutes ("runaway") is stopped by the in-guest `timeout`; the Dispatcher then marks its task "failed" (reason: over 20 minutes). The limit can be changed in the Cockpit UI.
+- 3i. A Worker is a "runaway" and is killed by the Dispatcher if it has run more than 40 minutes since its launch or has made no record for more than 10 minutes. The task is marked "failed" (reasons: over 40 minutes, no activity). Both limits can be changed in the Cockpit UI.
 - 3j. If a Worker has not written "started" within 1 minute of launch, the Dispatcher kills it and marks the task "failed" (reason: no start).
 - 3k. At each firing the Dispatcher starts the container if it is not running, then starts the proxy on the container network's gateway address if it is not listening. If either cannot be started, it skips the firing and records the reason.
 - 3l. The start check (3j) is made at each firing, so a Worker that has not written "started" is killed within one firing interval after the 1-minute limit.
 - 3m. The Dispatcher does not tear down the Workers' workspaces. Old task folders are mopped up later.
 - 3n. If the free disk space on the data volume is below 10 GiB, the Dispatcher skips the firing and records the reason.
-- 3o. Every call the Dispatcher makes to the container tool has a time limit. If a call exceeds it, the Dispatcher skips the firing and records the reason.
+- 3o. The Dispatcher stores the launch time of each Worker. A Worker's last record is the time of its last request through the proxy; if the proxy cannot tell, it is the last-modified time of the Worker's session transcript. The runaway checks (3i) are made at each firing, so a Worker may exceed its limits by up to one firing interval.
+- 3p. Every call the Dispatcher makes to the container tool has a time limit. If a call exceeds it, the Dispatcher skips the firing and records the reason.
 
 **4. Workers**
 
@@ -49,7 +50,7 @@ Every requirement below is the owner's own statement or was approved by the owne
 - 4b. All Workers run in one container, at any time.
 - 4c. The container is Apple's native macOS `container` tool, using plain `container run` (not `container machine`): one long-lived container with `--init`, a fixed `--memory` (4-6 GB) and `--cpus`, volumes only for the worker area and an outbox, and no `--ssh`.
 - 4d. A LaunchAgent in the owner's logged-in session keeps the proxy running and holds `caffeinate -i` for as long as it does.
-- 4e. The image has no sudo; the Dispatcher starts each Worker with `container exec --user workerN`, using a `workerN` that no running Worker is using, under an in-guest `timeout` set to the runaway limit (20 minutes by default, see 3i).
+- 4e. The image has no sudo; the Dispatcher starts each Worker with `container exec --user workerN`, using a `workerN` that no running Worker is using, under an in-guest `timeout` of twice the runaway limit (80 minutes by default) as a backstop if the Dispatcher is down.
 - 4f. On the host, a small reverse proxy listens only on the container network's gateway address, forwards only `POST /v1/messages` (and `count_tokens`) to the model API, strips any client credential and adds the credentials corresponding to the owner's subscription; each Worker holds its own dummy token, so that the proxy can tell the Workers apart. The Workers' Claude Code points `ANTHROPIC_BASE_URL` at it.
 - 4g. The token usage can be inferred from the proxy, and this shall be done.
 - 4h. The Workers' environment switches off non-essential traffic: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `DISABLE_TELEMETRY=1`, `DISABLE_ERROR_REPORTING=1`, `skipWebFetchPreflight: true` or the WebFetch tool denied, `ENABLE_CLAUDEAI_MCP_SERVERS=false`, `CLAUDE_CODE_DISABLE_ARTIFACT=1`, `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1`, and a per-Worker `CLAUDE_CONFIG_DIR`.
@@ -66,14 +67,14 @@ Every requirement below is the owner's own statement or was approved by the owne
 **5. Processing log**
 
 - 5a. Each significant change of state related to Workers and the Dispatcher is recorded in the processing log; each entry names the task and its task folder.
-- 5b. Every failed task records its reason in the processing log: no start, over 20 minutes, no note, or an unusable note.
+- 5b. Every failed task records its reason in the processing log: no start, over 40 minutes, no activity, no note, or an unusable note.
 - 5c. The processing log is stored where the processing occurs, on the owner's MacBook.
 - 5d. The processing log is not part of any git repository.
 - 5e. The processing log is backed up on GDrive once a day. The access details are stored in a configuration file which is not part of the git repository.
 
 **6. Settings**
 
-- 6a. Settings (the Dispatcher's interval and on/off switch, retries, the number of Workers and the runaway limit) are stored in a configuration file in the Cockpit's local data folder, outside git.
+- 6a. Settings (the Dispatcher's interval and on/off switch, retries, the number of Workers and the two runaway limits) are stored in a configuration file in the Cockpit's local data folder, outside git.
 - 6b. The Dispatcher reads the file at each firing.
 
 ## Approach
