@@ -30,17 +30,18 @@ Every requirement below is the owner's own statement or was approved by the owne
 - 3a. The Dispatcher's function is to assign tasks to Workers. Any "released" tasks can be assigned. The Dispatcher follows the priority and takes into account deadlines and blockers.
 - 3b. The Dispatcher runs on the host, not in a container.
 - 3c. The Dispatcher is started by launchd every 2 minutes; this can be changed via "Settings" in the Cockpit UI. It can also be disabled there. At each firing it starts at most one Worker, so the Workers are started one by one.
-- 3d. The Dispatcher puts a git bundle of the current main of the task's repository (the one its issue belongs to) and a task file (the task's title and text) into the Worker's `inbox/` (see 4q).
+- 3d. The Dispatcher puts a git bundle of the current main of the task's repository (the one its issue belongs to) and a task file (the task's title and text) into the Worker's `inbox/` (see 4p).
 - 3e. For each Worker whose process has ended, the Dispatcher fetches the Worker's git bundle, reads its good-bye note and decides whether the Worker was successful: the task becomes "unmerged" if the outcome is "done" and the bundle holds at least one commit, otherwise "failed". The fetched branch is created in the task's repository on the host under the name `worker/<task-id>`; the Dispatcher does not push it or open a pull request.
 - 3f. As of now, no retries of failed jobs are foreseen; this can be changed via "Settings" in the Cockpit UI.
 - 3g. At each Dispatcher firing a heartbeat line records: the time; the Workers running and what the firing did (started a Worker, nothing to do, or skipped, with the reason); the host's memory pressure level, free disk on the data volume, CPU load average and power source (AC or battery); and the container's memory and CPU use against its limits, if the container tool can report them. The line is written to the processing log.
 - 3h. The Dispatcher also monitors the quota. Ideally, this shall be from the proxy counts for each Worker. If, for whatever reason, this is not feasible, it maintains running estimates which start from the last interactive session and are incremented with the tokens reported in the good-bye notes. The quota utilisation is just statistics visualised in the UI. At this stage, no decisions are to be based on it.
 - 3i. A Worker running more than 20 minutes ("runaway") is stopped by the in-guest `timeout`; the Dispatcher then marks its task "failed" (reason: over 20 minutes). The limit can be changed in the Cockpit UI.
 - 3j. If a Worker has not written "started" within 1 minute of launch, the Dispatcher kills it and marks the task "failed" (reason: no start).
-- 3k. At each firing the Dispatcher starts the container if it is not running. If the proxy is down, it skips the firing and records the reason.
+- 3k. At each firing the Dispatcher starts the container if it is not running, then starts the proxy on the container network's gateway address if it is not listening. If either cannot be started, it skips the firing and records the reason.
 - 3l. The start check (3j) is made at each firing, so a Worker that has not written "started" is killed within one firing interval after the 1-minute limit.
 - 3m. The Dispatcher does not tear down the Workers' workspaces. Old task folders are mopped up later.
 - 3n. If the free disk space on the data volume is below 10 GiB, the Dispatcher skips the firing and records the reason.
+- 3o. Every call the Dispatcher makes to the container tool has a time limit. If a call exceeds it, the Dispatcher skips the firing and records the reason.
 
 **4. Workers**
 
@@ -49,19 +50,18 @@ Every requirement below is the owner's own statement or was approved by the owne
 - 4c. The container is Apple's native macOS `container` tool, using plain `container run` (not `container machine`): one long-lived container with `--init`, a fixed `--memory` (4-6 GB) and `--cpus`, volumes only for the worker area and an outbox, and no `--ssh`.
 - 4d. A LaunchAgent in the owner's logged-in session keeps the proxy running and holds `caffeinate -i` for as long as it does.
 - 4e. The image has no sudo; the Dispatcher starts each Worker with `container exec --user workerN`, using a `workerN` that no running Worker is using, under an in-guest `timeout` set to the runaway limit (20 minutes by default, see 3i).
-- 4f. If the first step shows the container has no usable network, a host Unix socket is mounted into the container (the runtime relays it over vsock); inside, a tiny relay exposes it on `127.0.0.1`, and the Workers' Claude Code points `ANTHROPIC_BASE_URL` there.
-- 4g. On the host, a small reverse proxy listens only on that socket (or, if the container has a network, only on the host's gateway address), forwards only `POST /v1/messages` (and `count_tokens`) to the model API, strips any client credential and adds the credentials corresponding to the owner's subscription; the container holds a dummy token.
-- 4h. The token usage can be inferred from the proxy, and this shall be done.
-- 4i. The Workers' environment switches off non-essential traffic: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `DISABLE_TELEMETRY=1`, `DISABLE_ERROR_REPORTING=1`, `skipWebFetchPreflight: true` or the WebFetch tool denied, `ENABLE_CLAUDEAI_MCP_SERVERS=false`, `CLAUDE_CODE_DISABLE_ARTIFACT=1`, `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1`, and a per-Worker `CLAUDE_CONFIG_DIR`.
-- 4j. The Workers run as unprivileged users.
-- 4k. Each Worker works in its own separate clone, without hardlinks.
-- 4l. The Workers clone into a folder named after the task (`<task-id>/clone`) on the container's own disk or a named volume, so that clones of different tasks never overwrite each other; the bind mounts only hand work in and results out.
-- 4m. The CLI, python, pytest and git are baked into the image.
-- 4n. The Worker confirms that it has picked a task up by writing the file `outbox/started` (its content is ignored); the Dispatcher picks the file up and sets the status of the task to "WIP".
-- 4o. The Worker composes a good-bye note, `outbox/goodbye.json`, with: `outcome` ("done" or "gave_up"), `summary` (a report of the work done), `branch`, and `tokens` (the tokens consumed).
-- 4p. The Worker writes a git bundle of its branch, named in the note, into `outbox/result.bundle`.
-- 4q. Each task has a folder `<worker area>/<task-id>/` with two subfolders: (1) `inbox/`: `main.bundle` (the current main of the task's repository) and `task.md` (the task's title and text), written by the Dispatcher; (2) `outbox/`: `started`, `goodbye.json` and `result.bundle`, written by the Worker.
-- 4r. The Dispatcher launches each Worker with a fixed instruction: read `inbox/task.md`; work in your own clone; write `outbox/started` first; at the end write `outbox/goodbye.json` and `outbox/result.bundle`.
+- 4f. On the host, a small reverse proxy listens only on the container network's gateway address, forwards only `POST /v1/messages` (and `count_tokens`) to the model API, strips any client credential and adds the credentials corresponding to the owner's subscription; each Worker holds its own dummy token, so that the proxy can tell the Workers apart. The Workers' Claude Code points `ANTHROPIC_BASE_URL` at it.
+- 4g. The token usage can be inferred from the proxy, and this shall be done.
+- 4h. The Workers' environment switches off non-essential traffic: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `DISABLE_TELEMETRY=1`, `DISABLE_ERROR_REPORTING=1`, `skipWebFetchPreflight: true` or the WebFetch tool denied, `ENABLE_CLAUDEAI_MCP_SERVERS=false`, `CLAUDE_CODE_DISABLE_ARTIFACT=1`, `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1`, and a per-Worker `CLAUDE_CONFIG_DIR`.
+- 4i. The Workers run as unprivileged users.
+- 4j. Each Worker works in its own separate clone, without hardlinks.
+- 4k. The Workers clone into a folder named after the task (`<task-id>/clone`) on the container's own disk or a named volume, so that clones of different tasks never overwrite each other; the bind mounts only hand work in and results out.
+- 4l. The CLI, python, pytest and git are baked into the image.
+- 4m. The Worker confirms that it has picked a task up by writing the file `outbox/started` (its content is ignored); the Dispatcher picks the file up and sets the status of the task to "WIP".
+- 4n. The Worker composes a good-bye note, `outbox/goodbye.json`, with: `outcome` ("done" or "gave_up"), `summary` (a report of the work done), `branch`, and `tokens` (the tokens consumed).
+- 4o. The Worker writes a git bundle of its branch, named in the note, into `outbox/result.bundle`.
+- 4p. Each task has a folder `<worker area>/<task-id>/` with two subfolders: (1) `inbox/`: `main.bundle` (the current main of the task's repository) and `task.md` (the task's title and text), written by the Dispatcher; (2) `outbox/`: `started`, `goodbye.json` and `result.bundle`, written by the Worker.
+- 4q. The Dispatcher launches each Worker with a fixed instruction: read `inbox/task.md`; work in your own clone; write `outbox/started` first; at the end write `outbox/goodbye.json` and `outbox/result.bundle`.
 
 **5. Processing log**
 
@@ -78,7 +78,7 @@ Every requirement below is the owner's own statement or was approved by the owne
 
 ## Approach
 
-1. There is a major unresearched part in this spec: how the Workers reach the proxy. As a first step, check whether the container has working networking on macOS 15.3. If so, the proxy listens on the host's gateway address and the socket relay (4f) is not needed. If not, check whether the socket relay (4f) is feasible. If neither works, the spec needs to be reworked. The egress policy (what the Workers may reach) is to be proposed after this step.
+1. The first step was done on 2026-11-23: on macOS 15.3.1 the container has working networking and a Worker reaches a host listener on the gateway address; the socket relay also works. The gateway variant is used. The egress policy (what the Workers may reach) is still to be proposed.
 2. If feasible, this would be a major re-work of the codebase of Project Cockpit.
 3. Eliminate anything from the codebase which contradicts a specification set in this document.
 4. When implementing, follow the philosophy of minimalism ("less is more").
