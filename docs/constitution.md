@@ -40,6 +40,8 @@ It will also try to address the mismatch in information bandwidth and context wi
 
 The human behind this project management system is acutely aware that there are dozens, if not hundreds, of such project management systems. Thus there will be a preference towards "buy" (or adopt) vs. "build". Yet, there is no fear in threading new ground - the super-human power of the agents drastically lowers the cost of code generation. There will be no fear in yielding this super-power judiciously. The goal is to come up with a project-management system which is light-weight, as general (and generalizable) as possible,  and leverages as much of the pre-existing tooling and infrastructure, as practical.
 
+Any text or code produced follows the principle "less is more": it is included only if it is absolutely necessary or specifically asked for by the owner.
+
 ## The Definition of a Task
 
 The "task" is the most basic entity in the project management system. It can be many types - a bug fix, a feature implementation or something else. It can consist of other tasks (and thus tasks may form trees of sub-tasks) and it could depend on other tasks. A task is about change of state - the creation, update or deletion of a file (e.g. code, documentation, configuration setting, database record). This is a (preliminary) list of its attributes:
