@@ -226,6 +226,40 @@
     "retention": "the image is kept until rebuilt; clones live on the container's own disk until the container is removed (the Dispatcher does not tear them down, 3m)"
    }
   },
+  "taskqueue/e2e": {
+   "files": [
+    {
+     "path": "<base>/ (the --base argument of tools/e2e_failure_paths.py, for example /tmp/e2e)",
+     "kind": "dir",
+     "personal_data": false,
+     "written_by": "taskqueue/e2e",
+     "note": "scratch folder of one failure-path run: the throwaway repository's clone, the Dispatcher's state and processing log of that run; created by the driver and not kept on purpose"
+    },
+    {
+     "path": "tools/e2e/",
+     "kind": "dir",
+     "personal_data": false,
+     "written_by": "taskqueue/e2e",
+     "note": "the model stub and the Containerfile of the derived stub image (sources only); the built image is held by the container tool"
+    }
+   ],
+   "logging": [
+    {
+     "logger": "e2e_failure_paths",
+     "file": null,
+     "rotation": "none: the driver writes to its standard error"
+    },
+    {
+     "logger": "stub_claude",
+     "file": null,
+     "rotation": "none: the stub runs inside the container and writes to its standard error"
+    }
+   ],
+   "policy": {
+    "backup": "the driver and the stub: the git repository and its remote; the scratch folder and the stub image are rebuildable and are not backed up on purpose",
+    "retention": "the scratch folder is the caller's to delete (a run does not clean the folder it was given); the stub image is kept until rebuilt"
+   }
+  },
   "docs": {
    "files": [
     {
