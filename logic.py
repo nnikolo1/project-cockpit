@@ -1435,8 +1435,17 @@ def transcript_report(text, quota=None, aggregate=None):
         q = peaks.get(k, {})
         row["five_hour"], row["seven_day"] = (q.get(w, {}).get("high") for w in ("five_hour", "seven_day"))
     top = sorted(sessions.items(), key=lambda kv: (-kv[1]["total"], kv[0]))[:SESSIONS_SHOWN]
-    return dict(periods=list(rows.values()), sources=[dict(key=k, **v) for k, v in sorted(sources.items(), key=lambda kv: (-kv[1]["total"], kv[0]))],
+    return dict(periods=_history(rows.values(), [m[0] for m in msgs] + [_epoch(f"{d}T00:00:00+00:00") for d in days]), sources=[dict(key=k, **v) for k, v in sorted(sources.items(), key=lambda kv: (-kv[1]["total"], kv[0]))],
                 sessions=[dict(v, key=k[1]) for k, v in top], aggregate_days=dict(sorted(days.items())))
+
+
+def _history(rows, times):
+    """The rows of the Interactive sessions history: none before the first month with data (all keys start with YYYY-MM), and no hour
+    without messages (as in Today's readings)."""
+    if not times:
+        return []
+    first = dt.datetime.fromtimestamp(min(times), dt.timezone.utc).strftime("%Y-%m")
+    return [r for r in rows if r["key"][:7] >= first and not (r["level"] == "hour" and not r["messages"] and not r["total"])]
 
 
 def _add_messages(into, c):

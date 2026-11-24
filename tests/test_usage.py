@@ -165,9 +165,9 @@ def test_transcript_periods_follow_the_quota_grading_with_peaks():
     rows = {(p["level"], p["key"]): p for p in r["periods"]}
     h10 = rows[("hour", "2026-11-20T10:00")]
     assert (h10["messages"], h10["input_tokens"], h10["total"], h10["five_hour"], h10["seven_day"]) == (2, 2, 20, 40, 22)
-    assert rows[("hour", "2026-11-20T12:00")]["messages"] == 0 and ("hour", "2026-11-20T13:00") not in rows
+    assert ("hour", "2026-11-20T12:00") not in rows and ("hour", "2026-11-20T13:00") not in rows   # an hour without messages has no row
     assert rows[("day", "2026-11-19")]["total"] == 10 and rows[("day", "2026-11-19")]["five_hour"] is None
-    assert [p["label"] for p in r["periods"]][-1] == "2026-11-20 12:00"
+    assert [p["label"] for p in r["periods"]][-1] == "2026-11-20 10:00"
 
 
 def test_transcript_sources_and_sessions_rank_by_total_and_cap():
