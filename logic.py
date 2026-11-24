@@ -785,3 +785,33 @@ def card_meta(texts, project=None, now=None):
         c.pop("data")
         out[kind] = c
     return out
+
+
+# ---------- Dispatcher settings (spec 3c, 3f, 3i, 3j, 4a, 6a) ----------
+SETTING_MINIMUMS = {"runaway_minutes": 30, "idle_minutes": 10, "start_minutes": 1}  # a rule of the page only; the Dispatcher does not enforce them
+SETTING_LABELS = {"enabled": "enabled", "interval_minutes": "interval", "retries": "retries", "workers": "workers",
+                  "runaway_minutes": "runaway limit", "idle_minutes": "no-activity limit", "start_minutes": "no-start limit"}
+
+
+def validate_settings(form, defaults, workers_cap):
+    """The seven Dispatcher settings from a form -> a dict of the same keys, or ValueError with a clear message.
+    `defaults` gives the keys and which are switches; whole numbers only, retries from 0, the rest from 1, workers up to the image's cap."""
+    out = {}
+    for k, default in defaults.items():
+        v, name = form.get(k), SETTING_LABELS.get(k, k)
+        if isinstance(default, bool):
+            if not isinstance(v, bool):
+                raise ValueError(f"{name} must be on or off")
+            out[k] = v
+            continue
+        if isinstance(v, str) and re.fullmatch(r"\s*\d+\s*", v):
+            v = int(v)
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise ValueError(f"{name} must be a whole number")
+        low = SETTING_MINIMUMS.get(k, 0 if k == "retries" else 1)
+        if v < low:
+            raise ValueError(f"{name} must be at least {low}" + (" minutes" if k.endswith("_minutes") else ""))
+        if k == "workers" and v > workers_cap:
+            raise ValueError(f"workers must be at most {workers_cap} (the worker users defined in the image)")
+        out[k] = v
+    return out
