@@ -9,7 +9,7 @@
   --accent:#0f766e;--accent-ink:#ffffff;--accent-tint:#e3f1ee;
   --p1:#b42318;--p1-ink:#ffffff;--p2:#f7d9bf;--p2-ink:#7d3503;--p3:#e6ecf5;--p3-ink:#2f4a73;
   --danger:#b42318;--danger-tint:#fdecea;--warn:#fbf0d9;--warn-ink:#724d00;
-  --s-embryo:#d9a400;--s-released:#c0392b;--s-progress:#0f766e;--s-done:#2e7d32;
+  --s-embryo:#d9a400;--s-released:#c0392b;--s-wip:#0f766e;--s-unmerged:#2f5fc4;--s-failed:#8e3aa8;--s-merged:#2e7d32;
   --edge:#8b8a82;--add-bg:#e4f3e8;--add-ink:#14532d;--del-bg:#fdecea;--del-ink:#8f1d12;--font:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
@@ -17,13 +17,13 @@
   --accent:#3fb5a8;--accent-ink:#0b1f1c;--accent-tint:#17332f;
   --p1:#e5645a;--p1-ink:#1a0503;--p2:#5a3a1c;--p2-ink:#f5d5b5;--p3:#26354d;--p3-ink:#cfdcf0;
   --danger:#f17b72;--danger-tint:#3a1a17;--warn:#3a2f12;--warn-ink:#f0cf84;
-  --s-embryo:#e0b94a;--s-released:#e57368;--s-progress:#3fb5a8;--s-done:#5fbf7a;--edge:#77766e;--add-bg:#143323;--add-ink:#9fe0b4;--del-bg:#3a1a17;--del-ink:#f4a8a0;color-scheme:dark}}
+  --s-embryo:#e0b94a;--s-released:#e57368;--s-wip:#3fb5a8;--s-unmerged:#7ea2f0;--s-failed:#c98be0;--s-merged:#5fbf7a;--edge:#77766e;--add-bg:#143323;--add-ink:#9fe0b4;--del-bg:#3a1a17;--del-ink:#f4a8a0;color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#151513;--surface:#1e1e1b;--line:#34342f;--ink:#ecebe6;--muted:#a09f97;
   --accent:#3fb5a8;--accent-ink:#0b1f1c;--accent-tint:#17332f;
   --p1:#e5645a;--p1-ink:#1a0503;--p2:#5a3a1c;--p2-ink:#f5d5b5;--p3:#26354d;--p3-ink:#cfdcf0;
   --danger:#f17b72;--danger-tint:#3a1a17;--warn:#3a2f12;--warn-ink:#f0cf84;
-  --s-embryo:#e0b94a;--s-released:#e57368;--s-progress:#3fb5a8;--s-done:#5fbf7a;--edge:#77766e;--add-bg:#143323;--add-ink:#9fe0b4;--del-bg:#3a1a17;--del-ink:#f4a8a0;color-scheme:dark}
+  --s-embryo:#e0b94a;--s-released:#e57368;--s-wip:#3fb5a8;--s-unmerged:#7ea2f0;--s-failed:#c98be0;--s-merged:#5fbf7a;--edge:#77766e;--add-bg:#143323;--add-ink:#9fe0b4;--del-bg:#3a1a17;--del-ink:#f4a8a0;color-scheme:dark}
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font:14px/1.45 var(--font);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 48px}
 .wrap{max-width:1180px;margin:0 auto}
@@ -164,8 +164,8 @@ tr.blocked{background:var(--danger-tint)}tr.blocked td:first-child{box-shadow:in
 <script>
 //LOGIC-START
 let TODAY='';
-const STAGES=['embryo','released','in_progress','completed','cancelled'];
-const STAGE_LABEL={embryo:'embryo',released:'released',in_progress:'in progress',completed:'completed',cancelled:'cancelled'};
+const STAGES=['embryo','released','wip','unmerged','failed','merged','cancelled'];  /* the six states, then the separate marker cancelled */
+const STAGE_LABEL={embryo:'embryo',released:'released',wip:'WIP',unmerged:'unmerged',failed:'failed',merged:'merged',cancelled:'cancelled'};
 const TYPES=['feature','bug','decision','research','doc','devops','test'];
 function byKey(d,k){return d.tasks.find(t=>t.key===k);}
 function eff(d,t){
@@ -177,8 +177,8 @@ function eff(d,t){
   return {d:null,inh:false};
 }
 function days(a,b){const f=s=>{const x=s.split('-');return Date.UTC(+x[0],+x[1]-1,+x[2]);};return Math.round((f(b)-f(a))/864e5);}
-function isOpen(t){return t.stage!=='completed'&&t.stage!=='cancelled';}
-function unfinished(d,t){return t.blockedBy.map(k=>byKey(d,k)).filter(b=>b&&b.stage!=='completed');}
+function isOpen(t){return t.stage==='embryo'||t.stage==='released'||t.stage==='wip';}
+function unfinished(d,t){return t.blockedBy.map(k=>byKey(d,k)).filter(b=>b&&b.stage!=='merged');}
 function isBlocked(d,t){return (t.stage==='embryo'||t.stage==='released')&&unfinished(d,t).length>0;}
 function blocksCount(d,t){return d.tasks.filter(x=>isOpen(x)&&x.blockedBy.includes(t.key)).length;}
 function conflict(d,t){
@@ -206,8 +206,8 @@ function blockHtml(t){
     const c=conflict(D,t);if(c)h+='<div class="warnline">'+esc(c.key)+' is due '+eff(D,c).d+', after this</div>';}
   if(bc&&isOpen(t))h+=' <span class="chip blocks">blocks '+bc+'</span>';
   return h;}
-function stageHtml(t){return t.stage==='in_progress'?'<b>in progress</b>':(t.stage==='embryo'||t.stage==='cancelled'?'<span class="muted">'+STAGE_LABEL[t.stage]+'</span>':STAGE_LABEL[t.stage]);}
-function sortKey(t){return STAGES.indexOf(t.stage)===2?0:(t.stage==='released'?1:(t.stage==='embryo'?2:3));}
+function stageHtml(t){return t.stage==='wip'?'<b>WIP</b>':(t.stage==='embryo'||t.stage==='cancelled'?'<span class="muted">'+STAGE_LABEL[t.stage]+'</span>':STAGE_LABEL[t.stage]);}
+function sortKey(t){return t.stage==='wip'?0:(t.stage==='released'?1:(t.stage==='embryo'?2:3));}
 
 
 /* Data layer: everything comes from the backend (/api/state, /api/timeline, /api/code). Nothing is stored in the browser. */
@@ -224,8 +224,8 @@ const modShort=id=>{const m=MODULES.find(x=>x.id===id);return m?(m.parent?modSho
 const inMod=(id,n)=>id===n||id.startsWith(n+'/');
 const modCell=id=>{const m=MODULES.find(x=>x.id===id);return m&&m.parent?esc(modShort(m.parent))+' <span class="crumb">/ '+esc(m.short)+'</span>':esc(modShort(id));};
 function stageBar(r){const n=STAGES.reduce((a,s)=>a+r[s],0);if(!n)return '';
-  const col={embryo:'var(--s-embryo)',released:'var(--s-released)',in_progress:'var(--s-progress)',completed:'var(--s-done)'};
-  return STAGES.slice(0,4).map(s=>r[s]?'<i style="width:'+(r[s]/n*100)+'%;background:'+col[s]+'"></i>':'').join('');}
+  const col={embryo:'var(--s-embryo)',released:'var(--s-released)',wip:'var(--s-wip)',unmerged:'var(--s-unmerged)',failed:'var(--s-failed)',merged:'var(--s-merged)'};
+  return STAGES.slice(0,6).map(s=>r[s]?'<i style="width:'+(r[s]/n*100)+'%;background:'+col[s]+'"></i>':'').join('');}
 /* Two chip rows: the top-level modules, then (indented) the sub-modules of the selected one. ex = only tasks at the module level itself. */
 function modFilter(cur,act,first,allOf,unsorted,extra){
   const top=cur.split('/')[0];
@@ -433,12 +433,12 @@ function vBacklog(){
   if(UI.mod!=='all')ts=ts.filter(t=>UI.ex?t.module===UI.mod:inMod(t.module,UI.mod));
   if(f==='blocked')ts=ts.filter(t=>isBlocked(D,t));else if(f!=='all')ts=ts.filter(t=>t.stage===f);
   ts.sort((a,b)=>sortKey(a)-sortKey(b)||((a.prio||9)-(b.prio||9))||((eff(D,a).d||'9').localeCompare(eff(D,b).d||'9'))||a.key.localeCompare(b.key,undefined,{numeric:true}));
-  const fl=['all','embryo','released','in_progress','completed','cancelled','blocked'];
+  const fl=['all','embryo','released','wip','unmerged','failed','merged','cancelled','blocked'];
   let h='<div class="page"><div class="card"><h2>Being processed now</h2>'+(run.length?run.map(t=>'<div class="row" style="gap:10px;margin-top:8px"><b class="mono">'+esc(t.key)+'</b><button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button><span class="muted">'+modCell(t.module)+'</span></div>').join(''):'<p class="muted" style="margin:8px 0 0">Nothing is running now.</p>')
    +'<p style="margin:12px 0 0">'+(nx?'Next up: <button class="linkbtn" data-act="open" data-k="'+nx.key+'"><b>'+esc(nx.key)+'</b> '+esc(nx.title)+'</button> <span class="muted">'+(nx.prio?'P'+nx.prio:'no priority')+' · '+(eff(D,nx).d?'due '+eff(D,nx).d:'no deadline')+' · unblocks '+blocksCount(D,nx)+' · '+nx.cls+'</span> '+(SIM()?'<button class="btn small" data-act="take" data-k="'+nx.key+'">Simulate: Orchestrator takes it</button>':''):'<span class="muted">Nothing released and unblocked.</span>')+'</p>'
    +'<p class="muted" style="font-size:12px;margin:6px 0 0">Ranking (column #): your priority, then deadline, then tasks that unblock the most, then must before nice.</p></div>'
    +'<div class="row spread"><div><h1>Task Queue</h1><span class="muted">'+ts.length+' of '+D.tasks.length+' tasks</span></div>'+(ST()?'<button class="btn primary" data-act="new">New task</button>':'')+'</div>';
-  h+='<div class="filters" role="group" aria-label="Stage filter">'+fl.map(x=>'<button class="f" data-act="filter" data-v="'+x+'" aria-pressed="'+(f===x)+'">'+(x==='in_progress'?'in progress':x)+'</button>').join('')+'</div>';
+  h+='<div class="filters" role="group" aria-label="Stage filter">'+fl.map(x=>'<button class="f" data-act="filter" data-v="'+x+'" aria-pressed="'+(f===x)+'">'+(STAGE_LABEL[x]||x)+'</button>').join('')+'</div>';
   h+=modFilter(UI.mod,'modf','all modules','all of {}',true);
   h+='<div class="row muted" style="font-size:13px;gap:8px">Priority <span class="chip p1">P1</span><span class="chip p2">P2</span><span class="chip p3">P3</span><span class="chip p0">none yet</span> &nbsp; Blockers <span class="chip blk">blocked by</span><span class="chip blocks">blocks n</span> &nbsp; <span class="inh">↳ italic = inherited deadline</span></div>';
   h+='<div class="tblbox"><table><thead><tr><th title="Rank in the Orchestrator queue">#</th><th>ID</th><th>Title</th><th>Module</th><th>Priority</th><th>Class</th><th>Deadline</th><th>Blockers</th><th>Stage</th>'+(ST()?'<th class="act-col">Submit</th><th class="act-col">Cancel</th>':'')+'</tr></thead><tbody>';
@@ -650,10 +650,10 @@ function wfSvg(){
   [[10,290,'Manager (you)',155],[310,290,'Orchestrator (AI agent)',455],[610,280,'Worker (AI agent)',750]].forEach(l=>{s+='<rect class="lane" x="'+l[0]+'" y="40" width="'+l[1]+'" height="1080" rx="10"/><text class="lh" x="'+l[3]+'" y="28" text-anchor="middle">'+l[2]+'</text>';});
   s+=box(155,86,230,46,['File a task or sub-task'],'m')+box(455,86,250,46,['Orchestrator files an embryo','(a suggestion)'])+pill(155,166,120,'Embryo')
    +dia(155,250,170,76,['Release it?'])+box(155,350,250,56,['Release: set priority P1 to P3','and an optional deadline'],'m')+pill(155,422,120,'Released')
-   +dia(455,422,200,80,['All blockers','completed?'])+box(455,520,260,62,['Rank the queue: priority, deadline,','tasks that unblock the most,','must before nice'])
+   +dia(455,422,200,80,['All blockers','merged?'])+box(455,520,260,62,['Rank the queue: priority, deadline,','tasks that unblock the most,','must before nice'])
    +box(455,606,250,44,['Assign to a free Worker','(workers setting)'])+box(750,606,230,56,['Work in its own work tree','and commit on a branch'],'w')
-   +dia(455,712,170,76,['Checks pass?'])+box(455,806,230,44,['Accept, merge and push'])+pill(455,876,130,'Completed')
-   +box(155,806,240,44,['Cancel at any time','before completed'],'m')+pill(155,876,130,'Cancelled')
+   +dia(455,712,170,76,['Checks pass?'])+box(455,806,230,44,['Accept, merge and push'])+pill(455,876,130,'Merged')
+   +box(155,806,240,44,['Cancel at any time','before merged'],'m')+pill(155,876,130,'Cancelled')
    +'<text class="lh" x="155" y="944" text-anchor="middle" style="text-anchor:middle">Change requests</text>'
    +box(455,1010,270,56,['Orchestrator proposes a new','priority or deadline'])+dia(155,1010,190,80,['Accept the','proposal?'])+box(155,1090,230,40,['Change applied as the Manager'],'m');
   s+=ar('M155 109V150')+ar('M455 109V166H215')+ar('M155 182V212')+ar('M155 288V322')+lab(166,308,'yes')
@@ -692,7 +692,7 @@ function drawerTask(t){
   if(t.stage==='embryo'){
     h+='<form class="card" data-form="release" data-k="'+t.key+'" style="display:flex;flex-direction:column;gap:12px"><h2>Release this task</h2><div class="field"><span>Priority</span>'+seg('rp',2)+'<span class="muted" style="font-size:12px">1 is first. The Orchestrator ranks by priority, then deadline.</span></div>'
      +'<div class="field"><label for="rd">Deadline (optional)</label><input id="rd" type="date" name="d"><span class="muted" style="font-size:12px">Complete by the end of this day. Leave empty to inherit from the parent or module.</span></div><button class="btn primary">Release</button></form>';
-  }else if(t.stage==='released'||t.stage==='in_progress'){
+  }else if(t.stage==='released'||t.stage==='wip'){
     h+='<form class="card" data-form="change" data-k="'+t.key+'" style="display:flex;flex-direction:column;gap:12px"><h2>Change</h2><div class="field"><span>Priority</span>'+seg('cp',t.prio)+'</div><div class="field"><label for="cd">Deadline</label><input id="cd" type="date" name="d" value="'+(t.deadline||'')+'"><span class="muted" style="font-size:12px">Clear it to inherit again.</span></div><div class="row"><button class="btn primary">Save changes</button></div></form>';
   }else h+='<p class="muted">Finished work is not reopened. File a new task instead.</p><button class="btn" data-act="followup" data-k="'+t.key+'">File a follow-up task</button>';
   if(isOpen(t)){
@@ -700,7 +700,7 @@ function drawerTask(t){
      +'<form class="row" data-form="block" data-k="'+t.key+'"><label class="muted" for="bk" style="font-size:13px">Blocked by</label><select id="bk" name="b" style="border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:6px;min-height:36px;max-width:220px">'+others.filter(isOpen).map(x=>'<option value="'+x.key+'">'+esc(x.key)+' '+esc(x.title.slice(0,28))+'</option>').join('')+'</select><button class="btn small">Add</button></form></div>';
     h+='<div class="row"><button class="btn small" data-act="subtask" data-k="'+t.key+'">File a sub-task</button>'
      +(SIM()&&t.stage==='released'&&!isBlocked(D,t)?'<button class="btn small" data-act="take" data-k="'+t.key+'">Simulate: Orchestrator takes it</button>':'')
-     +(SIM()&&t.stage==='in_progress'?'<button class="btn small" data-act="complete" data-k="'+t.key+'">Simulate: Orchestrator completes it</button>':'')
+     +(SIM()&&t.stage==='wip'?'<button class="btn small" data-act="complete" data-k="'+t.key+'">Simulate: Orchestrator completes it</button>':'')
      +''+armBtn('cancel',t)+'</div>';
   }
   }

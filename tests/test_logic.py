@@ -25,18 +25,23 @@ def derive(issues, events=(), project=None, mods=(), grow=True):
 def test_stage_derivation():
     assert L.stage(iss(1), set()) == "embryo"
     assert L.stage(iss(1), {"released"}) == "released"
-    assert L.stage(iss(1, assignees=["w"]), {"released"}) == "in_progress"
-    assert L.stage(iss(1, state="closed", reason="completed"), set()) == "completed"
+    assert L.stage(iss(1, assignees=["w"]), {"released"}) == "wip"
+    assert L.stage(iss(1, state="closed", reason="completed"), set()) == "merged"
     assert L.stage(iss(1, state="closed", reason="not_planned"), set()) == "cancelled"
     assert L.stage(iss(1), {"cancelled"}) == "cancelled"
 
 
-def test_is_running_in_progress_or_wip_label():
-    assert L.is_running("in_progress", [])
-    assert L.is_running("released", ["wip"])
-    assert not L.is_running("released", [])
-    assert not L.is_running("completed", ["wip"])
-    assert not L.is_running("cancelled", ["wip"])
+def test_stage_follows_the_state_labels():
+    for s in ("wip", "unmerged", "failed", "merged"):
+        assert L.stage(iss(1, ["released", s]), {"released"}) == s
+    assert L.stage(iss(1, ["failed"], state="closed", reason="completed"), set()) == "failed"
+    assert L.stage(iss(1, ["wip"]), {"cancelled"}) == "cancelled"
+
+
+def test_is_running_is_wip():
+    assert L.is_running("wip")
+    for s in ("embryo", "released", "unmerged", "failed", "merged", "cancelled"):
+        assert not L.is_running(s)
 
 
 def test_derive_marks_running_tasks():
@@ -110,7 +115,7 @@ def test_derive_full_task():
     events = [ev(5, l, "labeled", M) for l in ("released", "P2", "due:2026-12-01")]
     tasks, mods = derive(issues, events, {5: dict(est=100, used=40, hint="Should", status="Todo", module="")})
     t = {x["key"]: x for x in tasks}["AB-05"]
-    assert (t["title"], t["module"], t["type"], t["cls"], t["prio"], t["deadline"], t["stage"]) == ("Fix it", "alpha", "bug", "must", 2, "2026-12-01", "in_progress")
+    assert (t["title"], t["module"], t["type"], t["cls"], t["prio"], t["deadline"], t["stage"]) == ("Fix it", "alpha", "bug", "must", 2, "2026-12-01", "wip")
     assert (t["parent"], t["blockedBy"], t["assignee"], t["est"], t["used"], t["hint"]) == ("AB-02", ["#3"], "w", 100, 40, "Should")
     assert t["desc"] == "Why." and t["evidence"] == [dict(text="doc", url="https://x/y")] and [m["id"] for m in mods if m["id"] != "unassigned"] == ["alpha"]
 
@@ -153,6 +158,13 @@ def test_task_events_and_unauthorised_suffix():
               dict(number=1, name="w", kind="assigned", actor=M, t="2026-01-01T12:00:00Z")]
     out = L.task_events(events, {1: "AB-01"}, M)
     assert [(e["key"], e["actor"], e["text"]) for e in out] == [("AB-01", M, "assigned to w"), ("AB-01", "eve", "set priority P2 (unauthorised)"), ("AB-01", M, "released")]
+
+
+def test_task_events_name_the_state_labels():
+    events = [ev(1, "wip", "labeled", "dispatcher", "2026-01-01T10:00:00Z"), ev(1, "wip", "unlabeled", "dispatcher", "2026-01-01T11:00:00Z"),
+              ev(1, "bug", "labeled", M)]
+    out = L.task_events(events, {1: "AB-01"}, M)
+    assert [e["text"] for e in out] == ["state wip removed", "state wip"]
 
 
 A = [{"path": "src/", "module": "alpha"}, {"path": "core/", "module": "alpha"},

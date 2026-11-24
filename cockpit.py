@@ -340,7 +340,7 @@ def _plan(form, S, repo, simulate):
     """-> (ops, message). Each op is the argument list of one `gh` call; '{id}' in an op is the database id returned by the
     previous call. Raises ValueError for anything the framework rules forbid (checked here as well as in the page)."""
     a = form.get("action")
-    openstage = ("embryo", "released", "in_progress")
+    openstage = ("embryo", "released", "wip")
     if a == "new":
         title = (form.get("title") or "").strip()
         mod, typ, cls = form.get("module") or "", form.get("type") or "task", form.get("cls") or "nice"
@@ -372,7 +372,7 @@ def _plan(form, S, repo, simulate):
         add, remove = _prio_due(t, p, d and _date(d), bool(d))
         return _edit(repo, t, ["released"] + add, remove), f"{t['key']} released as {p}" + (f", deadline {d}" if d else "")
     if a == "change":
-        if t["stage"] not in ("released", "in_progress"):
+        if t["stage"] not in ("released", "wip"):
             raise ValueError(f"{t['key']} is {t['stage']}; priority and deadline change only on released tasks")
         p = _prio(form["p"]) if form.get("p") else None
         d = form.get("d") if "d" in form else None
@@ -405,11 +405,11 @@ def _plan(form, S, repo, simulate):
         if not simulate:
             raise PermissionError("simulation is off (start with --simulate-orchestrator)")
         if a == "take":
-            if t["stage"] != "released" or any(b for b in t["blockedBy"] if next(x for x in S["tasks"] if x["key"] == b)["stage"] != "completed"):
+            if t["stage"] != "released" or any(b for b in t["blockedBy"] if next(x for x in S["tasks"] if x["key"] == b)["stage"] != "merged"):
                 raise ValueError(f"{t['key']} is not a released, unblocked task")
-            return [["issue", "edit", n, "-R", repo, "--add-assignee", "@me"], ["issue", "comment", n, "-R", repo, "--body", "Orchestrator (simulated) takes this task."]], f"{t['key']} in progress"
-        if t["stage"] != "in_progress":
-            raise ValueError(f"{t['key']} is not in progress")
+            return [["issue", "edit", n, "-R", repo, "--add-assignee", "@me"], ["issue", "comment", n, "-R", repo, "--body", "Orchestrator (simulated) takes this task."]], f"{t['key']} WIP"
+        if t["stage"] != "wip":
+            raise ValueError(f"{t['key']} is not WIP")
         return [["issue", "close", n, "-R", repo, "--reason", "completed"], ["issue", "comment", n, "-R", repo, "--body", "Orchestrator (simulated) completed this task."]], f"{t['key']} completed"
     raise ValueError(f"unknown action {a!r}")
 

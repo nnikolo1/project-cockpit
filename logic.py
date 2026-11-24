@@ -10,7 +10,8 @@ log = logging.getLogger("cockpit")
 
 PRIO = ["P1", "P2", "P3"]
 PROTECTED = {"released", "cancelled", *PRIO}
-STAGES = ["embryo", "released", "in_progress", "completed", "cancelled"]
+STATES = ["wip", "unmerged", "failed", "merged"]  # set by the Dispatcher as issue labels; an issue carries at most one
+STAGES = ["embryo", "released", *STATES, "cancelled"]
 DUE = re.compile(r"^due:(\d{4}-\d{2}-\d{2})$")
 KEY = re.compile(r"^\[([A-Za-z][A-Za-z0-9]*-\d+)\]\s*")
 PROPOSAL = re.compile(r"<!--\s*pm:proposal\s*(\{.*?\})\s*-->", re.S)
@@ -109,18 +110,23 @@ def issues_needing_timeline(issues, events):
 
 
 def stage(issue, eff):
+    """The six task states (embryo, released, wip, unmerged, failed, merged) plus the separate marker `cancelled`."""
     if "cancelled" in eff or (issue["state"] == "closed" and issue.get("state_reason") == "not_planned"):
         return "cancelled"
+    lab = issue.get("labels") or []
+    for s in STATES:
+        if s in lab:
+            return s
     if issue["state"] == "closed":
-        return "completed"
+        return "merged"
     if issue.get("assignees"):
-        return "in_progress"
+        return "wip"
     return "released" if "released" in eff else "embryo"
 
 
-def is_running(stage_, labels):
-    """A job runs now: the task is in progress, or carries the Dispatcher's `wip` state label (and is not finished)."""
-    return stage_ == "in_progress" or (stage_ in ("embryo", "released") and "wip" in labels)
+def is_running(stage_):
+    """A job runs now: the task is WIP."""
+    return stage_ == "wip"
 
 
 def swap_priority(current, new):
@@ -237,7 +243,7 @@ def derive(issues, events, project, manager, mods, grow):
             stage=stage(i, eff), assignee=(i.get("assignees") or [None])[0], hint=hint, est=p.get("est"), used=p.get("used"),
             status=p.get("status", ""), created=i["created_at"], closed=i.get("closed_at"), author=i.get("author"),
             desc=body.split("**Evidence**")[0].strip()[:700], evidence=[dict(text=t, url=u) for t, u in LINK.findall(body)][:6],
-            labels=i["labels"], running=is_running(stage(i, eff), i["labels"]), flags=[f"unauthorised: {n} set by {a}" for n, a in sorted(bad.items())], bad=sorted(bad)))
+            labels=i["labels"], running=is_running(stage(i, eff)), flags=[f"unauthorised: {n} set by {a}" for n, a in sorted(bad.items())], bad=sorted(bad)))
     with_parents(mods)
     for m in mods:
         m["short"] = pnames.get(m["id"]) or short_name(m["name"])
@@ -254,6 +260,8 @@ def event_text(e):
     if e["kind"] == "closed":
         return "closed as " + ("not planned" if e["name"] == "not_planned" else "completed")
     verb = "removed" if e["kind"] == "unlabeled" else "set"
+    if n in STATES:
+        return f"state {n}" if verb == "set" else f"state {n} removed"
     if n == "released":
         return "released" if verb == "set" else "release removed"
     if n == "cancelled":
@@ -264,12 +272,12 @@ def event_text(e):
 
 
 def task_events(events, keys, manager):
-    """Protected-label / assignment / close events -> [{t, actor, key, text, kind}] newest first."""
+    """Protected-label / state-label / assignment / close events -> [{t, actor, key, text, kind}] newest first."""
     out = []
     for e in events:
-        if e["kind"] in ("labeled", "unlabeled") and not is_protected(e["name"]):
+        if e["kind"] in ("labeled", "unlabeled") and not is_protected(e["name"]) and e["name"] not in STATES:
             continue
-        text = event_text(e) + ("" if e["kind"] not in ("labeled", "unlabeled") or e["actor"] == manager else " (unauthorised)")
+        text = event_text(e) + ("" if e["kind"] not in ("labeled", "unlabeled") or e["name"] in STATES or e["actor"] == manager else " (unauthorised)")
         out.append(dict(t=e["t"].replace("T", " ")[:16], actor=e["actor"] or "unknown", key=keys.get(e["number"], f"#{e['number']}"), text=text, kind=e["kind"]))
     return sorted(out, key=lambda x: x["t"], reverse=True)
 

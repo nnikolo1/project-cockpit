@@ -34,7 +34,7 @@ def test_derive_tree_counts_rollup_and_unsorted():
     assert [t["module"] for t in tasks] == ["alpha/one", "alpha/two", "alpha", "unassigned", "beta"]
     m = {x["id"]: x for x in mods}
     assert (m["alpha"]["parent"], m["alpha"]["children"], m["alpha/one"]["parent"], m["alpha/one"]["children"]) == (None, ["alpha/one", "alpha/two"], "alpha", [])
-    assert m["alpha"]["counts"]["embryo"] == 1 and m["alpha"]["rollup"]["embryo"] == 2 and m["alpha"]["rollup"]["completed"] == 1
+    assert m["alpha"]["counts"]["embryo"] == 1 and m["alpha"]["rollup"]["embryo"] == 2 and m["alpha"]["rollup"]["merged"] == 1
     assert m["alpha/one"]["counts"] == m["alpha/one"]["rollup"] and m["alpha/one"]["desc"] == "First part"
     assert m["beta"]["rollup"]["embryo"] == 1 and m["unassigned"]["parent"] is None
 
