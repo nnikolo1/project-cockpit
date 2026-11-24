@@ -210,13 +210,11 @@ def test_ref_link_and_module_dir():
     assert L.module_dir("/r", dict(id="m", docs=None)) == pathlib.Path("/r/docs/project/m")
 
 
-def test_static_entries_and_module_facts(tmp_path):
-    assert L.static_entries(tmp_path, "m", "o/r") == [] and L.module_facts(tmp_path) == (None, None)
+def test_static_entries(tmp_path):
+    assert L.static_entries(tmp_path, "m", "o/r") == []
     (tmp_path / "timeline.json").write_text('{"events":[{"date":"2026-01-01","type":"milestone","text":"M","refs":[{"sha":"abc1234"}]}]}')
     (tmp_path / "backlog.json").write_text('{"read_on":"2026-01-02","items":[{"kind":"gap","status":"open"},{"kind":"gap","status":"done"}]}')
-    (tmp_path / "documents.json").write_text('{"sources":[1,2,3]}')
     assert [(e["d"], e["type"]) for e in L.static_entries(tmp_path, "m", "o/r")] == [("2026-01-01", "milestone"), ("2026-01-02", "gap")]
-    assert L.module_facts(tmp_path) == (1, 3)
 
 
 def test_code_view_and_missing_metrics():

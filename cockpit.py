@@ -383,8 +383,6 @@ def build_state(p):
     tasks, mods = L.derive(issues, events, project, p["manager"], (cfgm or {}).get("modules", []), grow=not cfgm)
     for t in tasks:
         t["modDl"] = L.module_deadline(deadlines, t["module"])  # (date, module it is set on): the sub-module's, else the module's
-    for m in mods:
-        m["gaps"], m["ndocs"] = L.module_facts(L.module_dir(p["git"], m)) if p["git"] and not m.get("virtual") else (None, None)
     keys = {i["number"]: L.split_title(i["title"], i["number"])[0] for i in issues}
     nums = {t["number"]: t for t in tasks}
     proposals = [dict(p, n=i["number"], key=keys[i["number"]]) for i in issues for p in L.parse_proposals(i["comments"])]
@@ -909,10 +907,7 @@ def local_modules_of(p):
     except (OSError, ValueError) as ex:
         log.warning("module map of %s unreadable: %s", p.get("name", ""), ex)
         cfgm = None
-    mods = L.local_modules((cfgm or {}).get("modules", []))
-    for m in mods:
-        m["gaps"], m["ndocs"] = L.module_facts(L.module_dir(p["git"], m)) if p.get("git") and not m.get("virtual") else (None, None)
-    return mods
+    return L.local_modules((cfgm or {}).get("modules", []))
 
 
 def card_metadata(p=None, now=None):

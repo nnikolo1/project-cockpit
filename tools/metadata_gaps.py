@@ -61,9 +61,6 @@ def collect(p, data_dir, now):
     if p.get("modules") and modules is not None:
         folder = pathlib.Path(p["modules"]).expanduser().parent / "modules"
         content = {m: {e: (folder / f"{L.module_stem(m)}.{e}").is_file() for e in ("txt", "svg")} for m in modules}
-    facts = None
-    if p.get("git") and modules is not None:
-        facts = {m["id"]: L.module_facts(L.module_dir(p["git"], m)) for m in cfgm["modules"]}
     try:
         entries = sorted(x.name for x in d.iterdir())
     except OSError:
@@ -77,7 +74,7 @@ def collect(p, data_dir, now):
         log.warning("quality bands not checked for %s: %s", p["name"], ex)
     return dict(quality=quality, modules=modules, cards=cards, metrics=metrics if isinstance(metrics, dict) else None, usage=usage,
                 policies=dict(config=L.rules_config(cfgm), files=files), descs={m["id"]: m.get("desc") for m in (cfgm or {}).get("modules", [])},
-                module_facts=facts, tracked=files, assign=(cfgm or {}).get("assign") if cfgm else None, docs_heads=docs_heads, content=content,
+                tracked=files, assign=(cfgm or {}).get("assign") if cfgm else None, docs_heads=docs_heads, content=content,
                 data_root=str(d), data_entries=entries)
 
 
