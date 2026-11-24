@@ -86,10 +86,10 @@ def test_quota_history_gives_vendor_windows_and_daily_maxima():
     d = {x["key"]: x for x in r["quota"]["days"]}
     assert len(r["quota"]["days"]) == 90 and d["2026-11-20"]["five_hour"] == 40 and d["2026-11-20"]["seven_day"] == 35
     assert d["2026-11-19"]["five_hour"] is None
-    h = {x["key"]: x for x in r["quota"]["hours"]}
-    assert list(h) == ["2026-11-20T04:00", "2026-11-20T06:00", "2026-11-21T00:00"]
-    assert h["2026-11-20T04:00"]["five_hour"] == dict(first=10, last=10, low=10, high=10) and h["2026-11-20T04:00"]["readings"] == 1
-    assert h["2026-11-20T04:00"]["reset5"] == "2026-11-20T08:30+00:00"
+    h = {x["key"]: x for x in r["quota"]["periods"]}
+    assert list(h) == ["2026-11-20", "2026-11-21T00:00"]  # the last reading is the anchor: Friday 21st 00:30; the 20th is an earlier day of its week
+    assert h["2026-11-20"]["five_hour"] == dict(first=10, last=40, low=10, high=40) and h["2026-11-20"]["readings"] == 2
+    assert h["2026-11-21T00:00"]["reset5"] == "2026-11-20T13:30+00:00"
 
 
 def test_get_usage_reads_the_quota_file(tmp_path):
@@ -98,7 +98,7 @@ def test_get_usage_reads_the_quota_file(tmp_path):
     (d / "proxy-usage.jsonl").write_text(USAGE)
     assert C.get_usage(dict(name="proj", repo="o/r"), data_dir=tmp_path)["quota"] is None
     (d / "quota-history.jsonl").write_text(q("2026-11-21T00:30:00+00:00", 5, 36, 1))
-    assert C.get_usage(dict(name="proj", repo="o/r"), data_dir=tmp_path)["quota"]["hours"][0]["seven_day"]["last"] == 36
+    assert C.get_usage(dict(name="proj", repo="o/r"), data_dir=tmp_path)["quota"]["periods"][0]["seven_day"]["last"] == 36
 
 
 def test_all_projects_table_sums_each_project(tmp_path):
@@ -115,11 +115,25 @@ def test_all_projects_table_sums_each_project(tmp_path):
     assert rows["none"] == dict(name="none")
 
 
-def test_hours_aggregate_the_readings_of_one_utc_hour():
-    end = int(L._epoch("2026-11-20T08:30:00+00:00"))
-    qt = "\n".join([q("2026-11-20T06:05:00+00:00", 10, 30, end), q("2026-11-20T06:20:00+00:00", 25, 31, end),
-                     q("2026-11-20T06:50:00+00:00", 20, 31, end)])
-    (hour,) = L._quota(qt, None)[1]["hours"]
-    assert hour["readings"] == 3
-    assert hour["five_hour"] == dict(first=10, last=20, low=10, high=25)
-    assert hour["seven_day"] == dict(first=30, last=31, low=30, high=31)
+def test_periods_are_graded_hour_day_week_month():
+    end = int(L._epoch("2026-11-25T08:30:00+00:00"))
+    at = ["2026-08-31T10:00:00+00:00",   # older than the two months before the current one (September, October): dropped
+          "2026-10-05T10:00:00+00:00", "2026-10-28T10:00:00+00:00",   # October: one month row (September has none)
+          "2026-11-03T10:00:00+00:00", "2026-11-04T10:00:00+00:00",   # week of 2026-11-02 (Monday), earlier week of November
+          "2026-11-09T10:00:00+00:00",                                # week of 2026-11-09
+          "2026-11-23T10:00:00+00:00", "2026-11-24T09:00:00+00:00",   # Monday and Tuesday of the current week: day rows
+          "2026-11-25T00:30:00+00:00",                                # Wednesday, before the 8 hours ending with the newest hour (01:00): its day row
+          "2026-11-25T05:10:00+00:00", "2026-11-25T05:40:00+00:00", "2026-11-25T08:20:00+00:00"]  # hour rows
+    qt = "\n".join(q(ts, 10 + i, 30, end) for i, ts in enumerate(at))
+    ps = L._quota(qt, None)[1]["periods"]
+    assert [(p["level"], p["key"]) for p in ps] == [
+        ("month", "2026-10"), ("week", "2026-11-02"), ("week", "2026-11-09"), ("day", "2026-11-23"), ("day", "2026-11-24"),
+        ("day", "2026-11-25"), ("hour", "2026-11-25T05:00"), ("hour", "2026-11-25T08:00")]
+    assert ps[0]["readings"] == 2 and ps[0]["five_hour"] == dict(first=11, last=12, low=11, high=12)
+    assert ps[6]["readings"] == 2 and ps[6]["five_hour"]["first"] == 19 and ps[6]["five_hour"]["last"] == 20
+
+
+def test_week_crossing_a_month_start_has_no_week_row():
+    end = int(L._epoch("2026-12-01T08:30:00+00:00"))
+    qt = "\n".join([q("2026-11-30T10:00:00+00:00", 10, 30, end), q("2026-12-02T10:00:00+00:00", 20, 31, end)])
+    assert [(p["level"], p["key"]) for p in L._quota(qt, None)[1]["periods"]] == [("day", "2026-11-30"), ("hour", "2026-12-02T10:00")]

@@ -1130,7 +1130,6 @@ def _add(into, c):
 
 
 HISTORY_DAYS = 90
-RECENT_DAYS = 2
 
 
 def _pct(block, key):
@@ -1145,11 +1144,44 @@ def _iso(epoch):
     return dt.datetime.fromtimestamp(epoch, dt.timezone.utc).isoformat(timespec="minutes")
 
 
-def _hours(reads):
-    """Readings (oldest first) aggregated per UTC hour: the count and, per window, first, last, lowest and highest percentage, and the window's reset time."""
+HOURLY_HOURS = 8        # the newest readings are shown per hour for this many hours
+MONTHLY_MONTHS = 2      # whole months before the current one that are shown per month
+
+
+def _period(t, anchor):
+    """Where a reading at epoch t falls, seen from the newest reading `anchor`: (level, key, label) or None when older than shown.
+    Per hour for the last HOURLY_HOURS hours; per day for the earlier days of the current (Monday-first) week; per week for the earlier
+    weeks of the current month (the first one cut at the month's start); per month for the MONTHLY_MONTHS months before the current one."""
+    utc = dt.timezone.utc
+    a, x = dt.datetime.fromtimestamp(anchor, utc), dt.datetime.fromtimestamp(t, utc)
+    hour0 = a.replace(minute=0, second=0, microsecond=0) - dt.timedelta(hours=HOURLY_HOURS - 1)
+    week0 = (a - dt.timedelta(days=a.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    month0 = a.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    m = month0.year * 12 + month0.month - 1 - MONTHLY_MONTHS
+    older = dt.datetime(m // 12, m % 12 + 1, 1, tzinfo=utc)
+    if x >= hour0:
+        return "hour", x.strftime("%Y-%m-%dT%H:00"), x.strftime("%Y-%m-%d %H:00")
+    if x >= week0:
+        return "day", x.strftime("%Y-%m-%d"), x.strftime("%Y-%m-%d")
+    if x >= month0:
+        mon = max((x - dt.timedelta(days=x.weekday())).replace(hour=0, minute=0, second=0, microsecond=0), month0)
+        return "week", mon.strftime("%Y-%m-%d"), "week of " + mon.strftime("%Y-%m-%d")
+    if x >= older:
+        return "month", x.strftime("%Y-%m"), x.strftime("%Y-%m")
+    return None
+
+
+def _periods(reads):
+    """Readings (oldest first) aggregated in the graded periods of _period(): the count and, per window, first, last, lowest and highest
+    percentage, and the windows' reset times (of the last reading)."""
     out = {}
+    anchor = reads[-1]["t"] if reads else 0
     for r in reads:
-        h = out.setdefault(r["ts"][:13] + ":00", dict(key=r["ts"][:13] + ":00", readings=0, five_hour={}, seven_day={}, reset5=None, reset7=None))
+        p = _period(r["t"], anchor)
+        if p is None:
+            continue
+        level, key, label = p
+        h = out.setdefault((level, key), dict(level=level, key=key, label=label, readings=0, five_hour={}, seven_day={}, reset5=None, reset7=None))
         h["readings"] += 1
         for k in ("five_hour", "seven_day"):
             v = r[k]
@@ -1195,8 +1227,7 @@ def _quota(quota_text, end_day):
             for k in ("five_hour", "seven_day"):
                 if r[k] is not None and (d[k] is None or r[k] > d[k]):
                     d[k] = r[k]
-    cut = reads[-1]["t"] - RECENT_DAYS * 86400 if reads else 0
-    return ends, dict(days=[dict(key=k, **v) for k, v in days.items()], hours=_hours([r for r in reads if r["t"] >= cut]))
+    return ends, dict(days=[dict(key=k, **v) for k, v in days.items()], periods=_periods(reads))
 
 
 def usage_summary(rep):
