@@ -59,7 +59,7 @@ def test_no_text_or_path_in_output(tmp_path):
     tu.collect({"L": str(src)}, str(out))
     body = out.read_text()
     assert "SECRET" not in body and "/secret" not in body
-    assert set(out_lines(out)[0]) == {"ts", "source", "session", "message", "model", *tu.COUNTS}
+    assert set(out_lines(out)[0]) == {"ts", "source", "session", "agent", "message", "model", *tu.COUNTS}
 
 
 def test_atomic_rewrite_mode_and_no_leftover(tmp_path):
@@ -97,3 +97,30 @@ def test_main_parses_sources(tmp_path):
     out = tmp_path / "o.jsonl"
     tu.main(["--source", f"L={src}", "--out", str(out)])
     assert len(out_lines(out)) == 1
+
+
+def test_subagent_transcripts_belong_to_the_parent_session(tmp_path):
+    src = tmp_path / "src"
+    (src / "s1" / "subagents").mkdir(parents=True)
+    write(src, "s1.jsonl", [line("m1", ts="2026-01-02T00:00:01Z", usage={"input_tokens": 1})])
+    write(src / "s1" / "subagents", "agent-a1.jsonl", [line("m2", ts="2026-01-02T00:00:02Z", usage={"input_tokens": 5})])
+    write(src / "s1" / "subagents", "notes.txt", [line("m3", usage={"input_tokens": 9})])
+    out = tmp_path / "o.jsonl"
+    stats = tu.collect({"A": str(src)}, str(out))
+    assert [(r["session"], r["agent"], r["input_tokens"]) for r in out_lines(out)] == [("s1", None, 1), ("s1", "agent-a1", 5)]
+    assert stats["files"] == 2
+
+
+def test_records_of_purged_transcripts_are_kept_and_repeated_labels_merge(tmp_path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir(); b.mkdir()
+    write(a, "s1.jsonl", [line("m1", ts="2026-01-02T00:00:01Z", usage={"input_tokens": 1})])
+    out = tmp_path / "o.jsonl"
+    tu.collect([("L", str(a)), ("L", str(b))], str(out))
+    (a / "s1.jsonl").unlink()  # Claude Code deletes the old transcript
+    write(b, "s2.jsonl", [line("m2", ts="2026-01-02T00:00:02Z", usage={"input_tokens": 2})])
+    stats = tu.collect([("L", str(a)), ("L", str(b))], str(out))
+    assert [(r["message"], r["input_tokens"]) for r in out_lines(out)] == [("m1", 1), ("m2", 2)]
+    assert stats["kept"] == 1 and stats["messages"] == 2
+    tu.collect([("L", str(b))], str(out))  # run again: nothing doubles
+    assert len(out_lines(out)) == 2

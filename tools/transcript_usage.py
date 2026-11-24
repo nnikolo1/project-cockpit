@@ -1,7 +1,7 @@
 """Collects the exact token counts of Claude Code session transcripts into transcript-usage.jsonl.
 
-Reads the *.jsonl transcripts directly in each source folder and keeps only the usage numbers of each message
-(never text, file contents or paths). Rewrites the whole output atomically (mode 0600). Contract:
+Reads the *.jsonl transcripts directly in each source folder and the sub-agent transcripts in <session>/subagents/ (attributed to the parent session) and keeps only the usage numbers of each message
+(never text, file contents or paths). Updates the output atomically (mode 0600) and never drops a record of an earlier run. Contract:
 docs/contracts/transcript-usage.md.
 
     python3 tools/transcript_usage.py --source LABEL=DIR [--source LABEL=DIR ...] --out FILE
@@ -30,7 +30,7 @@ def _ts(value):
     return d.astimezone(dt.timezone.utc).isoformat(timespec="seconds")
 
 
-def parse_line(line, source, session):
+def parse_line(line, source, session, agent=None):
     """A record for one transcript line, or None if it carries no usage; raises ValueError if unreadable."""
     obj = json.loads(line)
     msg = obj.get("message") if isinstance(obj, dict) else None
@@ -38,20 +38,21 @@ def parse_line(line, source, session):
         return None
     usage = msg["usage"]
     model = msg.get("model")
-    return {"ts": _ts(obj["timestamp"]), "source": source, "session": session, "message": str(msg["id"]),
+    return {"ts": _ts(obj["timestamp"]), "source": source, "session": session, "agent": agent, "message": str(msg["id"]),
             "model": model if isinstance(model, str) else None, **{k: _count(usage.get(k)) for k in COUNTS}}
 
 
-def read_transcript(path, source, stats):
-    """The records of one transcript, a message seen several times counted once (its last line wins)."""
-    session = os.path.splitext(os.path.basename(path))[0]
+def read_transcript(path, source, stats, session=None, agent=None):
+    """The records of one transcript, a message seen several times counted once (its last line wins). A sub-agent's transcript is
+    attributed to its parent session (`session`) and carries the agent id."""
+    session = session or os.path.splitext(os.path.basename(path))[0]
     seen = {}
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
             if not line.strip():
                 continue
             try:
-                rec = parse_line(line, source, session)
+                rec = parse_line(line, source, session, agent)
             except (ValueError, KeyError, TypeError, AttributeError):
                 stats["skipped"] += 1
                 continue
@@ -60,28 +61,65 @@ def read_transcript(path, source, stats):
     return list(seen.values())
 
 
+def _transcripts(folder):
+    """(path, session, agent) of the session transcripts directly in `folder` and of the sub-agent transcripts in `<session>/subagents/`."""
+    for name in sorted(os.listdir(folder)):
+        path = os.path.join(folder, name)
+        if name.endswith(".jsonl") and os.path.isfile(path):
+            yield path, None, None
+        elif os.path.isdir(os.path.join(path, "subagents")):
+            subs = os.path.join(path, "subagents")
+            for sub in sorted(os.listdir(subs)):
+                if sub.endswith(".jsonl") and os.path.isfile(os.path.join(subs, sub)):
+                    yield os.path.join(subs, sub), name, os.path.splitext(sub)[0]
+
+
+def _key(r):
+    return (r["source"], r["session"], r.get("agent"), r["message"])
+
+
+def _existing(path):
+    """The records of an earlier run (unreadable lines are dropped)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return []
+    out = []
+    for line in lines:
+        try:
+            r = json.loads(line)
+            _key(r)
+            out.append(r)
+        except (ValueError, KeyError, TypeError):
+            continue
+    return out
+
+
 def collect(sources, out):
-    """Rewrites `out` from the transcripts of `sources` ({label: dir}); returns the counters."""
-    stats = {"sources": 0, "files": 0, "messages": 0, "skipped": 0}
+    """Updates `out` from the transcripts of `sources` ({label: dir} or pairs, a label may repeat): the records already in `out` are kept
+    (Claude Code deletes old transcripts, the history must outlive them), a record seen again is refreshed; returns the counters."""
+    stats = {"sources": 0, "files": 0, "messages": 0, "skipped": 0, "kept": 0}
     records = []
-    for label, folder in sources.items():
+    for label, folder in (sources.items() if isinstance(sources, dict) else sources):
         folder = os.path.expanduser(folder)
         if not os.path.isdir(folder):
             log.warning("source %s: folder missing", label)
             continue
         stats["sources"] += 1
-        for name in sorted(os.listdir(folder)):
-            path = os.path.join(folder, name)
-            if not name.endswith(".jsonl") or not os.path.isfile(path):
-                continue
+        for path, session, agent in _transcripts(folder):
             try:
-                records += read_transcript(path, label, stats)
+                records += read_transcript(path, label, stats, session, agent)
                 stats["files"] += 1
             except OSError as e:
                 log.warning("source %s: a transcript is unreadable: %s", label, type(e).__name__)
-    records.sort(key=lambda r: (r["ts"], r["session"], r["message"]))
-    stats["messages"] = len(records)
     out = os.path.expanduser(out)
+    merged = {_key(r): r for r in _existing(out)}
+    stats["kept"] = len(merged)
+    merged.update({_key(r): r for r in records})
+    stats["kept"] = len(merged) - len({_key(r) for r in records})
+    records = sorted(merged.values(), key=lambda r: (r["ts"], r["session"], r["message"]))
+    stats["messages"] = len(records)
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(out)), prefix=".transcript-usage-")
     try:
         with os.fdopen(fd, "w") as f:
@@ -93,8 +131,8 @@ def collect(sources, out):
         if os.path.exists(tmp):
             os.unlink(tmp)
         raise
-    log.info("sources=%d files=%d messages=%d skipped=%d", stats["sources"], stats["files"],
-             stats["messages"], stats["skipped"])
+    log.info("sources=%d files=%d messages=%d (kept from earlier runs %d) skipped=%d", stats["sources"], stats["files"],
+             stats["messages"], stats["kept"], stats["skipped"])
     return stats
 
 
@@ -104,12 +142,12 @@ def main(argv=None):
     p.add_argument("--out", required=True)
     a = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s transcript_usage %(message)s")
-    sources = {}
+    sources = []
     for s in a.source:
         label, sep, folder = s.partition("=")
         if not sep or not label or not folder:
             p.error("--source needs LABEL=DIR")
-        sources[label] = folder
+        sources.append((label, folder))
     collect(sources, a.out)
 
 
