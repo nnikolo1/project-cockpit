@@ -121,6 +121,7 @@ class Dispatcher:
     probes: Probes
     actions: list = field(default_factory=list)
     relay_path: str = "/opt/relay.py"   # the relay script inside the image
+    repo_dir: str = ""                  # the task repository's clone on the host (3d); the bundle is made from it
 
     # -- bookkeeping --
     def _fail(self, st, user, w, reason):
@@ -201,26 +202,30 @@ class Dispatcher:
         free = [f"worker{i}" for i in range(1, n + 1) if f"worker{i}" not in st["workers"]]
         if not free:
             return "nothing to do (all Workers busy)"
-        task = choose_task(self.tasks.released(), {w["task_id"] for w in st["workers"].values()})
+        active = {w["task_id"] for w in st["workers"].values()}
+        released = self.tasks.released()
+        for t in released:  # 3m: a folder in the area means the task was attempted before; never select it again
+            if t.id not in active and os.path.exists(os.path.join(self.runtime.cfg.area, t.id)):
+                log.info("task %s skipped: its folder already exists in the Workers' area", t.id)
+                active.add(t.id)
+        task = choose_task(released, active)
         if task is None:
             return "nothing to do (no released task)"
         user = free[0]
         try:
             if not self.runtime.egress_blocked(user):
                 raise Skip(f"egress check failed for {user}")
-            folder = self.runtime.prepare_task(task.id, task.repo, f"# {task.title}\n\n{task.text}\n")
+            folder = self.runtime.prepare_task(task.id, self.repo_dir, f"# {task.title}\n\n{task.text}\n")
             proc = self.runtime.launch(user, task.id)
         except rt.ContainerTimeout as e:
             raise Skip(f"container call over its time limit: {e}")
         except rt.ContainerError as e:
             raise Skip(f"container call failed: {e}")
-        except (OSError, ValueError) as e:  # e.g. the task folder already exists: this task cannot start
+        except (OSError, ValueError) as e:  # a problem of the Dispatcher, not a failure of the task: no state is set
             log.exception("task %s cannot be prepared", task.id)
-            self.tasks.set_state(task.id, "failed")
-            self.plog.failure(task.id, os.path.join(self.runtime.cfg.area, task.id), f"cannot prepare: {e}")
-            return f"{task.id} failed (cannot prepare)"
+            raise Skip(f"cannot prepare {task.id}: {e}")
         st["workers"][user] = {
-            "task_id": task.id, "repo": task.repo, "folder": folder, "pid": proc.pid, "launched": self.probes.now(),
+            "task_id": task.id, "repo": self.repo_dir, "folder": folder, "pid": proc.pid, "launched": self.probes.now(),
             "started": False}
         self.plog.event(task.id, folder, "launched")
         log.info("started %s for task %s (pid %s)", user, task.id, proc.pid)
@@ -409,7 +414,8 @@ def main(argv=None):
         commits_ahead=commits_ahead,
         heartbeat_parts=lambda: host_readings(a.area, runtime))
     tasks = GitHubTasks(a.repo, make_gh(a.gh, a.call_timeout), make_git(a.git, a.call_timeout), a.repo_dir)
-    Dispatcher(s, a.state, runtime, tasks, ProcessingLog(a.data_dir), probes, relay_path=a.relay_path).fire()
+    Dispatcher(s, a.state, runtime, tasks, ProcessingLog(a.data_dir), probes, relay_path=a.relay_path,
+               repo_dir=a.repo_dir).fire()
 
 
 if __name__ == "__main__":

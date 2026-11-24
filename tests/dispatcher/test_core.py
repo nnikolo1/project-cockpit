@@ -267,11 +267,36 @@ def test_skip_when_egress_open(tmp_path):
     assert w.runtime.launched == []
 
 
-def test_unpreparable_task_fails_instead_of_looping(tmp_path):
+def test_preparation_failure_skips_the_firing_and_sets_no_state(tmp_path):
     w = World(tmp_path, [T("x-1")])
     w.runtime.prepare_error = FileExistsError("taken")
-    assert "failed" in w.fire()
-    assert ("x-1", "failed") in w.tasks.states and w.plog.failures[0][0] == "x-1"
+    assert w.fire().startswith("skipped: cannot prepare x-1")
+    assert w.tasks.states == [] and w.plog.failures == [] and w.plog.events == []
+    assert core.load_state(w.state)["workers"] == {}
+
+
+def test_prepare_gets_the_host_clone_not_the_repository_name(tmp_path):
+    w = World(tmp_path, [T("x-1", repo="owner/name")])
+    d = w.dispatcher()
+    d.repo_dir = "/host/clone"
+    d.fire()
+    assert w.runtime.prepared[0][1] == "/host/clone"
+    assert w.worker()["repo"] == "/host/clone"
+
+
+def test_task_with_an_existing_folder_is_not_selected_again(tmp_path, caplog):
+    (tmp_path / "x-1").mkdir()
+    w = World(tmp_path, [T("x-1", priority=1), T("x-2")])
+    with caplog.at_level("INFO", logger="dispatcher.core"):
+        assert w.fire() == "started worker1 on x-2"
+    assert "x-1 skipped" in caplog.text
+    assert w.tasks.states == [] and w.plog.failures == []
+
+
+def test_only_task_with_an_existing_folder_means_nothing_to_do(tmp_path):
+    (tmp_path / "x-1").mkdir()
+    w = World(tmp_path, [T("x-1")])
+    assert "no released task" in w.fire()
 
 
 def test_launch_timeout_skips(tmp_path):
@@ -454,8 +479,8 @@ def test_main_builds_tasks_and_plog_from_arguments(tmp_path, monkeypatch):
     seen = {}
 
     class FakeDispatcher:
-        def __init__(self, settings, state, runtime, tasks, plog, probes, relay_path):
-            seen.update(tasks=tasks, plog=plog)
+        def __init__(self, settings, state, runtime, tasks, plog, probes, relay_path, repo_dir):
+            seen.update(tasks=tasks, plog=plog, repo_dir=repo_dir)
 
         def fire(self):
             return "ok"
@@ -467,6 +492,7 @@ def test_main_builds_tasks_and_plog_from_arguments(tmp_path, monkeypatch):
                "--data-dir", str(data)])
     assert seen["tasks"].repo == "me/repo" and seen["tasks"].repo_dir == str(tmp_path) and seen["tasks"].short == "repo"
     assert seen["plog"].dir == data
+    assert seen["repo_dir"] == str(tmp_path)
 
 
 def test_gh_and_git_callables_run_with_a_time_limit(tmp_path):

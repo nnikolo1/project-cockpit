@@ -168,6 +168,24 @@ def test_prepare_task_bad_repo(tmp_path):
         r.prepare_task("T-2", str(tmp_path / "nope"), "x")
 
 
+def test_prepare_task_failure_removes_the_folder_it_made_and_a_retry_works(tmp_path, repo):
+    r, _ = make(tmp_path)
+    with pytest.raises(rt.ContainerError):
+        r.prepare_task("T-4", str(tmp_path / "nope"), "x")
+    assert not (tmp_path / "area" / "T-4").exists()
+    assert pathlib.Path(r.prepare_task("T-4", repo, "x")).is_dir()
+
+
+def test_prepare_task_never_removes_a_folder_that_existed(tmp_path, repo):
+    r, _ = make(tmp_path)
+    existing = tmp_path / "area" / "T-5"
+    existing.mkdir(parents=True)
+    (existing / "keep").write_text("k")
+    with pytest.raises(FileExistsError):
+        r.prepare_task("T-5", repo, "x")
+    assert (existing / "keep").read_text() == "k"
+
+
 @pytest.mark.parametrize("bad", ["", "../x", "a/b", ".hidden", "a b", None])
 def test_task_id_rejected(tmp_path, bad):
     r, _ = make(tmp_path)

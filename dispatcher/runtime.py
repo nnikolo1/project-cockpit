@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import signal
 import subprocess
 from dataclasses import dataclass
@@ -185,15 +186,22 @@ class Runtime:
         """Create <area>/<task-id>/{inbox,outbox}, write inbox/main.bundle (current main of `repo`) and task.md."""
         base = self.task_dir(task_id)
         inbox, outbox = os.path.join(base, "inbox"), os.path.join(base, "outbox")
-        os.makedirs(inbox)  # FileExistsError if the folder is taken: ids never overwrite each other
-        os.makedirs(outbox)
-        os.chmod(outbox, 0o777)  # bind mounts show up root-owned in the guest; workerN must be able to write
-        p = subprocess.run(["git", "-C", repo, "bundle", "create", os.path.join(inbox, "main.bundle"), "main"],
-                           capture_output=True, text=True, timeout=CALL_TIMEOUT)
-        if p.returncode:
-            raise ContainerError(f"git bundle of main failed: {p.stderr.strip()}")
-        with open(os.path.join(inbox, "task.md"), "w") as f:
-            f.write(task_text)
+        os.makedirs(os.path.dirname(base), exist_ok=True)
+        os.mkdir(base)  # FileExistsError if the folder is taken: ids never overwrite each other; from here on it is ours
+        try:
+            os.mkdir(inbox)
+            os.mkdir(outbox)
+            os.chmod(outbox, 0o777)  # bind mounts show up root-owned in the guest; workerN must be able to write
+            p = subprocess.run(["git", "-C", repo, "bundle", "create", os.path.join(inbox, "main.bundle"), "main"],
+                               capture_output=True, text=True, timeout=CALL_TIMEOUT)
+            if p.returncode:
+                raise ContainerError(f"git bundle of main failed: {p.stderr.strip()}")
+            with open(os.path.join(inbox, "task.md"), "w") as f:
+                f.write(task_text)
+        except BaseException:
+            log.warning("preparing %s failed; removing the folder made by this call", base)
+            shutil.rmtree(base, ignore_errors=True)
+            raise
         log.info("task folder ready: %s", base)
         return base
 
