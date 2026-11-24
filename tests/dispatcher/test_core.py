@@ -112,6 +112,7 @@ class World:
     def __init__(self, tmp_path, tasks=(), **settings):
         self.now, self.free, self.last, self.mtime = NOW, 50 * core.GIB, {}, None
         self.ahead = 1
+        self.proxy_up, self.proxy_starts, self.proxy_stops, self.proxy_stuck = False, 0, [], False
         self.detect_sleep = False        # the old tests jump the clock with interval 0; only the sleep tests turn it on
         self.runtime, self.tasks, self.plog = FakeRuntime(tmp_path), FakeTasks(tasks), FakeLog()
         self.state = str(tmp_path / "state.json")
@@ -129,10 +130,21 @@ class World:
     def alive_pids(self, v):
         self.runtime.alive_pids = v
 
+    def _start_proxy(self):
+        self.proxy_up = True
+        self.proxy_starts += 1
+        return 777
+
+    def _stop_proxy(self, pid):
+        self.proxy_stops.append(pid)
+        self.proxy_up = self.proxy_stuck
+        return not self.proxy_stuck
+
     def dispatcher(self):
         p = core.Probes(
             now=lambda: self.now, free_disk=lambda: self.free, proxy_last=lambda: dict(self.last),
             transcript_mtime=lambda u: self.mtime, ensure_proxy=lambda: None,
+            proxy_listening=lambda: self.proxy_up, start_proxy=self._start_proxy, stop_proxy=self._stop_proxy,
             commits_ahead=lambda repo, tid: self.ahead, heartbeat_parts=lambda: {"memory_pressure": "normal"})
         d = core.Dispatcher(self.settings, self.state, self.runtime, self.tasks, self.plog, p)
         if not self.detect_sleep:
@@ -279,7 +291,7 @@ def test_preparation_failure_skips_the_firing_and_sets_no_state(tmp_path):
     w = World(tmp_path, [T("x-1")])
     w.runtime.prepare_error = FileExistsError("taken")
     assert w.fire().startswith("skipped: cannot prepare x-1")
-    assert w.tasks.states == [] and w.plog.failures == [] and w.plog.events == []
+    assert w.tasks.states == [] and w.plog.failures == [] and w.plog.events == [("-", "proxy started")]
     assert core.load_state(w.state)["workers"] == {}
 
 
@@ -454,6 +466,81 @@ def test_workspace_is_not_torn_down(tmp_path):
     (tmp_path / "x-1").mkdir()
     finish(w, None)
     assert (tmp_path / "x-1").exists()
+
+
+# --- the proxy's lifetime (4d) ---
+def proxy_world(tmp_path, tasks=()):
+    w = World(tmp_path)
+    w.tasks.tasks = list(tasks)
+    return w
+
+
+def test_no_released_task_and_no_worker_starts_no_proxy(tmp_path):
+    w = proxy_world(tmp_path)
+    w.fire()
+    assert w.proxy_starts == 0 and "proxy" not in core.load_state(w.state)
+
+
+def test_released_task_starts_the_proxy_once(tmp_path):
+    w = proxy_world(tmp_path, [T("x-1"), T("x-2")])
+    w.fire()
+    w.now += 600
+    w.fire()
+    assert w.proxy_starts == 1
+    assert core.load_state(w.state)["proxy"] == {"pid": 777}
+    assert ("-", "proxy started") in w.plog.events
+
+
+def test_running_worker_keeps_the_proxy_after_the_last_task_became_wip(tmp_path):
+    w = start_one(tmp_path)                      # worker1 runs x-1; no task is released any more
+    w.runtime.outbox["x-1"] = (True, None, "no note")
+    w.now += 120
+    w.fire()
+    assert w.proxy_stops == [] and w.proxy_up
+
+
+def test_proxy_stops_when_neither_holds(tmp_path):
+    w = start_one(tmp_path)
+    w.runtime.outbox["x-1"] = (True, None, "no note")
+    w.now += 120
+    w.fire()
+    assert w.proxy_up
+    w.alive_pids = set()
+    w.runtime.outbox["x-1"] = (True, {"outcome": "done", "tokens": 1}, None)
+    w.now += 120
+    w.fire()                                     # the Worker has ended
+    assert core.load_state(w.state)["workers"] == {}
+    assert w.proxy_stops == [777] and not w.proxy_up
+    assert "proxy" not in core.load_state(w.state)
+    assert ("-", "proxy stopped") in w.plog.events
+
+
+def test_a_proxy_not_started_by_the_dispatcher_is_never_stopped(tmp_path):
+    w = proxy_world(tmp_path)
+    w.proxy_up = True
+    w.fire()
+    assert w.proxy_stops == [] and w.proxy_up
+
+
+def test_a_proxy_that_does_not_stop_stays_recorded(tmp_path):
+    w = proxy_world(tmp_path, [T("x-1")])
+    w.fire()
+    w.tasks.tasks = []
+    w.proxy_stuck = True
+    st = core.load_state(w.state)
+    st["workers"] = {}
+    core.save_state(w.state, st)
+    w.now += 600
+    w.fire()
+    assert core.load_state(w.state)["proxy"] == {"pid": 777}
+
+
+def test_heartbeat_shows_the_proxy_state(tmp_path):
+    w = World(tmp_path)
+    d = w.dispatcher()
+    assert "proxy off" in d.heartbeat({"workers": {}}, "x")
+    w.proxy_up = True
+    assert "proxy running" in d.heartbeat({"workers": {}}, "x")
 
 
 # --- heartbeat ---

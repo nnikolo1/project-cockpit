@@ -3,7 +3,6 @@ import plistlib
 import pytest
 
 from dispatcher import launchd as L
-from dispatcher import runtime as rt
 
 ARGS = dict(project="demo", repo="o/n", repo_dir="/r", token_file="/t", data_dir="/data", cockpit_dir="/cp")
 
@@ -33,16 +32,6 @@ def test_dispatcher_image_optional():
     assert a[a.index("--image") + 1] == "img:1"
 
 
-def test_proxy_plist_caffeinate_and_workers():
-    d = _roundtrip(L.proxy_plist("demo", "/t", data_dir="/data", cockpit_dir="/cp"))
-    assert d["Label"] == "com.project-cockpit.proxy.demo"
-    assert d["KeepAlive"] is True and d["RunAtLoad"] is True
-    a = d["ProgramArguments"]
-    assert a[:6] == ["caffeinate", "-i", "python3", "-m", "dispatcher.proxy", "--socket"]
-    workers = [a[i + 1] for i, x in enumerate(a) if x == "--worker"]
-    assert workers == [f"worker{i}=dummy-worker{i}" for i in range(1, rt.Config.image_workers + 1)]
-
-
 def test_quota_plist():
     d = _roundtrip(L.quota_plist("demo", data_dir="/data", cockpit_dir="/cp"))
     assert d["Label"] == "com.project-cockpit.quota.demo"
@@ -55,17 +44,15 @@ def test_quota_plist():
 def test_socket_limit():
     with pytest.raises(ValueError):
         L.dispatcher_plist(**{**ARGS, "data_dir": "/d" * 60})
-    with pytest.raises(ValueError):
-        L.proxy_plist("demo", "/t", data_dir="/d" * 60)
 
 
 def test_render_writes_files_and_installs_nothing(tmp_path, capsys):
     L.render(["--project", "demo", "--repo", "o/n", "--repo-dir", str(tmp_path), "--token-file", str(tmp_path / "tok"), "--out", str(tmp_path / "o")])
     out = capsys.readouterr().out
     files = sorted((tmp_path / "o").glob("*.plist"))
-    assert [f.name for f in files] == ["com.project-cockpit.dispatcher.demo.plist", "com.project-cockpit.proxy.demo.plist",
-                                       "com.project-cockpit.quota.demo.plist"]
-    assert out.count("launchctl bootstrap") == 3 and all(str(f) in out for f in files)
+    assert [f.name for f in files] == ["com.project-cockpit.dispatcher.demo.plist", "com.project-cockpit.quota.demo.plist"]
+    assert "proxy" not in out.replace("proxy.sock", "")
+    assert out.count("launchctl bootstrap") == 2 and all(str(f) in out for f in files)
     for f in files:
         assert plistlib.loads(f.read_bytes())["WorkingDirectory"].startswith("/")
 

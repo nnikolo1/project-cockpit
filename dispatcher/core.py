@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import shutil
+import signal
 import socket as socketlib
 import subprocess
 import sys
@@ -118,6 +119,9 @@ class Probes:
     proxy_last: object = None           # () -> {worker label: epoch seconds of its last request}; {} if the proxy cannot tell
     transcript_mtime: object = None     # (user) -> epoch seconds or None
     ensure_proxy: object = None         # () -> None; raises Skip/ContainerError if it cannot be started (3k)
+    proxy_listening: object = None      # () -> bool (4d)
+    start_proxy: object = None          # () -> pid of the detached proxy process; raises Skip (4d)
+    stop_proxy: object = None           # (pid) -> bool, True when the process is gone and the socket no longer listens (4d)
     commits_ahead: object = None        # (repo, task_id) -> int, commits of worker/<task-id> beyond main (3e)
     heartbeat_parts: object = None      # () -> dict of the host and container readings (3g)
 
@@ -257,6 +261,32 @@ class Dispatcher:
         log.info("started %s for task %s (pid %s)", user, task.id, proc.pid)
         return f"started {user} on {task.id}"
 
+    # -- the proxy's lifetime (4d) --
+    def manage_proxy(self, st):
+        """Needed while a released task is not yet WIP or a Worker runs: start it then; stop it, when the Dispatcher started it, if not."""
+        try:
+            needed = bool(st["workers"]) or bool(self.tasks.released())
+        except Exception:  # cannot tell: leave the proxy as it is
+            log.exception("proxy: could not read the released tasks")
+            return
+        listening = self.probes.proxy_listening()
+        if needed and not listening:
+            try:
+                st["proxy"] = {"pid": self.probes.start_proxy()}
+            except Skip as e:
+                log.warning("proxy not started: %s", e)
+                return
+            self.plog.event("-", "-", "proxy started")
+            log.info("proxy started (pid %s)", st["proxy"]["pid"])
+        elif not needed and "proxy" in st:
+            pid = st["proxy"]["pid"]
+            if not listening or self.probes.stop_proxy(pid):
+                st.pop("proxy")
+                self.plog.event("-", "-", "proxy stopped")
+                log.info("proxy stopped (pid %s)", pid)
+            else:
+                log.warning("proxy (pid %s) did not stop", pid)
+
     # -- the firing --
     def fire(self):
         st = load_state(self.state_path)
@@ -264,6 +294,7 @@ class Dispatcher:
         try:
             slept = self._detect_sleep(st, self.probes.now())
             self.manage(st)
+            self.manage_proxy(st)
             now = self.probes.now()
             last = st.get("last_fired")
             if not self.settings["enabled"]:
@@ -296,7 +327,7 @@ class Dispatcher:
             did = f"{did} | slept {slept} minutes"
         return (f"{t} | running: {running} | {did} | memory pressure {p.get('memory_pressure', '?')}"
                 f" | free disk {p.get('free_disk', '?')} | load {p.get('load', '?')} | power {p.get('power', '?')}"
-                f" | container data {p.get('data_size', '?')} | container {p.get('container', 'not reported')}")
+                f" | container data {p.get('data_size', '?')} | proxy {'running' if self.probes.proxy_listening() else 'off'} | container {p.get('container', 'not reported')}")
 
 
 # --- default probes (the host side; not exercised by the unit tests) ------------------------------------------
@@ -371,21 +402,39 @@ def proxy_listening(sock):
         s.close()
 
 
-def ensure_proxy(sock, token_file, usage_file, image_workers):
-    """3k: start the proxy on its host socket if it is not listening."""
-    if proxy_listening(sock):
-        return
-    cmd = [sys.executable, "-m", "dispatcher.proxy", "--socket", sock, "--token-file", token_file,
+def start_proxy(sock, token_file, usage_file, image_workers, host=None):
+    """Start the proxy detached from the firing, kept awake by the host helper; returns its pid (also its process group)."""
+    host = host or default_probes()
+    cmd = [*host.keep_awake_prefix(), sys.executable, "-m", "dispatcher.proxy", "--socket", sock, "--token-file", token_file,
            "--usage-file", usage_file]
     for i in range(1, image_workers + 1):
         cmd += ["--worker", f"worker{i}={rt.dummy_token(f'worker{i}')}"]
     log.info("starting the proxy on %s", sock)
-    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    pid = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True).pid
     for _ in range(20):
         time.sleep(0.5)
         if proxy_listening(sock):
-            return
+            return pid
     raise Skip("the proxy did not start listening")
+
+
+def stop_proxy(pid, sock):
+    """Terminate the proxy's process group, then check that the socket no longer listens."""
+    try:
+        os.killpg(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    for _ in range(20):
+        if not proxy_listening(sock):
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def ensure_proxy(sock, token_file, usage_file, image_workers):
+    """3k: start the proxy on its host socket if it is not listening."""
+    if not proxy_listening(sock):
+        start_proxy(sock, token_file, usage_file, image_workers)
 
 
 def _run(args, cwd, timeout):
@@ -435,6 +484,9 @@ def main(argv=None):
         proxy_last=lambda: read_proxy_last(a.usage_file),
         transcript_mtime=lambda user: transcript_mtime(runtime, user),
         ensure_proxy=lambda: ensure_proxy(a.socket, a.token_file, a.usage_file, cfg.image_workers),
+        proxy_listening=lambda: proxy_listening(a.socket),
+        start_proxy=lambda: start_proxy(a.socket, a.token_file, a.usage_file, cfg.image_workers),
+        stop_proxy=lambda pid: stop_proxy(pid, a.socket),
         commits_ahead=commits_ahead,
         heartbeat_parts=lambda: host_readings(a.area, runtime))
     tasks = GitHubTasks(a.repo, make_gh(a.gh, a.call_timeout), make_git(a.git, a.call_timeout), a.repo_dir)
