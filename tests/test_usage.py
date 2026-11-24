@@ -127,13 +127,12 @@ def test_periods_are_graded_hour_day_week_month():
     ps = L._quota(qt, None)[1]["periods"]
     assert [(p["level"], p["key"]) for p in ps] == [
         ("month", "2026-10"), ("week", "2026-11-02"), ("week", "2026-11-09"), ("day", "2026-11-23"), ("day", "2026-11-24"),
-        ] + [("hour", "2026-11-25T%02d:00" % h) for h in range(9)]  # every hour of the day up to the newest reading's, none still to come
+        ("hour", "2026-11-25T05:00"), ("hour", "2026-11-25T08:00")]  # only the hours of the current day that have readings
     assert ps[0]["readings"] == 2 and ps[0]["five_hour"] == dict(first=11, last=12, low=11, high=12)
     hr = {p["key"]: p for p in ps if p["level"] == "hour"}
     assert hr["2026-11-25T05:00"]["readings"] == 2 and hr["2026-11-25T05:00"]["five_hour"]["first"] == 18 and hr["2026-11-25T05:00"]["five_hour"]["last"] == 19
-    assert hr["2026-11-25T03:00"]["readings"] == 0 and hr["2026-11-25T03:00"]["five_hour"] == dict(first=17, last=17, low=17, high=17)  # carried from the day before
-    assert hr["2026-11-25T06:00"]["five_hour"]["last"] == 19 and hr["2026-11-25T08:00"]["readings"] == 1
-    assert "2026-11-25T09:00" not in hr
+    assert hr["2026-11-25T08:00"]["readings"] == 1 and hr["2026-11-25T08:00"]["five_hour"] == dict(first=20, last=20, low=20, high=20)
+    assert all(p["readings"] > 0 for p in ps)  # an hour without readings has no row, nothing is carried forward into it
 
 
 def test_week_crossing_a_month_start_has_no_week_row():
@@ -141,7 +140,7 @@ def test_week_crossing_a_month_start_has_no_week_row():
     qt = "\n".join([q("2026-11-30T10:00:00+00:00", 10, 30, end), q("2026-12-02T10:00:00+00:00", 20, 31, end)])
     ps = L._quota(qt, None)[1]["periods"]
     assert [(p["level"], p["key"]) for p in ps if p["level"] != "hour"] == [("day", "2026-11-30")]
-    assert [p["key"][-5:] for p in ps if p["level"] == "hour"] == ["%02d:00" % h for h in range(11)]
+    assert [p["key"] for p in ps if p["level"] == "hour"] == ["2026-12-02T10:00"]
 
 
 def m(ts, session, source="src-a", i=1, o=2, cw=3, cr=4):
@@ -168,6 +167,25 @@ def test_transcript_periods_follow_the_quota_grading_with_peaks():
     assert rows[("hour", "2026-11-20T12:00")]["messages"] == 0 and ("hour", "2026-11-20T13:00") not in rows
     assert rows[("day", "2026-11-19")]["total"] == 10 and rows[("day", "2026-11-19")]["five_hour"] is None
     assert [p["label"] for p in r["periods"]][-1] == "2026-11-20 12:00"
+
+
+def test_transcript_hours_without_readings_keep_the_held_peak():
+    """The quota rows list only the hours with readings; the sessions card still has a row for every hour of the current day and shows
+    the last value before an empty hour (unchanged by the 'Today's readings' change)."""
+    quota = L.usage_report(None, None, lambda f: None, QUOTA)["quota"]
+    assert [p["key"] for p in quota["periods"]] == ["2026-11-20T10:00", "2026-11-20T12:00"]
+    rows = {(p["level"], p["key"]): p for p in L.transcript_report(m("2026-11-20T11:05:00+00:00", "s1"), quota)["periods"]}
+    assert (rows[("hour", "2026-11-20T11:00")]["messages"], rows[("hour", "2026-11-20T11:00")]["five_hour"], rows[("hour", "2026-11-20T11:00")]["seven_day"]) == (1, 40, 22)
+    assert rows[("hour", "2026-11-20T09:00")]["five_hour"] is None  # before the first reading: nothing to hold
+    assert rows[("hour", "2026-11-20T12:00")]["five_hour"] == 5
+
+
+def test_held_peaks_start_from_the_newest_earlier_period():
+    periods = [dict(level="day", key="2026-11-19", five_hour=dict(first=3, last=7, low=3, high=9), seven_day={}),
+               dict(level="hour", key="2026-11-20T02:00", five_hour=dict(first=8, last=8, low=8, high=8), seven_day=dict(first=1, last=1, low=1, high=1))]
+    h = L._held_peaks(periods)
+    assert h[("hour", "2026-11-20T00:00")] == dict(five_hour=7, seven_day=None) and h[("hour", "2026-11-20T02:00")] == dict(five_hour=8, seven_day=1)
+    assert h[("day", "2026-11-19")] == dict(five_hour=9, seven_day=None) and ("hour", "2026-11-20T03:00") not in h
 
 
 def test_transcript_sources_and_sessions_rank_by_total_and_cap():
