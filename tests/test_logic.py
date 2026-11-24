@@ -287,3 +287,11 @@ def test_parse_filed_by():
 def test_derive_keeps_filed_by():
     t, _ = derive([iss(1, ["policy-finding"], body="<!-- filed-by: a1 -->")])
     assert t[0]["filed_by"] == "a1"
+
+
+def test_code_view_counts_code_files_across_language_groups():
+    m = dict(modules={"a": dict(name="A", metrics=dict(loc={"python_source": dict(code=100, files=3), "python_test": dict(code=40, files=2), "js_source": dict(code=10, files=1)})),
+                      "b": dict(name="B", metrics={})})
+    v = L.code_view(m)["modules"]
+    assert (v["a"]["code"], v["a"]["codeFiles"]) == (150, 6)
+    assert (v["b"]["code"], v["b"]["codeFiles"]) == (0, 0)

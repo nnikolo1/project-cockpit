@@ -402,7 +402,7 @@ function vCockpit(){
      +'<div class="bar" aria-hidden="true">'+bar+'</div><span class="muted" style="font-size:13px">'+txt+'</span>'
      +subBlock(m)
      +'<dl class="facts"><dt>Documents</dt><dd>'+(m.ndocs==null?'<span class="muted">no data</span>':m.ndocs)+'</dd>'
-     +'<dt>Code lines</dt><dd>'+nd(c.code,x=>x.toLocaleString('en-US'))+'</dd><dt>Worst complexity</dt><dd>'+nd(c.cc)+'</dd><dt>Import cycles</dt><dd>'+nd(c.cyc,x=>x+' files')+'</dd></dl>'
+     +'<dt>Code files / lines</dt><dd>'+(c.code==null?'<span class="muted">no data</span>':(c.codeFiles||0).toLocaleString('en-US')+' / '+c.code.toLocaleString('en-US'))+'</dd><dt>Worst complexity</dt><dd>'+nd(c.cc)+'</dd><dt>Import cycles</dt><dd>'+nd(c.cyc,x=>x+' files')+'</dd></dl>'
      +dlForm(m,md)+metaBlock(m.id)
      +'<div style="border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:5px;font-size:13px">'
      +(feed.length?feed.map(f=>'<span><span class="mono muted">'+f.d.slice(5,10)+'</span> '+esc(f.text)+'</span>').join(''):'<span class="muted">Not documented yet.</span>')

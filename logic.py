@@ -643,7 +643,7 @@ def code_view(metrics, thresholds=None):
         top = (_g(x, "lint", "top_codes") or {}).items()
         worst = (_g(x, "complexity", "worst") or [{}])[0]
         mods[mid] = dict(
-            name=m.get("name"), code=sum(v.get("code", 0) for v in loc.values()),
+            name=m.get("name"), code=sum(v.get("code", 0) for v in loc.values()), codeFiles=sum(v.get("files", 0) for v in loc.values()),
             files=f"{x.get('files_total')} files ({_g(loc, 'python_source', 'files') or 0} source, {_g(loc, 'python_test', 'files') or 0} test)",
             cc=_g(x, "complexity", "max"), ccAt=f"{worst['path']}:{worst['line']} {worst['name']}" if worst.get("path") else None,
             mean=_g(x, "complexity", "mean"), dfe=_g(x, "complexity", "rated_DEF"), mi=_g(x, "maintainability", "mean_mi"),
