@@ -18,13 +18,16 @@ Per project one folder: the key `meta` of the project in the `--projects` file, 
  "modules": {"module-a": {
     "own":   {"30": WINDOW, "90": WINDOW},     # files mapped to the module itself, sub-modules excluded
     "total": {"30": WINDOW, "90": WINDOW},     # the module with its sub-modules; for a sub-module equal to own
-    "size":  {"source_lines": n, "test_lines": n, "files": n}}},
- "unassigned": {"30": WINDOW, ...}, "excluded": {"30": WINDOW, ...}, "mapping_check": {...}}
+    "size":  {"source_lines": n, "test_lines": n, "files": n},
+    "series": {"weekly": {"own": [WEEK, ...], "total": [WEEK, ...]}}}},    # optional, additive
+ "unassigned": {"30": WINDOW, ..., "series": {...}}, "excluded": {"30": WINDOW, ...}, "mapping_check": {...}}
 WINDOW = {commits, files, added, removed, net, churn,
           "source": {added, removed, churn}, "tests": {...}, "docs": {...},
           active_days, prev_churn, trend_pct}
+WEEK = {"w": "YYYY-MM-DD", commits, added, removed, tests, docs}
 ```
 - `churn` = added + removed lines; `net` = added - removed; `prev_churn` is the churn of the window before; `trend_pct` = (churn - prev_churn) / prev_churn * 100, or `null` when `prev_churn` is 0 (shown as "new activity").
+- `series` (optional; a reader must work without it, the schema stays 1): `weekly.own` and `weekly.total` (own files of the module / with its sub-modules; for the `unassigned` entry both are the same) each hold 52 elements, one per week, oldest first, the last being the week of `generated_at`. `w` is the Monday (UTC) of the week; weeks without change are zeros. `added` and `removed` count all lines; `tests` and `docs` are the churn (added + removed) of test files and documents in that week, so source churn = added + removed - tests - docs. Same git walk, mapping and exclusions as the windows.
 - Keys of the window objects are the window lengths as strings.
 - The card shows `total` (falling back to `own`). The cockpit uses `size` for the relative view and shows `unassigned` on the "Not mapped" card; `excluded` and `mapping_check` are carried through, not shown yet.
 

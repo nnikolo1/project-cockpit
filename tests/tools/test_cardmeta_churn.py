@@ -1,6 +1,6 @@
 import pathlib
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "tools"))
 import cardmeta_churn as ch  # noqa: E402
@@ -53,3 +53,62 @@ def test_size_and_line_counting():
 
 def test_parse_until_and_trend_helpers():
     assert ch.parse_until("2026-11-20").tzinfo is not None and ch.parse_until("2026-11-20T00:00:00Z").year == 2026
+
+
+def _git(repo, *args, env=None):
+    import subprocess
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", *args], check=True, capture_output=True, env=env)
+
+
+def _commit(repo, when, path, text):
+    import os
+    f = repo / path
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(text)
+    _git(repo, "add", "-A")
+    stamp = when.isoformat()
+    _git(repo, "commit", "-m", path, env={**os.environ, "GIT_AUTHOR_DATE": stamp, "GIT_COMMITTER_DATE": stamp})
+
+
+def test_weekly_series_from_a_temporary_repo(tmp_path):
+    import subprocess
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    # until = Sunday 2026-11-22 12:00 UTC; the week is Mon 2026-11-16, the 28-day window starts Mon 2026-10-26 + 12h
+    until = datetime(2026, 11, 22, 12, tzinfo=timezone.utc)
+    at = lambda d, h=9: datetime(2026, 11, d, h, tzinfo=timezone.utc) if d >= 1 else None  # noqa: E731
+    _commit(tmp_path, datetime(2026, 10, 28, 9, tzinfo=timezone.utc), "a/p.py", "1\n2\n3\n")
+    _commit(tmp_path, datetime(2026, 11, 3, 9, tzinfo=timezone.utc), "a/one/q.py", "1\n")
+    _commit(tmp_path, datetime(2026, 11, 10, 9, tzinfo=timezone.utc), "tests/a/test_p.py", "1\n2\n")
+    _commit(tmp_path, datetime(2026, 11, 10, 10, tzinfo=timezone.utc), "docs/a.md", "x\n")
+    _commit(tmp_path, at(18), "b/z.py", "1\n2\n")
+    _commit(tmp_path, at(18, 10), "loose.txt", "1\n")
+    _commit(tmp_path, datetime(2025, 1, 6, 9, tzinfo=timezone.utc), "a/old.py", "1\n")  # older than 52 weeks
+    mmap = dict(MAP, assign=MAP["assign"] + [{"path": "tests/a/", "module": "a"}])
+    recs = ch.parse_log(ch.git_log(tmp_path, until - timedelta(days=ch.WEEKS * 7 + 400), until))
+    r = ch.aggregate(recs, mmap, [28], until, [])
+    a = r["modules"]["a"]["series"]["weekly"]
+    assert len(a["own"]) == 52 and a["own"][-1]["w"] == "2026-11-16" and a["own"][-2]["w"] == "2026-11-09"
+    wk = {e["w"]: e for e in a["own"]}
+    assert wk["2026-10-26"] == {"w": "2026-10-26", "commits": 1, "added": 3, "removed": 0, "tests": 0, "docs": 0}
+    assert wk["2026-11-09"]["tests"] == 2 and wk["2026-11-09"]["added"] == 2 and wk["2026-11-09"]["commits"] == 1
+    assert wk["2026-11-02"]["added"] == 0                      # a/one/q.py is a sub-module file: not in own
+    assert {e["w"]: e for e in a["total"]}["2026-11-02"]["added"] == 1
+    assert sum(e["added"] for e in a["own"]) == 5 and "2025-01-06" not in wk
+    assert r["modules"]["a/one"]["series"]["weekly"]["own"] == r["modules"]["a/one"]["series"]["weekly"]["total"]
+    docs = r["unassigned"]["series"]["weekly"]["own"]
+    assert {e["w"]: e for e in docs}["2026-11-09"]["docs"] == 1 and docs[-1]["added"] == 1
+    # weekly sums over the 28-day window (4 whole weeks) equal the window totals, for every module and the unassigned entry
+    entries = [(r["modules"][m]["own"]["28"], r["modules"][m]["series"]["weekly"]["own"]) for m in r["modules"]]
+    entries += [(r["modules"][m]["total"]["28"], r["modules"][m]["series"]["weekly"]["total"]) for m in r["modules"]]
+    entries.append((r["unassigned"]["28"], r["unassigned"]["series"]["weekly"]["own"]))
+    for win, weeks in entries:
+        last4 = weeks[-4:]
+        assert sum(e["added"] for e in last4) == win["added"] and sum(e["removed"] for e in last4) == win["removed"]
+        assert sum(e["tests"] for e in last4) == win["tests"]["churn"] and sum(e["docs"] for e in last4) == win["docs"]["churn"]
+        assert sum(e["commits"] for e in last4) == win["commits"]
+    assert all(c["ok"] for c in r["mapping_check"].values())
+
+
+def test_week_starts_are_mondays_and_end_with_the_current_week():
+    w = ch.week_starts(datetime(2026, 11, 22, 23, tzinfo=timezone.utc))
+    assert len(w) == 52 and w[-1] == "2026-11-16" and w[0] == "2025-11-24"
