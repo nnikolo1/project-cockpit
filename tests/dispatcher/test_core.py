@@ -367,10 +367,10 @@ def test_done_without_commit_fails(tmp_path):
     assert w.plog.failures == [("x-1", "no commit in the bundle")]
 
 
-def test_gave_up_fails(tmp_path):
+def test_outcome_is_not_used(tmp_path):
     w = start_one(tmp_path)
     finish(w, {"outcome": "gave_up", "branch": "b", "summary": "s", "tokens": 5})
-    assert ("x-1", "failed") in w.tasks.states and w.tasks.fetched == []
+    assert ("x-1", "unmerged") in w.tasks.states and w.plog.failures == []
 
 
 def test_no_note_and_unusable_note_fail_with_reason(tmp_path):
@@ -389,7 +389,7 @@ def test_fetch_failure_fails_the_task_not_the_firing(tmp_path):
     w = start_one(tmp_path)
     w.tasks.fail_fetch = True
     finish(w, {"outcome": "done", "branch": "b", "summary": "s", "tokens": 5})
-    assert w.plog.failures[0][1].startswith("unusable bundle")
+    assert w.plog.failures == [("x-1", "no commit in the bundle")]
 
 
 def test_workspace_is_not_torn_down(tmp_path):

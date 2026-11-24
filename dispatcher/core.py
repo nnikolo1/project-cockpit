@@ -166,18 +166,16 @@ class Dispatcher:
             self._fail(st, user, w, why)
 
     def _finish(self, st, user, w, note, reason):
-        """3e: the process has ended; unmerged if outcome done and the bundle holds a commit, else failed."""
+        """3e: the process has ended; unmerged if the bundle holds a commit, else failed."""
         tid = w["task_id"]
         if note is None:
             return self._fail(st, user, w, reason)
-        if note["outcome"] != "done":
-            return self._fail(st, user, w, f"outcome {note['outcome']}")
         try:
             self.tasks.fetch_branch(tid, self.runtime.bundle_path(tid), note["branch"])
             ahead = self.probes.commits_ahead(w["repo"], tid)
-        except Exception as e:  # a missing or broken bundle must fail this task, not the firing
+        except Exception:  # a missing or broken bundle holds no commit; it must fail this task, not the firing
             log.exception("fetching the branch of %s failed", tid)
-            return self._fail(st, user, w, f"unusable bundle: {e}")
+            return self._fail(st, user, w, "no commit in the bundle")
         if ahead < 1:
             return self._fail(st, user, w, "no commit in the bundle")
         self.tasks.set_state(tid, "unmerged")
