@@ -42,3 +42,7 @@ Authority analysis of tasks (owner, 2026-11-20; a default for all projects): eve
 ## Substantial coding work is split among sub-agents (standing rule, owner, 2026-11-23)
 
 For any more substantial coding task the assistant attempts to split the work among several sub-agents (disjoint modules or files, each in its own worktree and branch, with an agreed interface between them). The aim is to force clean seams and avoid silo architecture and convoluted code, which the code-quality metrics flagged as weak points. A task that cannot be split is reported as such, with the reason, and then done by one agent.
+
+## The UI may narrow what a parameter can be set to (standing rule, owner, 2026-11-24)
+
+A settings page lets the owner change the behaviour of the system without a code change, but it may restrict the range a parameter can take: not every value that the code accepts is reachable through the UI (for example a minimum for a time limit). The restriction is a rule of the UI, not of the code, so the code accepts any valid value in the settings file. This is part of the overall design policy.
