@@ -46,7 +46,7 @@
      "kind": "file",
      "personal_data": false,
      "written_by": "the Cockpit (Settings)",
-     "note": "6a: interval, on/off switch, retries, number of Workers and the three limits; outside git; read at each firing (6b); path is the documented default"
+     "note": "6a: interval, on/off switch, retries, number of Workers and the three limits; outside git; read at each firing (6b); the path is a suggested default, the code takes it as an argument"
     },
     {
      "path": "~/.local/share/project-cockpit/<project>/dispatcher-state.json",
@@ -91,7 +91,7 @@
      "kind": "file",
      "personal_data": false,
      "written_by": "the owner",
-     "note": "SENSITIVE: the owner's subscription credential the proxy adds to requests (4g); outside git, never logged or printed; the path is the documented default"
+     "note": "SENSITIVE: the owner's subscription credential the proxy adds to requests (4g); outside git, never logged or printed; the path is a suggested default, the code takes it as an argument"
     }
    ],
    "logging": [
