@@ -1,0 +1,9 @@
+The Task Queue is the unattended side of the project: it takes released tasks from GitHub and has Claude Code Workers work them while the owner is away, so that the quota is used.
+
+It owns two sub-modules. The Dispatcher is a deterministic procedure on the host, started by launchd every 2 minutes (a setting); it assigns tasks, watches the Workers and collects their results. The Workers run in one container without a network, as unprivileged users, each on one task in its own clone. The host proxy and the relay inside the container are the only way out of the container. The module also owns its specification, the failure-path test driver with its model stub, and the documents that name it.
+
+It deliberately does not merge: a finished task is "unmerged" and the Interactive Session Agent merges it. It also does not push branches or open pull requests, retry a task whose Worker gave up, tear down the Workers' workspaces, or base any decision on quota.
+
+Files: dispatcher/ and tests/dispatcher/, docs/specs/dispatcher-and-workers.md, tools/e2e_failure_paths.py and tools/e2e/.
+
+Relations. Besides imports, the two sub-modules meet through the proxy socket and the proxy's usage file. The Cockpit writes the settings file the Dispatcher reads at each firing and reads the processing log, the usage file and the Workers' area. GitHub holds the tasks: the Dispatcher reads them and sets the labels wip, unmerged and failed.

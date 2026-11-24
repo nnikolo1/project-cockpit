@@ -646,6 +646,56 @@ def card_metadata(p=None, now=None):
     return dict(out, dir=str(d))
 
 
+def import_edges_of(p, tracked, assign):
+    """Python imports between files of different modules (logic.import_edges over the tracked .py files of the clone)."""
+    src = {}
+    for x in [x for x in tracked if x.endswith(".py")][:3000]:
+        try:
+            src[x] = (pathlib.Path(p["git"]).expanduser() / x).read_text(errors="replace")
+        except OSError:
+            continue
+    return L.import_edges(src, assign)
+
+
+def build_moduledoc(p, mid):
+    """The content of a module page: description paragraphs (docs/modules/<id>.txt next to the module map, else the map's `desc`), the sanitised
+    drawing (.svg), the Workflow elements to highlight (.hl), the key files grouped and the documents naming the module. Anything missing is None / []."""
+    stem = L.module_stem(mid)
+    if not stem:
+        raise ValueError(f"unusable module id {mid!r}")
+    cfgm = load_modules(p)
+    folder = pathlib.Path(p["modules"]).expanduser().parent / "modules" if p.get("modules") else None
+
+    def read(ext):
+        try:
+            return (folder / f"{stem}.{ext}").read_text() if folder else None
+        except FileNotFoundError:
+            return None
+        except (OSError, UnicodeDecodeError) as ex:
+            log.warning("module page %s.%s unreadable: %s", stem, ext, ex)
+            return None
+    txt, svg_raw, hl = read("txt"), read("svg"), read("hl")
+    desc = next((m.get("desc") for m in (cfgm or {}).get("modules", []) if m.get("id") == mid), None)
+    svg = L.sanitise_svg(svg_raw) if svg_raw else None
+    if svg_raw and svg is None:
+        log.warning("module page %s.svg refused by the sanitiser", stem)
+    files = docs = rel = None
+    if p.get("git"):
+        tracked = [x for x in run_git(p, ["ls-files", "-z"]).split("\0") if x]
+        files = L.group_files(L.module_files(tracked, (cfgm or {}).get("assign", []), mid)) if cfgm else None
+        heads = {}
+        for x in [x for x in tracked if x.startswith("docs/") and x.endswith(".md")][:2000]:
+            try:
+                heads[x] = (pathlib.Path(p["git"]).expanduser() / x).read_text(errors="replace")[:1500]
+            except OSError:
+                continue
+        docs = L.module_docs(heads, mid, f"https://github.com/{p['repo']}")
+        if cfgm:
+            rel = L.module_relations(cached(pk(p, "importedges"), lambda: import_edges_of(p, tracked, cfgm["assign"]), 120), mid)
+    log.info("module page %s: text %s, svg %s, hl %s", mid, bool(txt), bool(svg), bool(hl))
+    return dict(id=mid, paragraphs=L.module_paragraphs(txt, desc), svg=svg, hl=L.hl_ids(hl), files=files, docs=docs, relations=rel)
+
+
 # ---------- server ----------
 def redact(line):
     """Keep the access token out of the request log."""
@@ -707,6 +757,11 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, get_rules(p))
             if u.path == "/api/code":
                 return self.send(200, code_snapshot(p))
+            if u.path == "/api/moduledoc":
+                mid = q.get("id", [""])[0]
+                if not L.module_stem(mid):
+                    return self.send(400, dict(error="bad module id"))
+                return self.send(200, cached(pk(p, "moduledoc:" + mid), lambda: build_moduledoc(p, mid), 60))
             if u.path == "/api/cardmeta":
                 return self.send(200, cached(pk(p, "cardmeta"), lambda: card_metadata(p), 60))
             name = u.path.removeprefix("/code/").removesuffix(".svg")

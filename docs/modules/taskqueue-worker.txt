@@ -1,0 +1,11 @@
+The Worker is what runs inside the Workers' container: a headless Claude Code agent that works on exactly one task. Up to 3 Workers run at once (a setting), each as its own unprivileged user, in its own clone made from main.bundle without hardlinks.
+
+It owns the image (Containerfile: agent CLI, git, python and pytest, the users worker1 to worker6 without sudo, each with its own configuration folder), the end check (the Stop hook) and the good-bye-note skill, and the relay that exposes the host proxy's socket on 127.0.0.1 inside the container.
+
+Its steps are in the diagram: read the task, write outbox/started, work and commit on worker/<task-id>, write result.bundle and goodbye.json. Before it may end, the Stop hook checks the note and the commit. It refuses the stop once; a second failure lets the Worker end and the Dispatcher then fails the task. The hook also writes the token total into the note.
+
+It deliberately has no network except the proxy socket, files no task (a suggestion goes into the note as suggested_task), and does not merge, push or decide the state of its task: the Dispatcher does.
+
+Files: dispatcher/image/ (Containerfile, stop_hook.py, skill/SKILL.md), dispatcher/relay.py and tests/dispatcher/test_relay.py, test_stop_hook.py.
+
+Relations. The relay forwards to the Dispatcher's proxy socket (mounted as /run/proxy.sock), which tells the Workers apart by their dummy tokens and counts their tokens. The Worker reads its inbox and writes its outbox in the task folder that the Dispatcher also reads.

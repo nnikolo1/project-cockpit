@@ -1,0 +1,9 @@
+The Dispatcher is the host-side procedure that assigns released tasks to Workers and collects what they deliver. It is not an agent but deterministic code: launchd runs it once per interval (2 minutes by default), and each run is one firing, shown in the diagram.
+
+It owns the settings it reads at each firing, the choice of the task (priority, deadline, what it unblocks, must before nice), the proxy and its lifetime, the start of the container and the relay, the egress check, the task folder with main.bundle and task.md, the launch of a Worker, the kill of a runaway, the heartbeat and processing log, the quota collector, and the rendering of the LaunchAgent files.
+
+It deliberately starts at most one Worker per firing, never pushes a branch or opens a pull request, never merges, never retries a task whose Worker gave up, never tears down the workspaces, and bases no decision on quota.
+
+Files: dispatcher/core.py, agent.py, host.py, runtime.py, proxy.py, tasks.py, plog.py, launchd.py and quota.py, with their tests in tests/dispatcher/.
+
+Relations. The Worker's relay connects to the proxy's socket; the proxy appends the token usage of each request to a usage file, from which a firing reads each Worker's last request. The Dispatcher writes each task's inbox and reads its outbox in the Workers' area. The Cockpit writes the settings file and reads the processing log. On GitHub the Dispatcher reads the tasks and sets the labels wip, unmerged and failed.
