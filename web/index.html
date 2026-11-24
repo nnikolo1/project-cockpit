@@ -200,7 +200,7 @@ function sortKey(t){return STAGES.indexOf(t.stage)===2?0:(t.stage==='released'?1
 let PROJ=null,PROJS=[];  /* the selected project (name) and the configured ones; the choice is kept in localStorage `cockpit-project` */
 const NOMETA=()=>({footprint:{status:'missing'},churn:{status:'missing'},ambiguity:{status:'missing'}});
 let Q={questions:[],counts:{},projects:[]};  /* open questions of every project: /api/questions, not tied to the selected project */
-let SET=null,D=null,CODE={wired:false,modules:{}},FEED=[],MODULES=[],RULES={configured:false},META=NOMETA();
+let USE=null,SET=null,D=null,CODE={wired:false,modules:{}},FEED=[],MODULES=[],RULES={configured:false},META=NOMETA();
 const SVGC={};
 const UI={churnRel:true,route:'cockpit',filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',tlType:'all',rulesGroup:'all',qProj:'all',codeMod:'unassigned',codeTab:'quality',fit:{deps:true,erd:true,js:true,flow:false},toast:'',err:'',armed:null};
 const ST=()=>!!(D&&D.source.steering);
@@ -234,7 +234,7 @@ async function reload(fresh){
   const mine=PROJ;
   const qp=loadQuestions(fresh);
   try{
-    const [s,f,c,r,mt,se]=await Promise.all([api('/api/state'+(fresh?'?fresh=1':'')),api('/api/timeline'),api('/api/code'),api('/api/rules').catch(e=>({configured:false,error:e.message})),api('/api/cardmeta').catch(e=>null),api('/api/settings').catch(e=>null)]);SET=se;
+    const [s,f,c,r,mt,se,us]=await Promise.all([api('/api/state'+(fresh?'?fresh=1':'')),api('/api/timeline'),api('/api/code'),api('/api/rules').catch(e=>({configured:false,error:e.message})),api('/api/cardmeta').catch(e=>null),api('/api/settings').catch(e=>null),api('/api/usage').catch(e=>null)]);SET=se;USE=us;
     if(mine!==PROJ)return;  /* the user switched project while this was loading: drop the answer */
     D=s;TODAY=D.today;MODULES=D.modules;FEED=f.entries;CODE=c;RULES=r;META=mt||NOMETA();UI.err='';
     if(!CODE.modules[UI.codeMod]&&!MODULES.some(m=>m.id===UI.codeMod&&m.parent)){const k=MODULES.find(m=>!m.virtual);UI.codeMod=CODE.modules[k&&k.id]?k.id:'unassigned';}
@@ -465,6 +465,25 @@ function vSettings(){
    +'<span class="muted" style="font-size:12px">'+r[2]+note(r[0])+'</span></div>').join('')
    +(ro?'<span class="muted">This Cockpit was started with --read-only: the values cannot be changed here.</span>':'<div><button class="btn primary">Save</button></div>')+'</form></div>';
 }
+const USEF=[['input_tokens','Input'],['output_tokens','Output'],['cache_creation_input_tokens','Cache write'],['cache_read_input_tokens','Cache read'],['total','Sum']];
+function usageTable(title,rows){
+  const nf=x=>x.toLocaleString('en-US');
+  if(!rows)return '<div class="card"><h2>'+title+'</h2><span class="muted">no data</span></div>';
+  const mx=Math.max(1,...rows.map(r=>r.total));
+  return '<div class="card"><h2>'+title+'</h2><div class="tblbox narrow"><table><thead><tr><th>'+title.split(' ').pop()+'</th>'+USEF.map(f=>'<th>'+f[1]+'</th>').join('')+'<th></th></tr></thead><tbody>'
+   +rows.map(r=>'<tr><td class="mono">'+esc(r.key)+'</td>'+USEF.map(f=>'<td class="mono">'+nf(r[f[0]])+'</td>').join('')+'<td style="width:120px"><div class="bar" aria-hidden="true"><i style="width:'+(100*r.total/mx)+'%;background:var(--accent)"></i></div></td></tr>').join('')
+   +(rows.length?'':'<tr><td class="muted" colspan="7">no data</td></tr>')+'</tbody></table></div></div>';
+}
+function vUsage(){
+  const head='<div class="page"><div><h1>Usage</h1><span class="muted">Tokens the Workers used, counted by the proxy. Windows are fixed 5-hour blocks counted from the epoch (UTC). No share of your quota is shown: the proxy cannot know it.</span></div>';
+  if(!USE)return head+'<div class="card"><span class="muted">no data</span></div></div>';
+  const nf=x=>x==null?'no data':x.toLocaleString('en-US');
+  const tk=USE.tasks;
+  return head+usageTable('Usage per day',USE.days)+usageTable('Usage per 5-hour window',USE.windows)+usageTable('Usage per Worker',USE.workers)
+   +'<div class="card"><h2>Per task</h2><div class="tblbox narrow"><table><thead><tr><th>Task</th><th>Launched (UTC)</th><th>Proxy sum</th><th>Good-bye note</th><th>Difference</th></tr></thead><tbody>'
+   +(tk?tk.map(t=>'<tr><td class="mono">'+esc(t.task)+'</td><td class="mono">'+esc(t.start)+'</td><td class="mono">'+nf(t.proxy)+(t.overlap?' <span class="muted" title="Another task ran at the same time; the sum may include its requests">overlap</span>':'')+'</td><td class="mono">'+nf(t.note)+'</td><td class="mono">'+nf(t.diff)+'</td></tr>').join(''):'')
+   +(tk&&tk.length?'':'<tr><td class="muted" colspan="5">no data</td></tr>')+'</tbody></table></div><p class="muted" style="font-size:13px;margin:8px 0 0">The proxy sum counts the requests between the task’s launch and its last log entry; the processing log does not name the Worker.</p></div></div>';
+}
 function vRules(){
   const head='<div class="page"><div><h1>Rules</h1><span class="muted">Files that steer the agents and the project. They have long reach, so every change is tracked here and waits for your review.</span></div>';
   if(!RULES.configured)return head+'<div class="card tile nw"><span class="label">Rules</span><span class="v muted" style="font-size:18px">not configured</span><span class="muted" style="font-size:13px">add a "rules" key to the --modules JSON'+(RULES.error?' ('+esc(RULES.error)+')':'')+'</span></div></div>';
@@ -628,7 +647,7 @@ function drawerNew(p){
 /* ---------- render and actions ---------- */
 function render(){
   const R=UI.route;
-  const nav=[['cockpit','Cockpit'],['backlog','Backlog'],['questions','Open questions'],['timeline','Timeline'],['rules','Rules'],['settings','Settings'],['code','Code'],['how','How it works']];
+  const nav=[['cockpit','Cockpit'],['backlog','Backlog'],['questions','Open questions'],['timeline','Timeline'],['rules','Rules'],['settings','Settings'],['usage','Usage'],['code','Code'],['how','How it works']];
   let h='<div class="top"><span class="brand">Project cockpit</span><nav class="nav" aria-label="Main">'+nav.map(n=>'<button data-act="go" data-r="'+n[0]+'"'+(R===n[0]?' aria-current="page"':'')+'>'+n[1]+(n[0]==='questions'?' <span class="chip" aria-label="'+Q.questions.length+' open">'+Q.questions.length+'</span>':'')+'</button>').join('')+'</nav>';
   if(PROJS.length>1)h=h.replace('</span><nav','</span><select class="psel" id="psel" aria-label="Project">'+PROJS.map(p=>'<option value="'+esc(p.name)+'"'+(p.name===PROJ?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select><nav');
   if(D){const s=D.source;
@@ -639,7 +658,7 @@ function render(){
   if(UI.err)h+='<div class="page"><div class="card" style="border-color:var(--danger)"><b class="warnline">Could not load from GitHub.</b> <span class="muted">'+esc(UI.err)+'</span> <button class="btn small" data-act="refresh">Retry</button></div></div>';
   else if(!D)h+='<div class="page"><span class="muted">Loading…</span></div>';
   else{
-  h+=R==='cockpit'?vCockpit():R==='backlog'?vBacklog():R==='questions'?vQuestions():R==='timeline'?vTimeline():R==='how'?vHow():R==='rules'?vRules():R==='settings'?vSettings():vCode();
+  h+=R==='cockpit'?vCockpit():R==='backlog'?vBacklog():R==='questions'?vQuestions():R==='timeline'?vTimeline():R==='how'?vHow():R==='rules'?vRules():R==='settings'?vSettings():R==='usage'?vUsage():vCode();
   if(UI.drawer){const t=UI.drawer.key&&byKey(D,UI.drawer.key);h+='<div class="drawer-bg" data-act="close"></div><div class="drawer" role="dialog" aria-modal="true" aria-label="Task">'+(UI.drawer.mode==='new'&&ST()?drawerNew(UI.drawer.prefill):(t?drawerTask(t):''))+'</div>';}
   }
   if(UI.toast)h+='<div class="toast" role="status">'+esc(UI.toast)+'</div>';

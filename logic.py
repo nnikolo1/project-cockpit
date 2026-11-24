@@ -815,3 +815,80 @@ def validate_settings(form, defaults, workers_cap):
             raise ValueError(f"workers must be at most {workers_cap} (the worker users defined in the image)")
         out[k] = v
     return out
+
+
+# -- Usage tab: the proxy's token counts (spec dispatcher-and-workers 3h, 4h) --
+USAGE_FIELDS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+WINDOW_SECONDS = 5 * 3600
+
+
+def _json_lines(text):
+    """The JSON objects of a JSON-lines text; an unreadable line is skipped. None for no text (missing file)."""
+    if text is None:
+        return None
+    out = []
+    for line in text.splitlines():
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(rec, dict):
+            out.append(rec)
+    return out
+
+
+def _epoch(s):
+    """Epoch seconds of an ISO time; a time without a zone is local time. None if unreadable."""
+    try:
+        return dt.datetime.fromisoformat(s).astimezone().timestamp()
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def _counts(rec):
+    c = {k: rec.get(k) if isinstance(rec.get(k), int) and not isinstance(rec.get(k), bool) else 0 for k in USAGE_FIELDS}
+    return dict(c, total=sum(c.values()))
+
+
+def _add(into, c):
+    for k in (*USAGE_FIELDS, "total"):
+        into[k] = into.get(k, 0) + c[k]
+    return into
+
+
+def usage_report(usage_text, plog_text, goodbye_tokens):
+    """The Usage tab. usage_text / plog_text: the file contents or None when missing; goodbye_tokens(folder) -> the `tokens` of the task's
+    good-bye note or None. -> dict(days, windows, workers (each a list of {key, counts}), tasks) or None parts where there is no data.
+    Windows are fixed 5-hour blocks counted from the epoch (UTC); days are UTC dates. The Worker label is not in the processing log, so a task's
+    sum counts the requests of all Workers in its time span (`overlap` marks spans that overlap another task's)."""
+    reqs = []
+    for rec in _json_lines(usage_text) or []:
+        t = _epoch(rec.get("ts"))
+        if t is not None:
+            reqs.append((t, rec.get("worker") or "?", _counts(rec)))
+    groups = {"days": {}, "windows": {}, "workers": {}}
+    for t, w, c in reqs:
+        u = dt.datetime.fromtimestamp(t, dt.timezone.utc)
+        start = dt.datetime.fromtimestamp(t - t % WINDOW_SECONDS, dt.timezone.utc)
+        _add(groups["days"].setdefault(u.date().isoformat(), {}), c)
+        _add(groups["windows"].setdefault(start.strftime("%Y-%m-%d %H:%M"), {}), c)
+        _add(groups["workers"].setdefault(w, {}), c)
+    rep = {k: None if usage_text is None else [dict(key=key, **v) for key, v in sorted(g.items())] for k, g in groups.items()}
+    spans = {}
+    for rec in _json_lines(plog_text) or []:
+        t, task = _epoch(rec.get("time")), rec.get("task")
+        if t is None or not task:
+            continue
+        s = spans.setdefault(task, dict(task=task, folder=rec.get("folder"), start=None, end=t))
+        if rec.get("state") == "launched":
+            s["start"], s["folder"] = t, rec.get("folder")
+        s["end"] = max(s["end"], t)
+    tasks = []
+    for s in sorted((s for s in spans.values() if s["start"] is not None), key=lambda s: s["start"]):
+        proxy = None if usage_text is None else sum(c["total"] for t, _, c in reqs if s["start"] <= t <= s["end"])
+        note = goodbye_tokens(s["folder"]) if s["folder"] else None
+        tasks.append(dict(task=s["task"], start=dt.datetime.fromtimestamp(s["start"], dt.timezone.utc).isoformat(timespec="seconds"),
+                          proxy=proxy, note=note, diff=None if proxy is None or note is None else proxy - note,
+                          overlap=any(o is not s and o["start"] is not None and o["start"] <= s["end"] and s["start"] <= o["end"] for o in spans.values())))
+    rep["tasks"] = None if plog_text is None else tasks
+    return rep
