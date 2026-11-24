@@ -24,7 +24,7 @@ Owner briefs:
 - **The gaps are on the three spine items, and each can be filled with borrowed parts:**
   1. **Task isolation:** per-Worker isolation is in place, including no network except the model, which is worth keeping as the default (F-762). What is missing is a network policy per task kind (default none, named allowlists, F-763), per-task resource limits, and a boundary that does not depend on an unsupported container tool. Borrow a per-task container (Linux) or the vendor's sandbox runtime (laptop) only when that boundary is replaced.
   2. **Worker images:** there is one hand-built image with no per-project dependencies, no version and no rebuild trigger. Borrow the standard recipe-and-layer-cache model: a Containerfile, or devcontainer.json, per project on a shared base, with the recipe and lock-file hash as the tag. This is the biggest missing bit for projects other than the cockpit.
-  3. **Sessions and context:** the vendor's coding tool already provides project memory (`autoMemoryDirectory`), context injection at session start (a SessionStart hook), compaction, resume and fork, and sub-agents. The frameworks (LangGraph and others) add stores and checkpointers. These can wrap a Worker that stays the vendor's tool, so need 2 is unchanged. Build only the synopsis writer and the wiring.
+  3. **Sessions and context:** the vendor's coding tool already provides project memory (`autoMemoryDirectory`), context injection at session start (a SessionStart hook), compaction, resume and fork, and sub-agents. The Claude-specific frameworks (the Agent SDK, Ruflo) can wrap a Worker that stays the vendor's tool, so need 2 is unchanged, but nothing in them is needed. Piggy-back on the tool; write only the synopsis and the wiring.
 - **Secondary:**
   - Do not adopt a batch scheduler (Slurm, Grid Engine, HTCondor, pueue). On one node it replaces little and mirrors task state (section 5).
   - The vendor's cloud (Projects, cloud sessions) covers isolation, images and context best. It conflicts with the owner's rules on push, determinism and the local log.
@@ -71,7 +71,7 @@ Owner briefs:
 | Cloud sessions / Projects | "each session gets a fresh virtual machine" [V] | Limited by default; can be disabled while the model stays reachable [V] | Vendor's | Vendor cloud | [cloud environments](https://code.claude.com/docs/en/cloud-environments), [cloud](https://code.claude.com/docs/en/claude-code-on-the-web) |
 | Slurm | Job in cgroups ("Confine jobs ... to specific memory resources") [V] | Not provided [I] | `--mem`, `--time` [V] | Linux only [V] | [cgroups](https://slurm.schedmd.com/cgroups.html), [platforms](https://slurm.schedmd.com/platforms.html) |
 | Kubernetes + Kueue | Pod per job | NetworkPolicy [I] | Requests and limits [I] | Linux | [Kueue](https://kueue.sigs.k8s.io/docs/tasks/run_jobs) |
-| OpenHands, Sculptor, container-use | Docker container per agent [V] | Varies | Docker | Docker | [Sculptor](https://docs.imbue.com/features/containers), [container-use](https://dagger.io/blog/agent-container-use) |
+| Sculptor, container-use | Docker container per agent [V] | Varies | Docker | Docker | [Sculptor](https://docs.imbue.com/features/containers), [container-use](https://dagger.io/blog/agent-container-use) |
 
 **The credential.** If the Worker holds its own token instead of using the proxy, the vendor warns that a dev container does "not prevent ... exfiltrating anything accessible inside the container, including the Claude Code credentials" [V]. With egress limited to the model host, the path left is a commit carrying the token [I]. A secret scan of the bundle in the end check would close it, about 10 lines [I].
 
@@ -174,19 +174,19 @@ What the vendor's coding tool already offers [V]:
 - **Sub-agents.** [Agent SDK]
 - **Projects (cloud).** Project memory files read by "Every cloud thread", project instructions "up to 16,000 characters", and "You don't manage context windows in a project". [Projects]
 
-What the frameworks offer that the tool does not (F-761):
-- **LangGraph.** Checkpointers "persist a thread's graph state", and a Store holds long-term memory "that spans threads", backed by SQLite or Postgres [V, [persistence](https://docs.langchain.com/oss/python/langgraph/persistence)]. In other words: structured, queryable memory across many agents, plus handoff state between graph nodes.
-- **CrewAI and Microsoft Agent Framework.** Not read in a source, so no claim is made (AutoGen is in maintenance mode [V via its repository notice]).
-- **Can they wrap a Worker that stays the vendor's tool?** Yes, as plain stores [I]:
+What Claude-specific frameworks add (F-761, F-767; only frameworks built for Claude or Claude Code are considered):
+- **Claude Agent SDK.** The vendor's own library: sessions to "resume or fork later", hooks, sub-agents and memory loading, programmable in Python or TypeScript [V, [Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview)]. It "runs the Claude Code binary" [V], so a wrapper around a Worker uses the account the same way as today. It could replace `claude -p` in the launch if a programmatic wrapper is ever needed; for a one-shot Worker the CLI and hooks suffice [I].
+- **Ruflo (formerly claude-flow).** "An agent meta-harness for Claude Code and Codex" with vector memory and a plugin to "Save and restore agent memory across sessions" [V, [repo](https://github.com/ruvnet/claude-flow)]. It is a large surface (swarms, 100+ agents) at odds with need 10, and its claims are self-reported [I].
+- **Can they wrap a Worker that stays the vendor's tool?** Yes [I]:
   - a wrapper writes the synopsis and the memory extract before launch (into the memory folder or a SessionStart hook);
   - it harvests the good-bye note and the transcript after the session.
-- **What needs a framework-driven agent instead:** graph handoffs inside a session, framework-managed summarisation and per-step checkpoints. Those replace the tool and so change need 2. OpenHands, for example, reaches models "supported by LiteLLM" [V].
-- For one owner and tens of tasks, a JSON or Markdown folder does what a Store does [I].
+- For one owner and tens of tasks, a Markdown folder with an index does what a memory store does [I].
+- Generic multi-model frameworks are left out (appendix A).
 
 **Hand-crafted versus the frameworks.**
 - The owner's practices already match what the vendor tool offers: instruction files, a `MEMORY.md`-indexed memory, skills.
-- They go beyond the frameworks in curation: typed notes, a sanitised archive, dated logs.
-- The frameworks add only queryable stores and checkpoints, which tens of tasks do not need [I].
+- They go beyond the Claude-specific frameworks in curation: typed notes, a sanitised archive, dated logs.
+- Those frameworks add programmatic sessions (the Agent SDK) or vector memory (Ruflo), which tens of tasks do not need [I].
 - Recommendation: **keep the practices hand-crafted; borrow the tool's mechanisms to deliver them to Workers.**
 
 **Recommendation: piggy-back first** (F-766; hours are estimates [I]):
@@ -202,7 +202,7 @@ What the frameworks offer that the tool does not (F-761):
 | Resume, fork, compaction, sub-agents | Built into Claude Code [V]; nothing to do for one-shot Workers | 0 | — |
 | Transcripts and history | Keep the existing mirror | 0 | — |
 
-The closest framework, Projects' memory, is cloud-only and is not loaded for local threads [V]. The other frameworks would replace the tool or add a store that nothing needs. So no build route is needed beyond the few lines named.
+The closest Claude-specific candidate, Projects' memory, is cloud-only and is not loaded for local threads [V]. The Agent SDK and Ruflo would add a wrapper or a store that nothing needs. So no build route is needed beyond the few lines named.
 
 ## 4a. Traction in the Claude community (F-764; checked 2026-11-24)
 
@@ -219,10 +219,9 @@ The target agent is Claude Code and its SDK. The candidates are ranked by how cl
 | 7 | Claude Squad | Several agents (Claude Code, Codex, Gemini, Aider); tmux and worktrees, no containers | [repo](https://github.com/smtg-ai/claude-squad): about 8.9k stars, AGPL-3.0 | Uncertain; interactive tool, no queue |
 | 8 | Ruflo (formerly claude-flow) | "An agent meta-harness for Claude Code and Codex"; multi-model | [repo](https://github.com/ruvnet/claude-flow): about 82.3k stars, 10,644 commits; speed and security claims self-reported | Popular, but a large surface at odds with need 10 [I] |
 | 9 | Sculptor (Imbue) | Claude Code and others; "experimental research preview" | [repo](https://github.com/imbue-ai/sculptor): 285 stars | Short-lived risk [I] |
-| — | Vibe Kanban | Multi-agent | "sunsetting" [V] | No |
-| — | LangGraph | Generic; the repository page names no Claude support | [repo](https://github.com/langchain-ai/langgraph): 45.4k stars | Yes, but not Claude-specific. Kept only as an optional memory store; it does not solve a spine item better than auto memory plus a folder. |
-| — | OpenHands, SWE-agent, Microsoft Agent Framework | Generic or model-API based | above | Dropped (F-764) |
-| — | Slurm, HTCondor, Grid Engine, pueue | Not agent tools | above | Maintained, but they do not solve a spine item |
+| — | Slurm, HTCondor, Grid Engine, pueue, Docker/Podman, GitHub runners | Not tied to a model; in scope (F-767) | above | Maintained; only container tooling solves a spine item |
+
+Generic multi-model frameworks and tools are not in this table (appendix A).
 
 Open issues about using a Claude Code subscription with these tools were not searched issue by issue. That is a gap of this report.
 
@@ -246,7 +245,7 @@ Open issues about using a Claude Code subscription with these tools were not sea
 - **Self-hosted environments** [V, [self-hosted](https://code.claude.com/docs/en/self-hosted-environments)]: "public beta on Team and Enterprise plans" only.
 - **Projects** [V]: a thread limit "isn't a hard cap"; threads open PRs.
 - **Agent view** [V, [agent view](https://code.claude.com/docs/en/agent-view)]: interactive background sessions in worktrees.
-- **Vibe Kanban** "is sunsetting" [V, [README](https://raw.githubusercontent.com/BloopAI/vibe-kanban/HEAD/README.md)].
+- **Claude Squad** (tmux and worktrees, several agents) and **container-use** are interactive tools with no queue [V repos above].
 
 Each of these lacks one of: deterministic choice (constitution "The Dispatcher"), no push (3e), or a local log (5c). These are owner rules, not conveniences. **Keep the Dispatcher's queue and ranking.**
 
@@ -261,12 +260,10 @@ Each of these lacks one of: deterministic choice (constitution "The Dispatcher")
 | `srt` (laptop or Linux) | n/a | + | + (beta) | n/a | + | n/a | ~ | n/a | n/a | + |
 | Slurm, Grid Engine, HTCondor, Kueue | − | + | − | ~ | + | + | ~ | − | ~ | − |
 | pueue | − | + | − | ~ | + | + | − | − | ~ | + |
-| LangGraph and similar frameworks (as a wrapper) | n/a | + | n/a | n/a | n/a | n/a | n/a | ~ | n/a | ~ |
-| OpenHands, SWE-agent (as the agent) | ~ | − | + | − | − | − | ~ | − | − | − |
+| Claude Agent SDK (as a wrapper) | n/a | + | n/a | n/a | + | n/a | n/a | ~ | n/a | ~ |
 
 Column 2 shows how a candidate uses the account (F-755):
-- **+**: the vendor's binary with the owner's login, the same use as today.
-- **−**: a third-party tool calls the model.
+- **+**: the vendor's binary with the owner's login, the same use as today. Every candidate left in scope is **+**.
 - "6 − (one repo per run)": `dispatcher/core.py:478-504` takes a single `--repo` [V].
 
 ## 6. Hosts side by side (F-748, F-751, F-752, F-754)
@@ -371,7 +368,7 @@ The relevant sentences [V]:
 
 Read against this use case, nothing in these texts was found to conflict with it: the vendor documents scripted use of its own tool with the owner's subscription, and the restrictive sentences concern other users and resale. The decision is the owner's.
 
-The only candidates that would use the account differently are the agent-framework and third-party agents that call the model themselves (OpenHands, SWE-agent, framework-driven agents). The recommendation uses none of them.
+Every candidate left in scope uses the account the same way as today's Workers: the vendor's binary with the owner's login.
 
 ## 10. Open questions for the owner
 
@@ -384,3 +381,13 @@ The only candidates that would use the account differently are the agent-framewo
 - that a base-plus-project image layout fits every project without network at run time (for example, projects that download data or models during tests);
 - how much of `core.py` a batch scheduler would really replace;
 - that `autoMemoryDirectory` plus a read-only mount behaves well for six concurrent Workers sharing one project memory.
+
+## Appendix A. Left out: not Claude-specific (F-764, F-767)
+
+None of these is the only way to meet a spine item:
+- **LangGraph** ([repo](https://github.com/langchain-ai/langgraph); checkpointers and a cross-thread Store [V, [persistence](https://docs.langchain.com/oss/python/langgraph/persistence)]);
+- **CrewAI**;
+- **Microsoft Agent Framework / AutoGen** (AutoGen in maintenance mode [V via its repository notice]);
+- **OpenHands** (models "supported by LiteLLM" [V, [docs](https://docs.openhands.dev/openhands/usage/llms/llms)]);
+- **SWE-agent** (superseded by mini-swe-agent [V, [repo](https://github.com/SWE-agent/SWE-agent)]);
+- **Vibe Kanban** ("sunsetting" [V, [README](https://raw.githubusercontent.com/BloopAI/vibe-kanban/HEAD/README.md)]).
