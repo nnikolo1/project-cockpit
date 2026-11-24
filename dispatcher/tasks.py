@@ -2,7 +2,7 @@
 
 Task metadata lives in GitHub (2d). A task is `<repository short name>-<issue number>`; its states wip, unmerged, failed and merged are
 labels on its issue. Priority, deadline, blockers, unblocks and must/nice are read with the cockpit's own logic (logic.derive and
-bootfill.core.rank_inputs). Every call goes through two injected functions: `gh(args) -> stdout` and `git(args, cwd) -> stdout`.
+the helpers below, copied from the retired bootfill.core). Every call goes through two injected functions: `gh(args) -> stdout` and `git(args, cwd) -> stdout`.
 """
 import json
 import logging
@@ -11,7 +11,6 @@ from dataclasses import dataclass
 
 import cockpit
 import logic as L
-from bootfill import core
 
 log = logging.getLogger("dispatcher.tasks")
 
@@ -42,6 +41,30 @@ def write_task_md(task, path):
         f.write(f"# {task.title}\n\n{task.text}\n")
 
 
+def _unblock_counts(tasks):
+    """key -> number of open tasks that name it as a blocker."""
+    open_ = {t["key"] for t in tasks if t["stage"] in ("embryo", "released", "in_progress")}
+    out = {}
+    for t in tasks:
+        if t["key"] in open_:
+            for b in t["blockedBy"]:
+                out[b] = out.get(b, 0) + 1
+    return out
+
+
+def _rank_inputs(task, by_key, unblocks):
+    """-> dict(deadline, blocked, unblocks): the task's own deadline, else its parent chain's; blocked while a blocker is not completed."""
+    seen, t, deadline = set(), task, None
+    while t and t["key"] not in seen:
+        seen.add(t["key"])
+        if t.get("deadline"):
+            deadline = t["deadline"]
+            break
+        t = by_key.get(t.get("parent"))
+    return dict(deadline=deadline, blocked=any(by_key[b]["stage"] != "completed" for b in task["blockedBy"] if b in by_key),
+                unblocks=unblocks.get(task["key"], 0))
+
+
 class GitHubTasks:
     def __init__(self, repo, gh, git, repo_dir, manager=None, short=None):
         """repo: `owner/name`; repo_dir: the task repository's clone on the host; manager: the login whose protected labels count
@@ -68,7 +91,7 @@ class GitHubTasks:
         issues, events = self._issues()
         tasks, _ = L.derive(issues, events, {}, self.manager, [], False)
         by_key = {t["key"]: t for t in tasks}
-        unblocks = core.unblock_counts(tasks)
+        unblocks = _unblock_counts(tasks)
         labels = {i["number"]: set(i["labels"]) for i in issues}
         body = {i["number"]: i["body"] for i in issues}
         out = []
@@ -76,7 +99,7 @@ class GitHubTasks:
             lab = labels[t["number"]]
             if t["stage"] not in ("embryo", "released") or lab & set(STATES) or lab & set(NOT_RELEASABLE) or t["type"] == "decision":
                 continue
-            r = core.rank_inputs(t, by_key, unblocks)
+            r = _rank_inputs(t, by_key, unblocks)
             out.append(Task(id=f"{self.short}-{t['number']}", repo=self.repo, number=t["number"], title=t["title"], text=body[t["number"]],
                             priority=t["prio"] or 2, due=r["deadline"], blocked=r["blocked"], unblocks=r["unblocks"], must=t["cls"] == "must"))
         log.info("%s: %d released task(s)", self.repo, len(out))
