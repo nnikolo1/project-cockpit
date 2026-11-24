@@ -1,13 +1,13 @@
 {
  "_comment": "Committed persistence declaration per module (a decision, not a measurement); read by tools/cardmeta_footprint.py, which adds sizes and counts from the live state. Paths: repo-relative, absolute or ~/...; <project> is replaced by the project name; kind 'dir' counts files. 'volume': true marks files whose modification times feed the volume figures. A missing backup or retention statement is a gap and is shown as such: gaps below are honest 'undocumented' entries, not decisions. Backup 'undocumented' means nobody has decided yet (the cockpit shows it as a gap); the code itself is in git.",
  "modules": {
-  "core": {
+  "githubclient": {
    "files": [
     {
      "path": "~/.local/share/project-cockpit/<project>/token",
      "kind": "file",
      "personal_data": false,
-     "written_by": "core",
+     "written_by": "githubclient",
      "note": "access token created with --token-file (mode 0600); a secret, not personal data; the path is the documented default, the owner may choose another"
     }
    ],
