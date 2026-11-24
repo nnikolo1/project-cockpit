@@ -634,8 +634,8 @@ def _g(d, *path):
     return d
 
 
-def code_view(metrics):
-    """metrics.json -> {generated_at, commit, modules: {id: flat dict the Code tab shows}}."""
+def code_view(metrics, thresholds=None):
+    """metrics.json -> {generated_at, commit, modules: {id: flat dict the Code tab shows, with its `bands`}}."""
     mods = {}
     for mid, m in (metrics.get("modules") or {}).items():
         x = m.get("metrics") or {}
@@ -654,6 +654,7 @@ def code_view(metrics):
             churn=_g(x, "churn", "commits_touching_files"), churnNote=f"{_g(x, 'churn', 'commits_touching_files')} commits touching {_g(x, 'churn', 'files_touched')} files in {_g(x, 'churn', 'window_days')} days",
             testRatio=_g(x, "tests", "test_to_code_ratio_python"), testsNote=f"{_g(x, 'tests', 'source_files_with_mirror_test')} source files have a mirror test",
             hot=[[h["path"], h["churn"], h["cc_max"]] for h in (_g(x, "hotspots", "top") or [])[:5]])
+        mods[mid]["bands"] = module_bands(mods[mid], thresholds)
     return dict(generated_at=metrics.get("generated_at"), commit=metrics.get("git_commit_short"), modules=mods)
 
 
@@ -1101,16 +1102,88 @@ def validate_settings(form, defaults, workers_cap):
 
 
 # ---------- Module-card settings (Settings tab, section "Module cards") ----------
-CARD_SETTING_DEFAULTS = {"churn_colour": "size"}  # what the overview showed before the option moved to Settings
 CARD_CHURN_COLOURS = ("size", "absolute")  # size = changed lines / current lines; absolute = lines added + removed
+# Quality bands (docs/contracts/quality-bands.md): metric -> (direction, ok, warn); "low" = lower is better
+QUALITY_DEFAULTS = {
+    "complexity": {"direction": "low", "ok": 10, "warn": 20},
+    "maintainability": {"direction": "high", "ok": 20, "warn": 10},
+    "lint": {"direction": "low", "ok": 10, "warn": 30},
+    "dead": {"direction": "low", "ok": 2, "warn": 5},
+    "cycles": {"direction": "low", "ok": 0, "warn": 0},
+    "duplication": {"direction": "low", "ok": 3, "warn": 5},
+    "docstrings": {"direction": "high", "ok": 80, "warn": 50},
+    "coverage": {"direction": "high", "ok": 80, "warn": 60},
+    "tests": {"direction": "high", "ok": 0.5, "warn": 0.2},
+}
+CARD_SETTING_DEFAULTS = {"churn_colour": "size", "quality_thresholds": QUALITY_DEFAULTS}  # churn: what the overview showed before the option moved to Settings
 
 
-def validate_card_settings(form):
+def _is_num(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and abs(v) != float("inf")
+
+
+def validate_thresholds(raw, strict=True):
+    """quality_thresholds from a form/file -> a full dict (a missing entry gets its default). strict: ValueError on an unknown metric
+    or an invalid entry; otherwise an invalid entry falls back to its default."""
+    raw = {} if raw is None else raw
+    if not isinstance(raw, dict):
+        if strict:
+            raise ValueError("quality thresholds must be an object")
+        raw = {}
+    if strict and (bad := [k for k in raw if k not in QUALITY_DEFAULTS]):
+        raise ValueError("unknown quality metric: " + ", ".join(map(str, bad)))
+    out = {}
+    for k, d in QUALITY_DEFAULTS.items():
+        e = raw.get(k)
+        if e is None:
+            out[k] = dict(d)
+            continue
+        ok = (isinstance(e, dict) and e.get("direction") == d["direction"] and _is_num(e.get("ok")) and _is_num(e.get("warn"))
+              and (e["ok"] <= e["warn"] if d["direction"] == "low" else e["ok"] >= e["warn"]))
+        if ok:
+            out[k] = dict(direction=d["direction"], ok=e["ok"], warn=e["warn"])
+        elif strict:
+            raise ValueError(f"quality threshold {k}: direction must be {d['direction']}, ok and warn numbers with ok "
+                             + ("<= warn" if d["direction"] == "low" else ">= warn"))
+        else:
+            out[k] = dict(d)
+    return out
+
+
+def validate_card_settings(form, strict=True):
     """The module-card options from a form -> a dict with every key of CARD_SETTING_DEFAULTS, or ValueError with a clear message."""
     v = form.get("churn_colour")
     if v not in CARD_CHURN_COLOURS:
         raise ValueError("churn colour must be one of: " + ", ".join(CARD_CHURN_COLOURS))
-    return {"churn_colour": v}
+    return {"churn_colour": v, "quality_thresholds": validate_thresholds(form.get("quality_thresholds"), strict)}
+
+
+BAND_WORDS = {"ok": "normal", "warn": "borderline", "bad": "out of range", "none": "no figure"}
+
+
+def band_of(value, t):
+    """(band, word) of a figure against a threshold entry {direction, ok, warn}; no figure (None, not a number) -> none."""
+    if not _is_num(value):
+        band = "none"
+    elif t["direction"] == "low":
+        band = "ok" if value <= t["ok"] else "warn" if value <= t["warn"] else "bad"
+    else:
+        band = "ok" if value >= t["ok"] else "warn" if value >= t["warn"] else "bad"
+    return dict(band=band, word=BAND_WORDS[band])
+
+
+def _per_kloc(n, code):
+    return n * 1000 / code if _is_num(n) and _is_num(code) and code > 0 else None
+
+
+def module_bands(m, thresholds=None):
+    """The bands of one code_view module dict, one per metric key of QUALITY_DEFAULTS; a module with no files measured has none."""
+    t = thresholds or QUALITY_DEFAULTS
+    figures = dict(complexity=m.get("cc"), maintainability=m.get("mi"), lint=_per_kloc(m.get("lint"), m.get("code")),
+                   dead=_per_kloc(m.get("dead"), m.get("code")), cycles=m.get("cyc"), duplication=m.get("dup"),
+                   docstrings=m.get("doc"), coverage=m.get("cov"), tests=m.get("testRatio"))
+    measured = bool(m.get("filesN"))
+    return {k: band_of(figures[k] if measured else None, t[k]) for k in QUALITY_DEFAULTS}
 
 
 # -- Token Usage tab: the proxy's token counts (spec dispatcher-and-workers 3h, 4h) --

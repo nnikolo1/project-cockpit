@@ -57,7 +57,7 @@ def test_read_only_refuses_save_with_403(tmp_path, monkeypatch):
 
 
 def test_card_settings_validation():
-    assert L.validate_card_settings({"churn_colour": "absolute"}) == {"churn_colour": "absolute"}
+    assert L.validate_card_settings({"churn_colour": "absolute"}) == dict(L.CARD_SETTING_DEFAULTS, churn_colour="absolute")
     assert L.validate_card_settings({"churn_colour": "size"}) == L.CARD_SETTING_DEFAULTS
     for bad in ({}, {"churn_colour": "red"}, {"churn_colour": None}):
         with pytest.raises(ValueError, match="churn colour"):
@@ -72,11 +72,38 @@ def test_card_settings_default_save_and_read_only(tmp_path, monkeypatch):
     f = C.card_settings_path(P)
     assert code == 200 and f == tmp_path / "proj" / "cockpit-settings.json"
     assert stat.S_IMODE(f.stat().st_mode) == 0o600 and not list(f.parent.glob("*.tmp"))
-    assert C.get_card_settings(P)["values"] == {"churn_colour": "absolute"}
+    assert C.get_card_settings(P)["values"] == dict(L.CARD_SETTING_DEFAULTS, churn_colour="absolute")
     assert C.do_act(dict(action="cardsettings", churn_colour="x"), p=P)[0] == 400
-    assert C.get_card_settings(P)["values"] == {"churn_colour": "absolute"}
+    assert C.get_card_settings(P)["values"] == dict(L.CARD_SETTING_DEFAULTS, churn_colour="absolute")
     f.write_text("not json")
     assert C.get_card_settings(P)["values"] == L.CARD_SETTING_DEFAULTS
     assert not (tmp_path / "proj" / "dispatcher-settings.json").exists()
     monkeypatch.setitem(C.CFG, "steer", False)
     assert C.do_act(dict(action="cardsettings", churn_colour="size"), p=P)[0] == 403
+
+
+def test_thresholds_roundtrip_and_validation(tmp_path, monkeypatch):
+    monkeypatch.setattr(C, "DATA_DIR", tmp_path)
+    monkeypatch.setitem(C.CFG, "steer", True)
+    custom = {"coverage": dict(direction="high", ok=90, warn=70)}
+    assert C.do_act(dict(action="cardsettings", churn_colour="size", quality_thresholds=custom), p=P)[0] == 200
+    got = C.get_card_settings(P)["values"]["quality_thresholds"]
+    assert got["coverage"] == custom["coverage"] and got["lint"] == L.QUALITY_DEFAULTS["lint"] and set(got) == set(L.QUALITY_DEFAULTS)
+    for bad in ({"nosuch": dict(direction="low", ok=1, warn=2)},
+                {"lint": dict(direction="high", ok=1, warn=2)},   # wrong direction
+                {"lint": dict(direction="low", ok=5, warn=2)},    # ok above warn for low
+                {"coverage": dict(direction="high", ok=50, warn=60)},  # ok below warn for high
+                {"lint": dict(direction="low", ok="x", warn=2)}, {"lint": dict(direction="low", ok=True, warn=2)},
+                {"lint": dict(direction="low", ok=1)}, {"lint": 3}, [1]):
+        assert C.do_act(dict(action="cardsettings", churn_colour="size", quality_thresholds=bad), p=P)[0] == 400
+    assert C.get_card_settings(P)["values"]["quality_thresholds"]["coverage"] == custom["coverage"]
+
+
+def test_invalid_stored_threshold_falls_back_to_its_default(tmp_path, monkeypatch):
+    monkeypatch.setattr(C, "DATA_DIR", tmp_path)
+    f = C.card_settings_path(P)
+    f.parent.mkdir(parents=True)
+    f.write_text(json.dumps(dict(churn_colour="size", quality_thresholds=dict(
+        lint=dict(direction="low", ok=9, warn=1), coverage=dict(direction="high", ok=90, warn=70), bogus=1))))
+    t = C.get_card_settings(P)["values"]["quality_thresholds"]
+    assert t["lint"] == L.QUALITY_DEFAULTS["lint"] and t["coverage"]["ok"] == 90 and "bogus" not in t
