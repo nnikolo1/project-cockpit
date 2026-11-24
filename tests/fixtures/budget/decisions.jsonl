@@ -1,7 +1,0 @@
-{"kind": "poll", "time": "2026-11-20T10:00:00Z", "idle": true, "idle_reason": "no session activity for 40 min", "five_hour_used": 31.0, "five_hour_resets_at": "2026-11-20T12:00:00Z", "weekly_used": 55.5, "weekly_resets_at": "2026-11-24T09:00:00Z", "triggers": [{"name": "five_hour_20", "verdict": "fired"}, {"name": "weekly_50", "verdict": "not met"}], "decision": "release 20"}
-{"kind": "release", "time": "2026-11-20T10:00:05Z", "trigger": "five_hour_20", "rank": 1, "project": "demo", "issue": 7, "title": "Add a widget", "reason": "P1, due soonest, unblocks 2", "state": "released", "dry_run": false}
-{"kind": "release", "time": "2026-11-20T10:00:06Z", "trigger": "five_hour_20", "rank": 2, "project": "demo", "issue": 9, "title": "Fix <b>markup</b>", "reason": "P2, must", "state": "would_release", "dry_run": true}
-{"kind": "poll", "time": "2026-11-20T09:30:00Z", "idle": false, "idle_reason": "session active", "five_hour_used": 20, "five_hour_resets_at": "2026-11-20T12:00:00Z", "weekly_used": 50, "weekly_resets_at": "2026-11-24T09:00:00Z", "triggers": [], "decision": "skip: not idle"}
-this is not json
-{"kind": "other", "time": "2026-11-20T09:00:00Z"}
-{"kind": "poll"}
