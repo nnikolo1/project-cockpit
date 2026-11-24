@@ -443,6 +443,29 @@ def get_settings(p):
                 workers_cap=RuntimeConfig.image_workers, steering=CFG["steer"])
 
 
+# The Usage tab's files, under DATA_DIR/<project name>/ (the folder the Settings page uses)
+USAGE_FILE, PLOG_FILE, AREA_DIR = "proxy-usage.jsonl", "processing/processing.jsonl", "area"
+
+
+def _read_text(path):
+    try:
+        return pathlib.Path(path).read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        return None
+
+
+def get_usage(p, data_dir=None):
+    d = (data_dir or DATA_DIR) / (p.get("name") or p["repo"].split("/")[-1])
+
+    def goodbye_tokens(folder):  # only the task folder's name is taken from the log; the file is read inside the area
+        try:
+            t = json.loads(_read_text(d / AREA_DIR / pathlib.PurePath(folder).name / "outbox" / "goodbye.json")).get("tokens")
+        except (TypeError, ValueError, AttributeError):
+            return None
+        return t if isinstance(t, int) and not isinstance(t, bool) else None
+    return L.usage_report(_read_text(d / USAGE_FILE), _read_text(d / PLOG_FILE), goodbye_tokens)
+
+
 def save_settings(p, form):
     """Validate and write the settings file atomically, mode 0600. ValueError on a refused value."""
     values = L.validate_settings(form, SETTING_DEFAULTS, RuntimeConfig.image_workers)
@@ -635,6 +658,8 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, build_timeline(get_state(p=p), p))
             if u.path == "/api/settings":
                 return self.send(200, get_settings(p))
+            if u.path == "/api/usage":
+                return self.send(200, get_usage(p))
             if u.path == "/api/rules":
                 return self.send(200, get_rules(p))
             if u.path == "/api/code":
