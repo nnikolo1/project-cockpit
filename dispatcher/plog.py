@@ -44,6 +44,10 @@ class ProcessingLog:
             raise ValueError(f"unknown failure reason {reason!r}; expected one of {REASONS}")
         self.event(task_id, task_folder, "failed", reason)
 
+    def sleep(self, start, end, minutes):
+        """3i: the host slept (or the Dispatcher was down) from `start` to `end` (epoch seconds)."""
+        self._write(event="sleep", start=start, end=end, minutes=minutes)
+
     def heartbeat(self, line):
         self._write(heartbeat=line)
 

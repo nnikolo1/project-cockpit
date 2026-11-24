@@ -100,6 +100,15 @@ def save_state(path, st):
     os.replace(tmp, path)
 
 
+# --- host sleep (3i) -----------------------------------------------------------------------------------------
+def awake_seconds(start, end, sleeps):
+    """Seconds from start to end minus the overlap with the recorded sleep intervals [(from, to), ...]."""
+    total = max(end - start, 0)
+    for a, b in sleeps:
+        total -= max(0, min(end, b) - max(start, a))
+    return total
+
+
 # --- one firing ----------------------------------------------------------------------------------------------
 @dataclass
 class Probes:
@@ -138,10 +147,25 @@ class Dispatcher:
         t = w.get("last_request") or self.probes.transcript_mtime(user)
         return max(t or 0, w["launched"])
 
+    def _detect_sleep(self, st, now):
+        """3i: a gap since `last_fired` over twice the interval plus a minute means the host slept (or the Dispatcher was
+        down): record it (minus one normal interval), log it and return the minutes for the heartbeat; else None."""
+        last, step = st.get("last_fired"), self.settings["interval_minutes"] * 60
+        if not isinstance(last, (int, float)) or isinstance(last, bool) or now - last <= 2 * step + 60:
+            return None
+        sleeps = [s for s in st.get("sleeps", []) if s[1] >= now - 2 * self.settings["runaway_minutes"] * 60]
+        sleeps.append([last + step, now])
+        st["sleeps"] = sleeps
+        minutes = round((now - last - step) / 60)
+        log.warning("host slept (or the Dispatcher was down): %d minutes", minutes)
+        self.plog.sleep(last + step, now, minutes)
+        return minutes
+
     # -- the running Workers (3e, 3i, 3j, 3o, 4n) --
     def manage(self, st):
         now = self.probes.now()
         last = self.probes.proxy_last()
+        sleeps = st.get("sleeps", [])
         for user, w in list(st["workers"].items()):
             if user in last:
                 w["last_request"] = last[user]   # the `ts` of the proxy's last usage line for this Worker
@@ -153,13 +177,13 @@ class Dispatcher:
             if not self.runtime.alive(w["pid"]):
                 self._finish(st, user, w, note, reason)
                 continue
-            age = now - w["launched"]
+            age = awake_seconds(w["launched"], now, sleeps)
             limit, idle = self.settings["runaway_minutes"], self.settings["idle_minutes"]
             if not w["started"] and age > self.settings["start_minutes"] * 60:
                 why = "no start"
             elif age > limit * 60:
                 why = f"over {limit} minutes"
-            elif w["started"] and now - self._last_record(user, w) > idle * 60:
+            elif w["started"] and awake_seconds(self._last_record(user, w), now, sleeps) > idle * 60:
                 why = "no activity"
             else:
                 continue
@@ -236,7 +260,9 @@ class Dispatcher:
     # -- the firing --
     def fire(self):
         st = load_state(self.state_path)
+        slept = None
         try:
+            slept = self._detect_sleep(st, self.probes.now())
             self.manage(st)
             now = self.probes.now()
             last = st.get("last_fired")
@@ -256,16 +282,18 @@ class Dispatcher:
                 st["last_fired"] = now
         finally:
             save_state(self.state_path, st)
-        line = self.heartbeat(st, did)
+        line = self.heartbeat(st, did, slept)
         self.plog.heartbeat(line)
         log.info(line)
         return did
 
-    def heartbeat(self, st, did):
+    def heartbeat(self, st, did, slept=None):
         """3g: the time, the Workers running, what the firing did, the host and container readings."""
         p = self.probes.heartbeat_parts()
         running = ", ".join(f"{u}={w['task_id']}" for u, w in sorted(st["workers"].items())) or "none"
         t = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.probes.now()))
+        if slept is not None:
+            did = f"{did} | slept {slept} minutes"
         return (f"{t} | running: {running} | {did} | memory pressure {p.get('memory_pressure', '?')}"
                 f" | free disk {p.get('free_disk', '?')} | load {p.get('load', '?')} | power {p.get('power', '?')}"
                 f" | container data {p.get('data_size', '?')} | container {p.get('container', 'not reported')}")
