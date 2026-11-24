@@ -127,12 +127,18 @@ def test_periods_are_graded_hour_day_week_month():
     ps = L._quota(qt, None)[1]["periods"]
     assert [(p["level"], p["key"]) for p in ps] == [
         ("month", "2026-10"), ("week", "2026-11-02"), ("week", "2026-11-09"), ("day", "2026-11-23"), ("day", "2026-11-24"),
-        ("hour", "2026-11-25T05:00"), ("hour", "2026-11-25T08:00")]
+        ] + [("hour", "2026-11-25T%02d:00" % h) for h in range(9)]  # every hour of the day up to the newest reading's, none still to come
     assert ps[0]["readings"] == 2 and ps[0]["five_hour"] == dict(first=11, last=12, low=11, high=12)
-    assert ps[5]["readings"] == 2 and ps[5]["five_hour"]["first"] == 18 and ps[5]["five_hour"]["last"] == 19
+    hr = {p["key"]: p for p in ps if p["level"] == "hour"}
+    assert hr["2026-11-25T05:00"]["readings"] == 2 and hr["2026-11-25T05:00"]["five_hour"]["first"] == 18 and hr["2026-11-25T05:00"]["five_hour"]["last"] == 19
+    assert hr["2026-11-25T03:00"]["readings"] == 0 and hr["2026-11-25T03:00"]["five_hour"] == dict(first=17, last=17, low=17, high=17)  # carried from the day before
+    assert hr["2026-11-25T06:00"]["five_hour"]["last"] == 19 and hr["2026-11-25T08:00"]["readings"] == 1
+    assert "2026-11-25T09:00" not in hr
 
 
 def test_week_crossing_a_month_start_has_no_week_row():
     end = int(L._epoch("2026-12-01T08:30:00+00:00"))
     qt = "\n".join([q("2026-11-30T10:00:00+00:00", 10, 30, end), q("2026-12-02T10:00:00+00:00", 20, 31, end)])
-    assert [(p["level"], p["key"]) for p in L._quota(qt, None)[1]["periods"]] == [("day", "2026-11-30"), ("hour", "2026-12-02T10:00")]
+    ps = L._quota(qt, None)[1]["periods"]
+    assert [(p["level"], p["key"]) for p in ps if p["level"] != "hour"] == [("day", "2026-11-30")]
+    assert [p["key"][-5:] for p in ps if p["level"] == "hour"] == ["%02d:00" % h for h in range(11)]

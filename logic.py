@@ -1188,7 +1188,31 @@ def _periods(reads):
                 s = h[k]
                 s.update(first=s.get("first", v), last=v, low=min(s.get("low", v), v), high=max(s.get("high", v), v))
         h["reset5"], h["reset7"] = r["reset5"] or h["reset5"], r["reset7"] or h["reset7"]
-    return list(out.values())
+    return _fill_hours(out, reads, anchor) if reads else []
+
+
+def _fill_hours(out, reads, anchor):
+    """The graded rows, with a row for every hour of the current day up to the newest reading's hour: an hour without a recorded change
+    has readings 0 and shows the value carried forward; hours still to come get no row; hours before the very first reading stay empty."""
+    utc = dt.timezone.utc
+    last = dt.datetime.fromtimestamp(anchor, utc).replace(minute=0, second=0, microsecond=0)
+    day0 = last.replace(hour=0)
+    rows = [v for k, v in out.items() if k[0] != "hour"]
+    hours = {k[1]: v for k, v in out.items() if k[0] == "hour"}
+    before = next((r for r in reversed(reads) if r["t"] < day0.timestamp()), None)
+    carry = dict(five_hour=before["five_hour"], seven_day=before["seven_day"], reset5=before["reset5"], reset7=before["reset7"]) if before else {}
+    for i in range(last.hour + 1):
+        key = (day0 + dt.timedelta(hours=i)).strftime("%Y-%m-%dT%H:00")
+        row = hours.get(key)
+        if row is None:
+            held = {k: ({} if carry.get(k) is None else dict(first=carry[k], last=carry[k], low=carry[k], high=carry[k])) for k in ("five_hour", "seven_day")}
+            row = dict(level="hour", key=key, label=key.replace("T", " "), readings=0, reset5=carry.get("reset5"), reset7=carry.get("reset7"), **held)
+        else:
+            for k in ("five_hour", "seven_day"):
+                carry[k] = row[k].get("last", carry.get(k))
+            carry["reset5"], carry["reset7"] = row["reset5"], row["reset7"]
+        rows.append(row)
+    return rows
 
 
 def _quota(quota_text, end_day):
