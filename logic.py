@@ -502,7 +502,7 @@ def parse_project(items, repo):
 # ---------- rule files: which files steer the agents, and what changed in them ----------
 RS, US, GS = "\x1e", "\x1f", "\x1d"  # record, field and body separators of the git formats below
 LOG_FMT = f"{RS}%H{US}%aI{US}%an{US}%ae{US}%s{US}%b{GS}"  # then --numstat or -p output follows
-BOT = ("[bot]", "noreply@anthropic")
+BOT = ("[bot]", "noreply@anthropic")  # default of rules.bots
 TRAILER = re.compile(r"^co-authored-by:\s*([^<\n]*?)\s*(?:<[^>\n]*>)?\s*$", re.I | re.M)
 DIFF_CAP, LINE_CAP = 30, 200
 
@@ -525,13 +525,14 @@ def glob_re(g):
 
 
 def rules_config(cfg):
-    """The `rules` key of the --modules JSON -> {groups: [{name, res, paths}], managers: [lower-case]}, or None when absent/malformed."""
+    """The `rules` key of the --modules JSON -> {groups: [{name, res, paths}], managers: [lower-case], bots: [lower-case]}, or None when absent/malformed."""
     r = (cfg or {}).get("rules")
     if not isinstance(r, dict) or not isinstance(r.get("groups"), list):
         return None
     gs = [dict(name=str(g["name"]), paths=[str(p) for p in g["paths"]], res=[glob_re(str(p)) for p in g["paths"]])
           for g in r["groups"] if isinstance(g, dict) and g.get("name") and isinstance(g.get("paths"), list)]
-    return dict(groups=gs, managers=[str(m).lower() for m in r.get("managers", [])]) if gs else None
+    bots = [str(b).lower() for b in r["bots"]] if isinstance(r.get("bots"), list) else list(BOT)
+    return dict(groups=gs, managers=[str(m).lower() for m in r.get("managers", [])], bots=bots) if gs else None
 
 
 def rule_group(path, groups):
@@ -544,10 +545,10 @@ def rule_pathspecs(groups):
     return [":(glob)" + p for g in groups for p in g["paths"]]
 
 
-def is_agent_assisted(body, name, email):
-    """A Co-Authored-By trailer in the message, or a bot-looking author."""
+def is_agent_assisted(body, name, email, bots=BOT):
+    """A Co-Authored-By trailer in the message, or an author matching one of `bots` (substrings, lower-case)."""
     who = f"{name} {email}".lower()
-    return bool(TRAILER.search(body or "")) or any(b in who for b in BOT)
+    return bool(TRAILER.search(body or "")) or any(b in who for b in bots)
 
 
 def is_manager(name, email, managers):
@@ -588,7 +589,7 @@ def diff_excerpt(rest, groups, cap=DIFF_CAP):
     return out
 
 
-def parse_rule_changes(numstat_txt, diff_txt, groups, managers):
+def parse_rule_changes(numstat_txt, diff_txt, groups, managers, bots=BOT):
     """Outputs of two `git log` runs (LOG_FMT + --numstat / -p -U0) -> rule changes, newest first; commits without matching files are dropped."""
     diffs = {h[0]: rest for h, rest in _records(diff_txt)}
     out = []
@@ -596,7 +597,7 @@ def parse_rule_changes(numstat_txt, diff_txt, groups, managers):
         files = parse_numstat(rest, groups)
         if not files:
             continue
-        agent, mgr = is_agent_assisted(body, name, email), is_manager(name, email, managers)
+        agent, mgr = is_agent_assisted(body, name, email, bots), is_manager(name, email, managers)
         out.append(dict(sha=sha[:7], date=date[:10], author=name, email=email, subject=subj, files=files, diff=diff_excerpt(diffs.get(sha, ""), groups),
                         co_authors=[c for c in TRAILER.findall(body or "") if c], agent_assisted=agent, by_manager=mgr, needs_attention=agent or not mgr))
     return out
