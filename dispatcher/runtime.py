@@ -23,6 +23,7 @@ INSTRUCTION = (  # 4r
     "At the end write {outbox}/goodbye.json (outcome, summary, branch, tokens) and {outbox}/result.bundle "
     "(a git bundle of your branch).")
 # 4i: Claude Code's non-essential traffic off; skipWebFetchPreflight is set in the image's settings.json
+PERMISSION_MODE = "auto"  # owner F-528
 SWITCHES = {
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_TELEMETRY": "1", "DISABLE_ERROR_REPORTING": "1",
     "ENABLE_CLAUDEAI_MCP_SERVERS": "false", "CLAUDE_CODE_DISABLE_ARTIFACT": "1",
@@ -241,6 +242,7 @@ class Runtime:
         cmd = [self.cfg.container, "exec", "--user", user, "--workdir", clone]
         for k, v in env.items():
             cmd += ["--env", f"{k}={v}"]
-        cmd += [self.cfg.name, "timeout", str(backstop), "claude", "-p", prompt]
+        cmd += [self.cfg.name, "timeout", str(backstop), "claude", "-p", prompt,
+            "--permission-mode", PERMISSION_MODE]
         log.info("launching %s for task %s in %s", user, task_id, clone)
         return self._spawn(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
