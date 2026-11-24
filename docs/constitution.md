@@ -72,7 +72,7 @@ This is the human, acting via the Cockpit GUI.
 
 ### The Dispatcher
 
-This is a deterministic procedure, not an AI agent. It runs on the host and assigns released tasks to Workers, following priority and taking deadlines and blockers into account. When a Worker has ended, it decides from the Worker's good-bye note whether the task is unmerged or failed.
+This is a deterministic procedure, not an AI agent. It runs on the host and assigns released tasks to Workers, following priority and taking deadlines and blockers into account. When a Worker has ended, it decides from the Worker's good-bye note whether the task is unmerged or failed. There is one Task Queue, and it serves all the owner's projects: one Dispatcher, one pool of Workers, one ranking across the projects (owner, 2026-11-24, a constitutional setup; how projects are ranked against each other and which are served is decided separately). A task about the Task Queue itself is never run through it: it is worked outside the queue, as a high-priority task, by the Interactive Session Agent.
 
 ### The Interactive Session Agent
 
