@@ -251,15 +251,19 @@ async function reload(fresh){
   const mine=PROJ;
   const qp=loadQuestions(fresh);
   try{
-    const [s,f,c,r,mt,se,cs,us]=await Promise.all([api('/api/state'+(fresh?'?fresh=1':'')),api('/api/timeline'),api('/api/code'),api('/api/rules').catch(e=>({configured:false,error:e.message})),api('/api/cardmeta').catch(e=>null),api('/api/settings').catch(e=>null),api('/api/cardsettings').catch(e=>null),api('/api/usage').catch(e=>null)]);SET=se;CSET=cs;USE=us;
+    const errs=[],soft=(pr,d,w)=>pr.catch(e=>{errs.push(w+': '+e.message);return d;});  /* one failing part must not blank the others */
+    const [s,f,c,r,mt,se,cs,us]=await Promise.all([api('/api/state'+(fresh?'?fresh=1':'')),soft(api('/api/timeline'),{entries:[],activity:[]},'timeline'),soft(api('/api/code'),{wired:false,modules:{},diagrams:[]},'code'),api('/api/rules').catch(e=>({configured:false,error:e.message})),api('/api/cardmeta').catch(e=>null),api('/api/settings').catch(e=>null),api('/api/cardsettings').catch(e=>null),api('/api/usage').catch(e=>null)]);SET=se;CSET=cs;USE=us;
     if(mine!==PROJ)return;  /* the user switched project while this was loading: drop the answer */
     if(fresh)for(const k in MODDOC)delete MODDOC[k];
-    D=s;TODAY=D.today;MODULES=D.modules;FEED=f.entries;ACT=f.activity||[];CODE=c;RULES=r;META=mt||NOMETA();UI.err='';
+    D=s;TODAY=D.today;MODULES=D.modules;FEED=f.entries;ACT=f.activity||[];CODE=c;RULES=r;META=mt||NOMETA();UI.err=errs.join('; ');
     if(!CODE.modules[UI.codeMod]&&!MODULES.some(m=>m.id===UI.codeMod&&m.parent)){const k=MODULES.find(m=>!m.virtual);UI.codeMod=CODE.modules[k&&k.id]?k.id:'unassigned';}
   }catch(e){if(mine!==PROJ)return;UI.err=String(e.message||e);}
+  render();  /* the questions of the other projects may take longer: they fill in when they arrive */
+  clearTimeout(staleTimer);if(D&&D.stale&&mine===PROJ)staleTimer=setTimeout(()=>reload(false),4000);  /* a newer copy is being fetched: ask again shortly */
   await qp;
-  render();
+  if(mine===PROJ)render();
 }
+let staleTimer=0;
 async function pickProject(name){
   if(name===PROJ)return;
   PROJ=name;try{localStorage.setItem('cockpit-project',name);}catch(e){}

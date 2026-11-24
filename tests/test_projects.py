@@ -177,7 +177,7 @@ def test_api_unknown_project_is_404_with_a_clear_error(two):
 
 def test_api_picks_the_project_from_the_query(two, monkeypatch):
     monkeypatch.setattr(C, "build_state", lambda p: dict(of=p["name"]))
-    assert get("/api/state?project=alpha") == (200, dict(of="alpha")) and get("/api/state") == (200, dict(of="beta"))
+    assert get("/api/state?project=alpha") == (200, dict(of="alpha", stale=False)) and get("/api/state") == (200, dict(of="beta", stale=False))
 
 
 def test_report_without_a_query_follows_the_referer(two, tmp_path):
@@ -186,3 +186,31 @@ def test_report_without_a_query_follows_the_referer(two, tmp_path):
     C.proj("alpha")["code"] = str(tmp_path)
     assert get("/report/x.css", referer="http://h/report/p.html?project=alpha")[0] == 200
     assert get("/report/x.css")[0] == 404  # the default project has no snapshot
+
+
+def test_timeline_is_rebuilt_when_the_state_it_came_from_was_replaced(two, monkeypatch, tmp_path):
+    monkeypatch.setattr(C, "CACHE_DIR", None)
+    p = C.proj("alpha")
+    built = []
+    monkeypatch.setattr(C, "build_timeline", lambda S, p=None: built.append(S["source"]["fetchedAt"]) or dict(entries=[]))
+    state = dict(source=dict(fetchedAt=1))
+    monkeypatch.setattr(C, "get_state", lambda fresh=False, p=None: state)
+    assert C.get_timeline(p)["stateAt"] == 1
+    assert C.get_timeline(p)["stateAt"] == 1 and built == [1]  # same state: served from the cache
+    state = dict(source=dict(fetchedAt=2))
+    assert C.get_timeline(p)["stateAt"] == 2 and built == [1, 2]  # new state: rebuilt at once
+
+
+def test_served_state_says_when_a_newer_copy_is_being_fetched(two, monkeypatch):
+    p = C.proj("alpha")
+    monkeypatch.setattr(C, "get_state", lambda fresh=False, p=None: dict(tasks=[]))
+    assert C.get_state_served(p)["stale"] is False
+    monkeypatch.setattr(C, "_refreshing", {C.pk(p, "state")})
+    assert C.get_state_served(p)["stale"] is True
+
+
+def test_warm_up_survives_a_failing_part(two, monkeypatch):
+    monkeypatch.setattr(C, "get_state", lambda p=None, fresh=False: 1 / 0)
+    for n in ("get_rules", "get_timeline", "code_snapshot", "usage_served", "warm_module_pages"):
+        monkeypatch.setattr(C, n, lambda p=None: None)
+    C.warm()  # logs the failure, does not raise

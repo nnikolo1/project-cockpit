@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Project cockpit v1: a JSON API + one web page over GitHub (stdlib + the `gh` CLI; no token stored, acts as the gh login).
-Every action is exactly one GitHub operation (labels, sub-issues, dependencies, a repo variable); nothing is stored locally."""
+Every action is exactly one GitHub operation (labels, sub-issues, dependencies, a repo variable); the only local copy is the cache of the slow answers (--cache-dir)."""
 import argparse
 import json
 import logging
@@ -193,23 +193,99 @@ def fetch_module_deadlines(p):
         return {}
 
 
-_cache, _lock = {}, threading.RLock()  # re-entrant: build_state() calls cached() (gh_user) while cached() holds the lock
+_cache, _lock = {}, threading.RLock()  # _lock only guards the bookkeeping dicts; every key computes under its own lock, so a slow key never blocks the others
+_locks, _refreshing = {}, set()
+CACHE_DIR = None  # folder of the on-disk copies of the slow answers (set by main); None = memory only. Lets a restarted service answer at once.
 
 
-def cached(key, fn, ttl):
+def _disk_path(key):
+    return CACHE_DIR / (re.sub(r"[^A-Za-z0-9_.-]", "_", key) + ".json") if CACHE_DIR else None
+
+
+def _disk_load(key):
+    f = _disk_path(key)
+    try:
+        return json.loads(f.read_text()) if f else None
+    except (OSError, ValueError):
+        return None
+
+
+def _disk_save(key, v):
+    f = _disk_path(key)
+    if not f:
+        return
+    try:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        tmp = f.with_suffix(".tmp")
+        tmp.write_text(json.dumps(v))
+        os.replace(tmp, f)
+    except (OSError, TypeError, ValueError) as ex:
+        log.warning("cache %s not written to disk: %s", key, ex)
+
+
+def drop_cache(prefix):
+    """Forget the memory and disk copies of every key starting with `prefix` (after an action: nothing older may be served)."""
     with _lock:
-        t, v = _cache.get(key, (0, None))
-        if time.time() - t > ttl:
-            try:
-                v = fn()
-            except Exception:
-                if v is None:
-                    raise
-                log.warning("%s: refresh failed, serving the last good copy (%.0f s old)", key, time.time() - t)
-                _cache[key] = (time.time() - ttl + 15, v)  # try again in about 15 s, not on every request
-                return v
-            _cache[key] = (time.time(), v)
+        for k in [k for k in _cache if k.startswith(prefix)]:
+            del _cache[k]
+    if CACHE_DIR and CACHE_DIR.is_dir():
+        for f in CACHE_DIR.glob(re.sub(r"[^A-Za-z0-9_.-]", "_", prefix) + "*.json"):
+            f.unlink(missing_ok=True)
+
+
+def cached(key, fn, ttl, swr=False, persist=False):
+    """fn()'s value for `key`, recomputed when older than ttl seconds. swr (stale-while-revalidate): an expired copy is served at once and
+    refreshed in a background thread. persist: the value (JSON) is also kept on disk, and a copy from an earlier run counts as expired."""
+    t, v = _cache.get(key, (0, None))
+    if v is None and persist:
+        v = _disk_load(key)
+        if v is not None:
+            t = 0
+            _cache.setdefault(key, (t, v))
+    if v is not None and time.time() - t <= ttl:
         return v
+    if v is not None and swr:
+        with _lock:
+            if key in _refreshing:
+                return v
+            _refreshing.add(key)
+
+        def go():
+            try:
+                _refresh(key, fn, ttl, persist)
+            except Exception as ex:
+                log.warning("%s: background refresh failed: %s", key, str(ex)[:150])
+            finally:
+                _refreshing.discard(key)
+        threading.Thread(target=go, daemon=True).start()
+        return v
+    return _refresh(key, fn, ttl, persist)
+
+
+def _refresh(key, fn, ttl, persist):
+    with _lock:
+        lock = _locks.setdefault(key, threading.Lock())
+    with lock:
+        t, v = _cache.get(key, (0, None))
+        if v is not None and time.time() - t <= ttl:
+            return v  # another thread refreshed it while this one waited
+        try:
+            v = fn()
+        except Exception:
+            if v is None:
+                raise
+            log.warning("%s: refresh failed, serving the last good copy (%.0f s old)", key, time.time() - t)
+            _cache[key] = (time.time() - ttl + 15, v)  # try again in about 15 s, not on every request
+            return v
+        _cache[key] = (time.time(), v)
+        if persist:
+            _disk_save(key, v)
+        return v
+
+
+def refreshing(prefix):
+    """True while a background refresh of a key starting with `prefix` runs: what is served may be older than its ttl."""
+    return any(k.startswith(prefix) for k in list(_refreshing))
 
 
 def gh_user():
@@ -266,7 +342,7 @@ def get_state(fresh=False, p=None):
     k = pk(p, "state")
     if fresh and k in _cache:
         _cache[k] = (0, _cache[k][1])  # force a refresh but keep the old copy for a failed one
-    return cached(k, lambda: build_state(p), 120)
+    return cached(k, lambda: build_state(p), 120, swr=not fresh, persist=True)
 
 
 # ---------- actions: plan (pure) -> execute ----------
@@ -498,6 +574,10 @@ def _usage_one(p, data_dir=None):
     return L.usage_report(_read_text(d / USAGE_FILE), _read_text(d / PLOG_FILE), goodbye_tokens, _read_text(d / QUOTA_FILE))
 
 
+def usage_served(p):
+    return cached(pk(p, "usage"), lambda: get_usage(p), 15, swr=True)
+
+
 def get_usage(p, data_dir=None, projects=None):
     """The selected project's report plus `summary` (its 90-day row) and `projects` (one row per project the Cockpit serves; no counts = no data)."""
     rep = _usage_one(p, data_dir)
@@ -546,8 +626,7 @@ def do_act(form, run=run_gh, state=None, p=None):
     except RuntimeError as ex:
         log.error("action %s failed: %s", form.get("action"), ex)
         return 502, dict(error=f"GitHub: {ex}")
-    for k in [k for k in _cache if k.startswith(pk(p, ""))]:
-        del _cache[k]  # this project's copies only
+    drop_cache(pk(p, ""))  # this project's copies only, memory and disk
     log.info("action ok on %s: %s -> %s", p.get("name", ""), form.get("action"), msg)
     return 200, dict(ok=True, msg=msg)
 
@@ -579,7 +658,7 @@ def build_rules(p=None):
 
 def get_rules(p=None):
     p = p or proj()
-    return cached(pk(p, "rules"), lambda: build_rules(p), 120)
+    return cached(pk(p, "rules"), lambda: build_rules(p), 120, swr=True, persist=True)
 
 
 # ---------- timeline / code ----------
@@ -623,6 +702,42 @@ def build_timeline(S, p=None):
     return dict(entries=out[:400], total=len(out), activity=L.activity_days(S["tasks"], S["events"], mod_of))
 
 
+def get_timeline(p):
+    """The timeline built from the state that is served right now (a refreshed state gets a rebuilt timeline at once, never one from older data)."""
+    S = get_state(p=p)
+    k, at = pk(p, "timeline"), S["source"]["fetchedAt"]
+    build = lambda: dict(build_timeline(S, p), stateAt=at)
+    tl = cached(k, build, 30, swr=True, persist=True)
+    return tl if tl.get("stateAt") == at else cached(k, build, -1, persist=True)
+
+
+def get_state_served(p, fresh=False):
+    """The state for the page: `stale` is true while a newer copy is being fetched in the background, so the page asks again shortly."""
+    S = get_state(fresh=fresh, p=p)
+    return dict(S, stale=refreshing(pk(p, "state")))
+
+
+def warm_module_pages(p):
+    """The shared inputs of the module pages (file list, document heads, import edges), so the first module page opens fast."""
+    cfgm = load_modules(p)
+    if p.get("git") and cfgm:
+        tracked, _ = tracked_and_heads(p)
+        cached(pk(p, "importedges"), lambda: import_edges_of(p, tracked, cfgm["assign"]), 120, swr=True)
+
+
+def warm(projects=None):
+    """Fill the caches of every project in the background (at startup): with a disk copy this only starts the refreshes, without it it computes."""
+    def one(p):
+        for name, fn in (("state", get_state), ("rules", get_rules), ("timeline", get_timeline), ("code", code_snapshot), ("usage", usage_served), ("module pages", warm_module_pages)):
+            try:
+                fn(p)
+            except Exception as ex:
+                log.warning("warm-up %s of %s failed: %s", name, p.get("name", ""), str(ex)[:120])
+    with ThreadPoolExecutor(4) as ex:
+        list(ex.map(one, projects or list(PROJECTS.values()) or [CFG]))
+    log.info("warm-up done")
+
+
 def line_counts(p, tracked):
     """{path: physical lines} of the tracked text files of the clone (binary files and unreadable ones are left out)."""
     root, out = pathlib.Path(p["git"]).expanduser(), {}
@@ -654,7 +769,7 @@ def code_snapshot(p=None):
         p = p or proj()
         d = pathlib.Path(p["code"]).expanduser()
         view = L.code_view(json.load(open(d / "metrics.json")))
-        big = cached(pk(p, "biggest"), lambda: biggest_by_module(p, list(view["modules"])), 120)
+        big = cached(pk(p, "biggest"), lambda: biggest_by_module(p, list(view["modules"])), 120, swr=True, persist=True)
         for mid, m in view["modules"].items():
             m["biggest"] = big.get(mid, [])
         return dict(wired=True, **view, diagrams=[k for k, f in SVGS.items() if (d / f).exists()])
@@ -691,6 +806,20 @@ def import_edges_of(p, tracked, assign):
     return L.import_edges(src, assign)
 
 
+def tracked_and_heads(p):
+    """(tracked files of the clone, {docs/*.md path: its first 1500 characters}); shared by all module pages, so read once per minute, not per page."""
+    def build():
+        tracked = [x for x in run_git(p, ["ls-files", "-z"]).split("\0") if x]
+        heads = {}
+        for x in [x for x in tracked if x.startswith("docs/") and x.endswith(".md")][:2000]:
+            try:
+                heads[x] = (pathlib.Path(p["git"]).expanduser() / x).read_text(errors="replace")[:1500]
+            except OSError:
+                continue
+        return tracked, heads
+    return cached(pk(p, "tracked"), build, 60, swr=True)
+
+
 def build_moduledoc(p, mid):
     """The content of a module page: description paragraphs (docs/modules/<id>.txt next to the module map, else the map's `desc`), the sanitised
     drawing (.svg), the Workflow elements to highlight (.hl), the key files grouped and the documents naming the module. Anything missing is None / []."""
@@ -715,17 +844,11 @@ def build_moduledoc(p, mid):
         log.warning("module page %s.svg refused by the sanitiser", stem)
     files = docs = rel = None
     if p.get("git"):
-        tracked = [x for x in run_git(p, ["ls-files", "-z"]).split("\0") if x]
+        tracked, heads = tracked_and_heads(p)
         files = L.group_files(L.module_files(tracked, (cfgm or {}).get("assign", []), mid)) if cfgm else None
-        heads = {}
-        for x in [x for x in tracked if x.startswith("docs/") and x.endswith(".md")][:2000]:
-            try:
-                heads[x] = (pathlib.Path(p["git"]).expanduser() / x).read_text(errors="replace")[:1500]
-            except OSError:
-                continue
         docs = L.module_docs(heads, mid, f"https://github.com/{p['repo']}")
         if cfgm:
-            rel = L.module_relations(cached(pk(p, "importedges"), lambda: import_edges_of(p, tracked, cfgm["assign"]), 120), mid)
+            rel = L.module_relations(cached(pk(p, "importedges"), lambda: import_edges_of(p, tracked, cfgm["assign"]), 120, swr=True), mid)
     log.info("module page %s: text %s, svg %s, hl %s", mid, bool(txt), bool(svg), bool(hl))
     return dict(id=mid, paragraphs=L.module_paragraphs(txt, desc), svg=svg, hl=L.hl_ids(hl), files=files, docs=docs, relations=rel)
 
@@ -734,6 +857,11 @@ def build_moduledoc(p, mid):
 def redact(line):
     """Keep the access token out of the request log."""
     return re.sub(r"([?&]t=)[^ &]+", r"\1<token>", line)
+
+
+class Server(ThreadingHTTPServer):
+    request_queue_size = 128  # the page opens about ten connections at once; the default backlog of 5 dropped some of them
+    daemon_threads = True
 
 
 class H(BaseHTTPRequestHandler):
@@ -776,17 +904,17 @@ class H(BaseHTTPRequestHandler):
                 name_q = parse_qs(urlparse(self.headers.get("Referer", "")).query).get("project", [""])[0]
             p = proj(name_q or None)
             if u.path == "/api/state":
-                return self.send(200, get_state(fresh=bool(q.get("fresh")), p=p))
+                return self.send(200, get_state_served(p, fresh=bool(q.get("fresh"))))
             if u.path == "/api/questions":
                 return self.send(200, build_questions(fresh=bool(q.get("fresh"))))
             if u.path == "/api/timeline":
-                return self.send(200, build_timeline(get_state(p=p), p))
+                return self.send(200, get_timeline(p))
             if u.path == "/api/settings":
                 return self.send(200, get_settings(p))
             if u.path == "/api/cardsettings":
                 return self.send(200, get_card_settings(p))
             if u.path == "/api/usage":
-                return self.send(200, get_usage(p))
+                return self.send(200, usage_served(p))
             if u.path == "/api/rules":
                 return self.send(200, get_rules(p))
             if u.path == "/api/code":
@@ -795,9 +923,9 @@ class H(BaseHTTPRequestHandler):
                 mid = q.get("id", [""])[0]
                 if not L.module_stem(mid):
                     return self.send(400, dict(error="bad module id"))
-                return self.send(200, cached(pk(p, "moduledoc:" + mid), lambda: build_moduledoc(p, mid), 60))
+                return self.send(200, cached(pk(p, "moduledoc:" + mid), lambda: build_moduledoc(p, mid), 60, swr=True, persist=True))
             if u.path == "/api/cardmeta":
-                return self.send(200, cached(pk(p, "cardmeta"), lambda: card_metadata(p), 60))
+                return self.send(200, cached(pk(p, "cardmeta"), lambda: card_metadata(p), 60, swr=True, persist=True))
             name = u.path.removeprefix("/code/").removesuffix(".svg")
             if u.path.startswith("/code/") and name in SVGS and p.get("code"):
                 return self.send(200, (pathlib.Path(p["code"]).expanduser() / SVGS[name]).read_bytes(), "image/svg+xml")
@@ -870,6 +998,7 @@ def main():
     ap.add_argument("--phases", help="extra timeline.json ({module, events:[...]}) merged into the timeline")
     ap.add_argument("--code", help="code snapshot directory: metrics.json and erd|dataflow|deps|js.svg (see README)")
     ap.add_argument("--token-file", help="keep the access token in this file (created 0600 if missing), so the URL survives restarts")
+    ap.add_argument("--cache-dir", help="keep the slow answers on disk here (default: <data dir>/cache) so that a restarted service shows data at once; 'none' = memory only")
     ap.add_argument("--read-only", action="store_true", help="refuse every action (default: actions are enabled)")
     ap.add_argument("--steer", action="store_true", help=argparse.SUPPRESS)  # actions are the default now; kept so that existing service files still start
     ap.add_argument("--simulate-orchestrator", action="store_true", help="demo buttons: 'takes it' and 'completes it'")
@@ -886,12 +1015,15 @@ def main():
         log.info("project %s: repo=%s project=%s manager=%s mode=%s", p["name"], p["repo"], p["project"], p["manager"], "STEERING" if steer else "READ-ONLY")
         if steer and gh_user() != p["manager"]:
             log.warning("%s: gh is logged in as %s but the Manager is %s: protected labels set now would be flagged unauthorised", p["name"], gh_user(), p["manager"])
+    global CACHE_DIR
+    CACHE_DIR = None if a.cache_dir == "none" else pathlib.Path(a.cache_dir or DATA_DIR / "cache").expanduser()
     H.token = load_token(a.token_file)
+    threading.Thread(target=warm, daemon=True).start()
     host = "0.0.0.0" if a.lan else "127.0.0.1"
     if a.lan:
         log.warning("--lan: plain HTTP, the token travels unencrypted; trusted network only")
     log.info("open http://%s:%d/?t=%s  (acting as the gh user; manager=%s)", host, a.port, "<token file>" if a.token_file else H.token, ", ".join(f"{p['name']}={p['manager']}" for p in projects))
-    ThreadingHTTPServer((host, a.port), H).serve_forever()
+    Server((host, a.port), H).serve_forever()
 
 
 if __name__ == "__main__":
