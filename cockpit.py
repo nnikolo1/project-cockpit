@@ -8,6 +8,7 @@ import os
 import pathlib
 import re
 import secrets
+import collections
 import subprocess
 import threading
 import time
@@ -93,15 +94,66 @@ def meta_dir(p):
 
 
 # ---------- gh ----------
+GH_CALLS_PER_HOUR = 600       # cap of gh calls this Cockpit makes per rolling hour (a state load is about 12 calls; the 5,000-point budget is shared with every other tool of the login, so the Cockpit keeps well below it)
+RATE_LIMIT_PAUSE_S = 900      # after a rate-limit error with no reset time in it: no gh call for this long (the next hourly reset is at most 3600 s away; 15 min bounds the damage of a wrong guess)
+_gh_queue = threading.RLock()  # the hourly queue: GitHub refreshes run one at a time (projects one after another, never in parallel bursts); re-entrant for a refresh that needs another queued key
+GH_SUMMARY_EVERY = 25         # one summary line "gh calls in the last hour: n of cap" per this many calls
+GH_REFRESH_S = 3600           # lazy refresh (owner F-699): GitHub data is fetched at most once per this many seconds per project; within it the cache is served with no call, an older cache is served at once and one refresh is queued
+DISK_FRESH_S = GH_REFRESH_S   # a disk copy younger than this is used as is after a restart (nothing is fetched at startup)
+
+
+class GitHubUnavailable(RuntimeError):
+    """No gh call was made: the budget is exhausted or paused. `until` is the epoch time of the next call allowed."""
+    def __init__(self, msg, until):
+        super().__init__(msg)
+        self.until = until
+
+
+_gh_calls, _gh_lock, _gh_pause = collections.deque(), threading.Lock(), dict(until=0.0, rate_limited=False)
+
+
+def _clock(t):
+    return time.strftime("%H:%M", time.localtime(t))
+
+
+def _gh_gate(now=None):
+    """Count one gh call, or raise GitHubUnavailable when the Cockpit is paused after a rate-limit error or over its hourly cap."""
+    now = time.time() if now is None else now
+    with _gh_lock:
+        if now < _gh_pause["until"]:
+            raise GitHubUnavailable(f"GitHub rate limit reached; the Cockpit makes no GitHub call until {_clock(_gh_pause['until'])}", _gh_pause["until"])
+        while _gh_calls and _gh_calls[0] <= now - 3600:
+            _gh_calls.popleft()
+        if len(_gh_calls) >= GH_CALLS_PER_HOUR:
+            until = _gh_calls[0] + 3600
+            log.warning("gh call cap reached: %d calls in the last hour, next call allowed at %s", len(_gh_calls), _clock(until))
+            raise GitHubUnavailable(f"the Cockpit's own limit of {GH_CALLS_PER_HOUR} GitHub calls per hour is reached; next call at {_clock(until)}", until)
+        _gh_calls.append(now)
+        if len(_gh_calls) % GH_SUMMARY_EVERY == 0:
+            log.info("gh calls in the last hour: %d of %d", len(_gh_calls), GH_CALLS_PER_HOUR)
+
+
+def _gh_failed(msg, now=None):
+    """After a failed call: a rate-limit error pauses every further call until the reset time (the message's, else RATE_LIMIT_PAUSE_S from now)."""
+    now = time.time() if now is None else now
+    if L.is_rate_limited(msg):
+        with _gh_lock:
+            _gh_pause["until"] = L.rate_limit_reset(msg, now) or now + RATE_LIMIT_PAUSE_S
+            log.warning("GitHub rate limit hit (%s): no gh call until %s", msg[:100], _clock(_gh_pause["until"]))
+
+
 def run_gh(args):
-    """Run `gh <args>` and return stdout; raises RuntimeError with gh's message on failure."""
+    """Run `gh <args>` and return stdout; raises RuntimeError with gh's message on failure, GitHubUnavailable (no call made) while paused or over the hourly cap."""
+    _gh_gate()
     log.info("gh %s", " ".join(a if len(a) < 60 else a[:57] + "..." for a in args))
     try:
         r = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=120)
     except subprocess.TimeoutExpired:
         raise RuntimeError("gh timed out")
     if r.returncode:
-        raise RuntimeError(r.stderr.strip() or f"gh exited {r.returncode}")
+        msg = r.stderr.strip() or f"gh exited {r.returncode}"
+        _gh_failed(msg)
+        raise RuntimeError(msg)
     return r.stdout
 
 
@@ -233,14 +285,18 @@ def drop_cache(prefix):
             f.unlink(missing_ok=True)
 
 
-def cached(key, fn, ttl, swr=False, persist=False):
+_failures = {}  # key -> dict(at, error, until, rate_limited) of the last failed refresh that was answered with an older copy; removed by the next success
+
+
+def cached(key, fn, ttl, swr=False, persist=False, disk_fresh=0, queue=False):
     """fn()'s value for `key`, recomputed when older than ttl seconds. swr (stale-while-revalidate): an expired copy is served at once and
-    refreshed in a background thread. persist: the value (JSON) is also kept on disk, and a copy from an earlier run counts as expired."""
+    refreshed in a background thread. persist: the value (JSON) is also kept on disk; a copy from an earlier run counts as expired, unless it is
+    younger than disk_fresh seconds (then a restart costs no refresh). queue: the refresh costs GitHub requests and runs inside the one-at-a-time queue."""
     t, v = _cache.get(key, (0, None))
     if v is None and persist:
         v = _disk_load(key)
         if v is not None:
-            t = 0
+            t = _disk_time(key, disk_fresh)
             _cache.setdefault(key, (t, v))
     if v is not None and time.time() - t <= ttl:
         return v
@@ -252,17 +308,26 @@ def cached(key, fn, ttl, swr=False, persist=False):
 
         def go():
             try:
-                _refresh(key, fn, ttl, persist)
+                _refresh(key, fn, ttl, persist, queue)
             except Exception as ex:
                 log.warning("%s: background refresh failed: %s", key, str(ex)[:150])
             finally:
                 _refreshing.discard(key)
         threading.Thread(target=go, daemon=True).start()
         return v
-    return _refresh(key, fn, ttl, persist)
+    return _refresh(key, fn, ttl, persist, queue)
 
 
-def _refresh(key, fn, ttl, persist):
+def _disk_time(key, disk_fresh):
+    """The time a disk copy counts as fetched: its file time when younger than disk_fresh, else 0 (expired)."""
+    try:
+        m = _disk_path(key).stat().st_mtime
+    except (OSError, AttributeError):
+        return 0
+    return m if disk_fresh and time.time() - m <= disk_fresh else 0
+
+
+def _refresh(key, fn, ttl, persist, queue=False):
     with _lock:
         lock = _locks.setdefault(key, threading.Lock())
     with lock:
@@ -270,13 +335,20 @@ def _refresh(key, fn, ttl, persist):
         if v is not None and time.time() - t <= ttl:
             return v  # another thread refreshed it while this one waited
         try:
-            v = fn()
-        except Exception:
+            if queue:
+                with _gh_queue:
+                    v = fn()
+            else:
+                v = fn()
+        except Exception as ex:
             if v is None:
                 raise
-            log.warning("%s: refresh failed, serving the last good copy (%.0f s old)", key, time.time() - t)
-            _cache[key] = (time.time() - ttl + 15, v)  # try again in about 15 s, not on every request
+            until = getattr(ex, "until", None)
+            _failures[key] = dict(at=time.time(), error=str(ex)[:300], until=until, rate_limited=bool(until) or L.is_rate_limited(str(ex)))
+            log.warning("%s: refresh failed, serving the last good copy (%.0f s old): %s", key, time.time() - t, str(ex)[:120])
+            _cache[key] = ((until or time.time() + 15) - ttl, v)  # try again when GitHub is allowed again, else in about 15 s, not on every request
             return v
+        _failures.pop(key, None)
         _cache[key] = (time.time(), v)
         if persist:
             _disk_save(key, v)
@@ -289,7 +361,12 @@ def refreshing(prefix):
 
 
 def gh_user():
-    return cached("user", lambda: run_gh(["api", "user", "--jq", ".login"]).strip(), 3600)
+    """The login gh acts as ('' when GitHub cannot say and no copy exists); kept on disk for a day, so a restart makes no call."""
+    try:
+        return cached("user", lambda: run_gh(["api", "user", "--jq", ".login"]).strip(), 3600, persist=True, disk_fresh=86400)
+    except RuntimeError as ex:
+        log.warning("gh user unknown: %s", str(ex)[:100])
+        return ""
 
 
 # ---------- state ----------
@@ -328,7 +405,7 @@ def build_questions(fresh=False, now=None):
         try:
             S = get_state(fresh=fresh, p=p)
             per[name] = S["questions"]
-            status.append(dict(name=name, repo=p["repo"], age_s=max(0, round(time.time() - S["source"]["fetchedAt"])), error=None))
+            status.append(dict(name=name, repo=p["repo"], age_s=max(0, round(time.time() - S["source"]["fetchedAt"])), error=None, note=stale_note(p)))
         except Exception as ex:
             log.warning("questions: project %s unreadable: %s", name, str(ex)[:120])
             status.append(dict(name=name, repo=p["repo"], age_s=None, error=str(ex)[:200]))
@@ -337,12 +414,22 @@ def build_questions(fresh=False, now=None):
     return dict(questions=rows, counts=L.group_questions(rows), projects=status)
 
 
+def _expire(key):
+    """Make the copy of `key` (memory, else disk) count as expired but keep it for a failed refresh."""
+    v = _cache[key][1] if key in _cache else _disk_load(key)
+    if v is not None:
+        _cache[key] = (0, v)
+
+
 def get_state(fresh=False, p=None):
+    """The task state. Only fresh=True (the owner's Refresh click on a pane) bypasses the hour; timers, page loads, restarts and actions never do."""
     p = p or proj()
     k = pk(p, "state")
-    if fresh and k in _cache:
-        _cache[k] = (0, _cache[k][1])  # force a refresh but keep the old copy for a failed one
-    return cached(k, lambda: build_state(p), 120, swr=not fresh, persist=True)
+    if fresh:
+        _expire(k)
+    if fresh:
+        log.info("owner Refresh of %s: fetching from GitHub now (counted in the hourly total)", p.get("name", ""))
+    return cached(k, lambda: build_state(p), GH_REFRESH_S, swr=not fresh, persist=True, disk_fresh=DISK_FRESH_S, queue=True)
 
 
 # ---------- actions: plan (pure) -> execute ----------
@@ -519,6 +606,13 @@ def get_settings(p):
                 workers_cap=RuntimeConfig.image_workers, steering=CFG["steer"])
 
 
+def get_queue(p):
+    """The local part of the Task Queue tab (no GitHub): running Workers from the Dispatcher's state file, the processing log's newest lines and
+    the Dispatcher settings. The token and quota files are read for the Token Usage tab (`/api/usage`), also local."""
+    d = DATA_DIR / (p.get("name") or p["repo"].split("/")[-1])
+    return dict(L.queue_local(_read_text(d / "dispatcher-state.json"), _read_text(d / PLOG_FILE)), settings=get_settings(p), asOf=time.time())
+
+
 def card_settings_path(p):
     """The module-card options of the project: <data dir>/<project name>/cockpit-settings.json."""
     return DATA_DIR / (p.get("name") or p["repo"].split("/")[-1]) / "cockpit-settings.json"
@@ -613,7 +707,7 @@ def do_act(form, run=run_gh, state=None, p=None):
             return 200, dict(ok=True, msg=save_settings(p, form))
         if form.get("action") == "cardsettings":  # same: a local file, same guard
             return 200, dict(ok=True, msg=save_card_settings(p, form))
-        S = state or get_state(fresh=True, p=p)
+        S = state or get_state(p=p)  # the cached state: an action does not bypass the hour (owner F-701)
         ops, msg = plan_action(form, S, p["repo"], CFG["simulate"])
         execute(ops, run)
     except UnknownProject as ex:
@@ -626,7 +720,6 @@ def do_act(form, run=run_gh, state=None, p=None):
     except RuntimeError as ex:
         log.error("action %s failed: %s", form.get("action"), ex)
         return 502, dict(error=f"GitHub: {ex}")
-    drop_cache(pk(p, ""))  # this project's copies only, memory and disk
     log.info("action ok on %s: %s -> %s", p.get("name", ""), form.get("action"), msg)
     return 200, dict(ok=True, msg=msg)
 
@@ -647,18 +740,33 @@ def build_rules(p=None):
     changes = L.parse_rule_changes(run_git(p, fmt + ["--since=90.days.ago", "--numstat", "--", *spec]), run_git(p, fmt + ["--since=90.days.ago", "-p", "-U0", "--", *spec]), gs, rc["managers"], rc["bots"])
     last = L.parse_last_changes(run_git(p, fmt + ["--name-only", "--", *spec]), gs)
     files = L.rule_files([p for p in run_git(p, ["ls-files", "-z", "--", *spec]).split("\0") if p], last, gs)
-    try:
-        pending = L.pending_rule_prs(json.loads(run_gh(["pr", "list", "-R", p["repo"], "--state", "open", "--json", "number,title,author,files,url,createdAt"])), gs)
-    except (RuntimeError, ValueError) as ex:
-        log.warning("rules: open pull requests unavailable (%s)", str(ex)[:80])
-        pending = []
-    log.info("rules: %d files, %d changes, %d pending PRs in %.1fs", len(files), len(changes), len(pending), time.time() - t0)
-    return dict(configured=True, groups=[g["name"] for g in gs], files=files, changes=changes, pending=pending, repo=p["repo"])
+    log.info("rules: %d files, %d changes in %.1fs", len(files), len(changes), time.time() - t0)
+    return dict(configured=True, groups=[g["name"] for g in gs], files=files, changes=changes, repo=p["repo"])
 
 
 def get_rules(p=None):
+    """The rule view from local files and local git only (no GitHub): Settings > Policies renders from it whatever GitHub does."""
     p = p or proj()
     return cached(pk(p, "rules"), lambda: build_rules(p), 120, swr=True, persist=True)
+
+
+def get_rule_prs(p, fresh=False):
+    """The open pull requests that touch rule files: the one GitHub-sourced part of Policies, served separately so that it can never block or fail
+    the rest. Hourly cache; fresh (the owner's Refresh click on the pane) bypasses it. -> dict(configured, available, pending, at, error)."""
+    rc = L.rules_config(load_modules(p))
+    if not rc or not p.get("git"):
+        return dict(configured=False, available=False, pending=[])
+    k = pk(p, "rulesprs")
+    if fresh:
+        _expire(k)
+        log.info("owner Refresh of the rule pull requests of %s", p.get("name", ""))
+    fetch = lambda: dict(at=time.time(), prs=json.loads(run_gh(["pr", "list", "-R", p["repo"], "--state", "open", "--json", "number,title,author,files,url,createdAt"])))
+    try:
+        v = cached(k, fetch, GH_REFRESH_S, swr=not fresh, persist=True, disk_fresh=DISK_FRESH_S, queue=True)
+    except (RuntimeError, ValueError) as ex:
+        log.warning("rules: open pull requests unavailable (%s)", str(ex)[:80])
+        return dict(configured=True, available=False, pending=[], error=str(ex)[:200])
+    return dict(configured=True, available=True, pending=L.pending_rule_prs(v["prs"], rc["groups"]), at=v["at"])
 
 
 # ---------- timeline / code ----------
@@ -671,14 +779,17 @@ def load_commits(p):
     return [dict(sha=c["sha"], date=dt.date.fromisoformat(c["commit"]["author"]["date"][:10]), subject=c["commit"]["message"].splitlines()[0], files=[]) for c in raw]
 
 
-def build_timeline(S, p=None):
+def build_timeline(S, p=None, fresh=False):
     p = p or proj()
     t0 = time.time()
     cfgm = load_modules(p)
     assign = cfgm["assign"] if cfgm else []
     mod_of = {t["key"]: t["module"] for t in S["tasks"]}
     url_of = {t["key"]: t["url"] for t in S["tasks"]}
-    feed = L.group_commits(cached(pk(p, "commits"), lambda: load_commits(p), 60), assign, p["repo"]) + L.issue_entries(S["tasks"])
+    ck = pk(p, "commits")
+    if fresh:
+        _expire(ck)
+    feed = L.group_commits(cached(ck, lambda: load_commits(p), GH_REFRESH_S if not p.get("git") else 60, swr=not fresh, persist=True, disk_fresh=DISK_FRESH_S, queue=not p.get("git")), assign, p["repo"]) + L.issue_entries(S["tasks"])
     feed += [dict(d=e["t"], type="task event", mod=mod_of.get(e["key"], "unassigned"), text=f"{e['actor']} {e['key']}: {e['text']}", links=[(e["key"], url_of.get(e["key"], ""))])
              for e in S["events"] if e["kind"] != "closed"]
     if p["git"]:
@@ -702,19 +813,32 @@ def build_timeline(S, p=None):
     return dict(entries=out[:400], total=len(out), activity=L.activity_days(S["tasks"], S["events"], mod_of))
 
 
-def get_timeline(p):
+def get_timeline(p, fresh=False):
     """The timeline built from the state that is served right now (a refreshed state gets a rebuilt timeline at once, never one from older data)."""
     S = get_state(p=p)
     k, at = pk(p, "timeline"), S["source"]["fetchedAt"]
-    build = lambda: dict(build_timeline(S, p), stateAt=at)
-    tl = cached(k, build, 30, swr=True, persist=True)
+    build = lambda: dict(build_timeline(S, p, fresh), stateAt=at)
+    if fresh:
+        _expire(k)
+        log.info("owner Refresh of the timeline of %s", p.get("name", ""))
+    tl = cached(k, build, 30, swr=not fresh, persist=True, disk_fresh=DISK_FRESH_S)
     return tl if tl.get("stateAt") == at else cached(k, build, -1, persist=True)
 
 
+def stale_note(p, now=None):
+    """None, or why the state served for p is older than it should be: dict(age_s, error, until, rate_limited) of the failed refresh (until = when GitHub is tried again)."""
+    f, now = _failures.get(pk(p, "state")), now or time.time()
+    v = _cache.get(pk(p, "state"), (0, None))[1]
+    if not f or not v:
+        return None
+    return dict(age_s=max(0, round(now - v["source"]["fetchedAt"])), error=f["error"], until=f["until"], rate_limited=f["rate_limited"])
+
+
 def get_state_served(p, fresh=False):
-    """The state for the page: `stale` is true while a newer copy is being fetched in the background, so the page asks again shortly."""
+    """The state for the page: `stale` is true while a newer copy is being fetched in the background, so the page asks again shortly;
+    `staleNote` is set when the last refresh failed and an older copy is shown (its age, the reason and when GitHub is tried again)."""
     S = get_state(fresh=fresh, p=p)
-    return dict(S, stale=refreshing(pk(p, "state")))
+    return dict(S, stale=refreshing(pk(p, "state")), staleNote=stale_note(p), refreshAfter=S.get("source", {}).get("fetchedAt", 0) + GH_REFRESH_S)
 
 
 def warm_module_pages(p):
@@ -733,7 +857,7 @@ def warm(projects=None):
                 fn(p)
             except Exception as ex:
                 log.warning("warm-up %s of %s failed: %s", name, p.get("name", ""), str(ex)[:120])
-    with ThreadPoolExecutor(4) as ex:
+    with ThreadPoolExecutor(1) as ex:  # one project after another: the first fetches of projects without a disk copy never run as a parallel burst
         list(ex.map(one, projects or list(PROJECTS.values()) or [CFG]))
     log.info("warm-up done")
 
@@ -772,10 +896,23 @@ def code_snapshot(p=None):
         big = cached(pk(p, "biggest"), lambda: biggest_by_module(p, list(view["modules"])), 120, swr=True, persist=True)
         for mid, m in view["modules"].items():
             m["biggest"] = big.get(mid, [])
-        return dict(wired=True, **view, diagrams=[k for k, f in SVGS.items() if (d / f).exists()])
-    except (OSError, ValueError, TypeError) as ex:
+        return dict(wired=True, **view, diagrams=[k for k, f in SVGS.items() if (d / f).exists()], mods=local_modules_of(p))
+    except (OSError, ValueError, TypeError, KeyError) as ex:
         log.info("code snapshot not wired (%s)", ex)
-        return dict(wired=False, modules={}, diagrams=[])
+        return dict(wired=False, modules={}, diagrams=[], mods=local_modules_of(p) if p else [])
+
+
+def local_modules_of(p):
+    """The Code tab's module list from the local module map file (and the local clone for the gap and document counts); no GitHub."""
+    try:
+        cfgm = load_modules(p)
+    except (OSError, ValueError) as ex:
+        log.warning("module map of %s unreadable: %s", p.get("name", ""), ex)
+        cfgm = None
+    mods = L.local_modules((cfgm or {}).get("modules", []))
+    for m in mods:
+        m["gaps"], m["ndocs"] = L.module_facts(L.module_dir(p["git"], m)) if p.get("git") and not m.get("virtual") else (None, None)
+    return mods
 
 
 def card_metadata(p=None, now=None):
@@ -908,15 +1045,19 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/questions":
                 return self.send(200, build_questions(fresh=bool(q.get("fresh"))))
             if u.path == "/api/timeline":
-                return self.send(200, get_timeline(p))
+                return self.send(200, get_timeline(p, fresh=bool(q.get("fresh"))))
             if u.path == "/api/settings":
                 return self.send(200, get_settings(p))
             if u.path == "/api/cardsettings":
                 return self.send(200, get_card_settings(p))
+            if u.path == "/api/queue":
+                return self.send(200, get_queue(p))
             if u.path == "/api/usage":
                 return self.send(200, usage_served(p))
             if u.path == "/api/rules":
                 return self.send(200, get_rules(p))
+            if u.path == "/api/rulesprs":
+                return self.send(200, get_rule_prs(p, fresh=bool(q.get("fresh"))))
             if u.path == "/api/code":
                 return self.send(200, code_snapshot(p))
             if u.path == "/api/moduledoc":
@@ -939,7 +1080,7 @@ class H(BaseHTTPRequestHandler):
             self.send(404, dict(error=ex.args[0]))
         except Exception as ex:
             log.exception("GET %s failed", u.path)
-            self.send(502, dict(error=str(ex)))
+            self.send(502, dict(error=str(ex) + ("" if isinstance(ex, GitHubUnavailable) else " (no earlier copy to show; Refresh tries again now)")))
 
     def do_POST(self):
         u = urlparse(self.path)
@@ -1013,7 +1154,7 @@ def main():
     CFG.update(steer=steer, simulate=a.simulate_orchestrator)
     for p in projects:
         log.info("project %s: repo=%s project=%s manager=%s mode=%s", p["name"], p["repo"], p["project"], p["manager"], "STEERING" if steer else "READ-ONLY")
-        if steer and gh_user() != p["manager"]:
+        if steer and gh_user() and gh_user() != p["manager"]:
             log.warning("%s: gh is logged in as %s but the Manager is %s: protected labels set now would be flagged unauthorised", p["name"], gh_user(), p["manager"])
     global CACHE_DIR
     CACHE_DIR = None if a.cache_dir == "none" else pathlib.Path(a.cache_dir or DATA_DIR / "cache").expanduser()

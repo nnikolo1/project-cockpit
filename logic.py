@@ -1661,3 +1661,46 @@ def _snapshot_gaps(add, g, project, now, mods, metrics, max_age_h):
     cov = [_age_h(((m.get("metrics") or {}).get("test_coverage") or {}).get("data_file_modified"), now) for m in (metrics.get("modules") or {}).values()]
     cov = [a for a in cov if a is not None]
     g += _stale(project, "stale", "coverage file", max(cov) if cov else None, max_age_h)
+
+
+# ---------- GitHub rate limit and the local part of the Task Queue ----------
+def is_rate_limited(msg):
+    """True when a gh error message says the API budget (primary or secondary) is used up."""
+    return "rate limit" in (msg or "").lower()
+
+
+def rate_limit_reset(msg, now):
+    """The reset time (epoch seconds, in the future and within 2 hours) when the message carries one as a 10-digit epoch number, else None."""
+    for m in re.findall(r"\b(\d{10})\b", msg or ""):
+        if now < int(m) <= now + 7200:
+            return int(m)
+    return None
+
+
+def queue_local(state_text, plog_text, limit=15):
+    """The Task Queue facts that need no GitHub: the Workers the Dispatcher's state file lists as running (worker, task id, launched, started)
+    and the newest `limit` lines of the processing log (newest first). Missing or unreadable files give empty lists."""
+    try:
+        st = json.loads(state_text) if state_text else {}
+    except ValueError:
+        st = {}
+    ws = st.get("workers") if isinstance(st, dict) and isinstance(st.get("workers"), dict) else {}
+    workers = [dict(worker=u, task=w.get("task_id"), launched=w.get("launched"), started=bool(w.get("started")))
+               for u, w in sorted(ws.items()) if isinstance(w, dict)]
+    recs = [r for r in (_json_lines(plog_text) or []) if r.get("time")]
+    log_ = [dict(time=r["time"], task=r.get("task"), state=r.get("state"), reason=r.get("reason"), worker=r.get("worker"), heartbeat=r.get("heartbeat"))
+            for r in recs[-limit:]][::-1]
+    return dict(workers=workers, log=log_)
+
+
+def local_modules(mods):
+    """The module list the Code tab needs, from the module map file alone (no issues): the listed modules plus missing ancestors, each with
+    its short name, parent and children; task counts are zero (they come from GitHub and the Code tab does not show them)."""
+    mods = [dict(m) for m in mods]
+    with_parents(mods)
+    for m in mods:
+        m["short"] = short_name(m["name"])
+    if not any(m["id"] == "unassigned" for m in mods):
+        mods.append(dict(id="unassigned", name="Not mapped to a module", short="Unassigned", virtual=True))
+    add_tree(mods, [])
+    return mods
