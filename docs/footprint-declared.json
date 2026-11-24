@@ -94,12 +94,40 @@
      "note": "4f: the host Unix socket the proxy listens on (path under 104 bytes); a socket, no content"
     },
     {
-     "path": "~/.local/share/project-cockpit/<project>/processing.jsonl",
+     "path": "~/.local/share/project-cockpit/<project>/processing/processing.jsonl",
      "kind": "file",
      "personal_data": false,
      "written_by": "taskqueue/dispatcher (plog)",
      "volume": true,
      "note": "5a-5d: the processing log, one JSON line per entry naming task and task folder; on the owner's MacBook, outside any git repository; the daily backup access details live in a configuration file outside git"
+    },
+    {
+     "path": "~/.local/share/project-cockpit/<project>/processing/backup.stamp",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "taskqueue/dispatcher (plog)",
+     "note": "5e: the date of the last daily backup of the processing log; a date only"
+    },
+    {
+     "path": "~/.local/share/project-cockpit/<project>/dispatcher.log",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "launchd (the Dispatcher's standard output and error)",
+     "note": "3c: what the Dispatcher's loggers write at each firing (path set in dispatcher/launchd.py)"
+    },
+    {
+     "path": "~/.local/share/project-cockpit/<project>/quota.log",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "launchd (the quota collector's standard output and error)",
+     "note": "the quota collector's log, one reading every 30 seconds (path set in dispatcher/launchd.py)"
+    },
+    {
+     "path": "~/.local/share/project-cockpit/<project>/launchd",
+     "kind": "dir",
+     "personal_data": false,
+     "written_by": "taskqueue/dispatcher (dispatcher.launchd render)",
+     "note": "the two rendered LaunchAgent files (Dispatcher, quota collector); they hold the token-file path, not the token"
     },
     {
      "path": "~/.local/share/project-cockpit/<project>/proxy-token",
@@ -112,12 +140,22 @@
    "logging": [
     {
      "logger": "dispatcher.*",
-     "file": "processing.jsonl (entries of 5a, 5b); the loggers themselves write to standard error",
+     "file": "dispatcher.log (standard output and error under launchd); the processing log (processing/processing.jsonl) holds the entries of 5a, 5b",
      "rotation": "none in the code; the processing log is backed up once a day"
+    },
+    {
+     "logger": "quota",
+     "file": "quota.log",
+     "rotation": "none in the code"
+    },
+    {
+     "logger": "proxy",
+     "file": null,
+     "rotation": "none: the proxy is started detached with its output discarded (start_proxy), so it keeps no log file; usage goes to proxy-usage.jsonl; the token is never logged"
     }
    ],
    "policy": {
-    "backup": "code: the git repository and its remote; the processing log: once a day to GDrive (5e); settings, state, proxy usage and socket are not backed up on purpose; the token file is a secret and is not backed up",
+    "backup": "code: the git repository and its remote; the processing log: once a day to GDrive (5e); settings, state, proxy usage, logs, rendered LaunchAgent files and socket are not backed up on purpose; the token file is a secret and is not backed up",
     "retention": "processing log: kept, no rotation in the code; task folders: not torn down by the Dispatcher, old ones are mopped up later (3m); settings, state and token: kept until the owner changes or deletes them; no database tables"
    }
   },
@@ -131,7 +169,18 @@
      "note": "the Workers' image sources (Containerfile, Stop hook, skill); the built image and the container's own disk are held by the container tool, where the clones of the tasks live (4l)"
     }
    ],
-   "logging": [],
+   "logging": [
+    {
+     "logger": "relay",
+     "file": null,
+     "rotation": "none: the relay runs inside the container and writes to its standard error"
+    },
+    {
+     "logger": "stop_hook",
+     "file": null,
+     "rotation": "none: the Stop hook runs inside the container and writes warnings to its standard error"
+    }
+   ],
    "policy": {
     "backup": "the image sources: the git repository and its remote; the built image and the clones on the container's own disk are rebuildable or fetched back as bundles and are not backed up on purpose",
     "retention": "the image is kept until rebuilt; clones live on the container's own disk until the container is removed (the Dispatcher does not tear them down, 3m)"
