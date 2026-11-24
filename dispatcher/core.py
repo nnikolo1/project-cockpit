@@ -477,6 +477,7 @@ def main(argv=None):
     ap.add_argument("--git", default="git", help="git")
     ap.add_argument("--call-timeout", type=int, default=60, help="seconds a gh or git call may take")
     a = ap.parse_args(argv)
+    os.makedirs(a.area, exist_ok=True)  # the Workers' area is the Dispatcher's own folder: a first firing finds none
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
     from dispatcher.plog import ProcessingLog

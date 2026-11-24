@@ -724,6 +724,10 @@ def test_main_builds_tasks_and_plog_from_arguments(tmp_path, monkeypatch):
     core.main(["--settings", "s.json", "--state", str(tmp_path / "st"), "--area", str(tmp_path), "--socket", "/tmp/s",
                "--token-file", "t", "--usage-file", "u", "--repo", "me/repo", "--repo-dir", str(tmp_path),
                "--data-dir", str(data)])
+    core.main(["--settings", "s.json", "--state", str(tmp_path / "st"), "--area", str(tmp_path / "new" / "area"), "--socket", "/tmp/s",
+               "--token-file", "t", "--usage-file", "u", "--repo", "me/repo", "--repo-dir", str(tmp_path),
+               "--data-dir", str(data)])
+    assert (tmp_path / "new" / "area").is_dir()  # first firing: the area did not exist yet (found by test B)
     assert seen["tasks"].repo == "me/repo" and seen["tasks"].repo_dir == str(tmp_path) and seen["tasks"].short == "repo"
     assert seen["plog"].dir == data
     assert seen["repo_dir"] == str(tmp_path)
