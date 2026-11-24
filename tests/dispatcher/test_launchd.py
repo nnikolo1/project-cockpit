@@ -14,7 +14,7 @@ def _roundtrip(d):
 def test_dispatcher_plist():
     d = _roundtrip(L.dispatcher_plist(**ARGS))
     assert d["Label"] == "com.project-cockpit.dispatcher.demo"
-    assert d["StartInterval"] == 120
+    assert d["StartInterval"] == 120 and d["AbandonProcessGroup"] is True   # Workers outlive the firing
     assert d["WorkingDirectory"] == "/cp" and d["EnvironmentVariables"]["PYTHONPATH"] == "/cp"
     assert "/opt/homebrew/bin" in d["EnvironmentVariables"]["PATH"] and "/usr/local/bin" in d["EnvironmentVariables"]["PATH"]
     a = d["ProgramArguments"]

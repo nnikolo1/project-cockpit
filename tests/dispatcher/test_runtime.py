@@ -311,3 +311,11 @@ def test_worker_output_is_kept_and_its_tail_readable(tmp_path):
         f.write("x" * 700 + "API Error: 429")
     tail = r.worker_output_tail("T-9", 100)
     assert tail.endswith("API Error: 429") and len(tail) == 100
+
+
+def test_worker_starts_in_its_own_session(tmp_path):
+    seen = {}
+    cfg = rt.Config(area=str(tmp_path / "area"), socket="/tmp/s")
+    r = rt.Runtime(cfg, run=lambda *a, **k: (0, ""), spawn=lambda cmd, **k: seen.update(k) or ("spawned", cmd))
+    r.launch("worker1", "T-7")
+    assert seen.get("start_new_session") is True  # launchd would end the Worker with the firing otherwise

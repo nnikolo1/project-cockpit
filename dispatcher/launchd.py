@@ -51,6 +51,7 @@ def dispatcher_plist(project, repo, repo_dir, token_file, image=None, data_dir=D
     if image:
         args += ["--image", image]
     return dict(Label=f"{PREFIX}.dispatcher.{project}", ProgramArguments=[str(a) for a in args], StartInterval=INTERVAL,
+                AbandonProcessGroup=True,  # the Workers and the proxy outlive the firing that started them
                 WorkingDirectory=str(cockpit_dir), EnvironmentVariables=_env(cockpit_dir),
                 StandardOutPath=str(p["dir"] / "dispatcher.log"), StandardErrorPath=str(p["dir"] / "dispatcher.log"))
 

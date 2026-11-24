@@ -251,7 +251,8 @@ class Runtime:
         os.makedirs(self.task_dir(task_id), exist_ok=True)
         out = os.open(os.path.join(self.task_dir(task_id), "worker.log"), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
         try:  # the Worker's own output (error messages of the agent) is kept: without it a Worker that ends without a note is a mystery
-            return self._spawn(cmd, stdout=out, stderr=out)
+            # its own session: launchd ends every process of the Dispatcher's job when a firing exits (a firing lasts seconds, a Worker hours)
+            return self._spawn(cmd, stdout=out, stderr=out, start_new_session=True)
         finally:
             os.close(out)
 
