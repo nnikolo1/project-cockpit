@@ -69,3 +69,7 @@ This replaces the earlier statement that tasks are created only by the Orchestra
 ## Objective: a Swiss Army knife, in a nutshell and opinionated (owner, 2026-11-24)
 
 The Cockpit is a pocket-size Swiss Army knife for agent-assisted software development, in a nutshell and opinionated: several tools combined (continuous integration, quality gates, a queue, an agent manager, an artefact store, policy checks), each at a minimal level, as plain files and small commands, no heavy framework. A project that adopts the Cockpit gets this stance as its default; where a choice has to be made, the Cockpit makes it and says so.
+
+## Policy findings may be released by the interactive agent (owner, 2026-11-24)
+
+A policy violation identified by the interactive agent may be filed and released by it as a task, to be worked by a background agent (a Worker); the finder itself never works the task, so the separation of powers holds. The release applies only to tasks labelled policy-finding that carry the policy sentence and the evidence, with a trail comment naming the policy (owner, 2026-11-24; amends the policy-finding rule of the same day).
