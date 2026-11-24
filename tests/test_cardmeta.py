@@ -129,3 +129,34 @@ def test_ambiguity_view_lists_the_files_ambiguous_between_sub_modules_as_notes()
         {"path": "x.py", "candidates": ["m/a", "m/b"], "reason": "shared"}, {"path": "y.py", "candidates": [], "reason": ""}]}}})
     m = v["modules"]["m"]
     assert [u["path"] for u in m["ambiguous"]] == ["x.py"] and len(m["unsorted"]) == 2
+
+
+def _wk(n, **k):
+    return [dict(w=f"2026-{i:02d}", commits=k.get("c", 1), added=k.get("a", 10), removed=k.get("r", 5), tests=k.get("t", 3), docs=k.get("d", 2)) for i in range(n)]
+
+
+def test_changes_view_ranks_by_30_days_with_subs_under_their_parent():
+    mods = {"a": {"total": {"30": {"churn": 5}}, "series": {"weekly": {"total": _wk(52)}}},
+            "b": {"total": {"30": {"churn": 50}}, "series": {"weekly": {"total": _wk(52)}}},
+            "a/x": {"own": {"30": {"churn": 1}}, "series": {"weekly": {"own": _wk(52)}}},
+            "a/y": {"own": {"30": {"churn": 4}}, "series": {"weekly": {"own": _wk(52)}}}}
+    assert [p["id"] for p in L.changes_view(mods)] == ["b", "a", "a/y", "a/x"]
+    assert [p["level"] for p in L.changes_view(mods)] == [0, 0, 1, 1]
+
+
+def test_changes_view_sums_and_splits_source_tests_docs():
+    p = L.changes_view({"a": {"series": {"weekly": {"total": _wk(60)}}}})[0]
+    assert len(p["weeks"]) == 52 and p["churn52"] == 52 * 15 and p["commits90"] == 13
+    assert p["weeks"][0]["src"] == 15 - 3 - 2
+
+
+def test_changes_view_missing_or_broken_series_is_flagged_not_fatal():
+    ps = L.changes_view({"a": {"total": {"30": {"churn": 7}}}, "b": {"series": "x"}, "c": {"series": {"weekly": {"total": "no"}}}, "d": 3})
+    assert [p["id"] for p in ps] == ["a", "b", "c"] and all(p["weeks"] is None for p in ps) and ps[0]["churn30"] == 7
+
+
+def test_changes_view_sub_uses_own_and_top_uses_total_and_is_in_churn_view():
+    m = {"a": {"series": {"weekly": {"own": _wk(2, a=1), "total": _wk(3)}}}, "a/x": {"series": {"weekly": {"own": _wk(4), "total": _wk(5)}}}}
+    ps = L.changes_view(m)
+    assert len(ps[0]["weeks"]) == 3 and len(ps[1]["weeks"]) == 4
+    assert [p["id"] for p in L.churn_view({"modules": m})["changes"]] == ["a", "a/x"]

@@ -135,6 +135,12 @@ tr.blocked{background:var(--danger-tint)}tr.blocked td:first-child{box-shadow:in
 .band{display:inline-block;border-radius:6px;padding:1px 8px;font-size:12px;font-weight:600;white-space:nowrap}
 .band-hot{background:var(--p1);color:var(--p1-ink)}.band-mid{background:var(--p2);color:var(--p2-ink)}.band-cold{background:var(--p3);color:var(--p3-ink)}
 .band-dormant{background:none;border:1px dashed var(--s-embryo);color:var(--muted)}
+.chg{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.chg .pn{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:4px}
+.chg .pn.sub{margin-left:18px}
+.chg .pn.b-hot{border-left-color:var(--p1)}.chg .pn.b-mid{border-left-color:var(--p2-ink)}.chg .pn.b-cold{border-left-color:var(--p3-ink)}.chg .pn.b-dormant{border-left-style:dashed;border-left-color:var(--s-embryo)}
+.chg svg{width:100%;height:56px;display:block}
+.chg .cs{fill:var(--accent)}.chg .ct{fill:var(--s-embryo)}.chg .cd{fill:var(--muted)}.chg .hit{fill:transparent}
 .meta{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--line);padding-top:10px;font-size:13px}
 .meta details{border:1px solid var(--line);border-radius:8px;padding:6px 10px}
 .meta summary{cursor:pointer;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -609,14 +615,28 @@ async function hydrate(){
   if(mine!==PROJ){delete SVGC[k];return;}
   const again=document.getElementById('dgbox');if(again&&again.dataset.k===k)again.innerHTML=SVGC[k];
 }
+function chgBars(p){
+  const ws=p.weeks,mx=Math.max(1,...ws.map(x=>x.src+x.tests+x.docs));let g='';
+  ws.forEach((x,i)=>{let y=56;const t=x.w+': '+x.commits+' commits, +'+x.added+' −'+x.removed+' lines (source '+x.src+', tests '+x.tests+', documents '+x.docs+')';
+    [['cs',x.src],['ct',x.tests],['cd',x.docs]].forEach(([c,v])=>{const h=v/mx*54;if(h>0){y-=h;g+='<rect class="'+c+'" x="'+(i*4+.5)+'" y="'+y.toFixed(1)+'" width="3" height="'+h.toFixed(1)+'"/>';}});
+    g+='<rect class="hit" x="'+i*4+'" y="0" width="4" height="56"><title>'+esc(t)+'</title></rect>';});
+  return '<svg viewBox="0 0 '+ws.length*4+' 56" preserveAspectRatio="none" role="img" aria-label="Weekly churn of the last '+ws.length+' weeks">'+g+'</svg>';}
+function vChanges(){
+  const c=META.churn,h='<div class="row spread"><div><h2>Changes</h2><span class="muted">Weekly churn (lines added plus removed) of the last 52 weeks, ranked by the last 30 days.</span></div>'+asOf(c)+'</div>';
+  if(c.status!=='ok')return h;
+  const ps=c.view.changes||[];
+  return h+'<div class="legend" role="note"><span><i class="chip" style="background:var(--accent)">&nbsp;</i> source</span><span><i class="chip" style="background:var(--s-embryo)">&nbsp;</i> tests</span><span><i class="chip" style="background:var(--muted)">&nbsp;</i> documents</span></div>'
+   +'<div class="chg">'+ps.map(p=>{const e=((c.view.modules[p.id]||{}).windows||{})['30'],b=e&&e[churnRel()?'band_rel':'band_abs'];
+    return '<div class="pn'+(p.level?' sub':'')+(b?' b-'+b:'')+'"><div class="row spread"><b>'+esc(modShort(p.id))+'</b>'+bandChip(b||null)+'</div>'
+     +(p.weeks?chgBars(p)+'<span class="muted" style="font-size:12px">'+p.churn52+' lines in 52 weeks · '+p.commits90+' commits in 90 days</span>':'<span class="muted">no weekly data yet (run the card-metadata collector)</span>')+'</div>';}).join('')+'</div>';}
 function vCode(){
   const have=CODE.wired?CODE.diagrams:[];
-  const tabs=[['quality','Quality'],...[['deps','Dependencies'],['flow','Data flow'],['erd','ERD'],['js','JavaScript']].filter(t=>have.includes(SVGFILE[t[0]])),['flowchart','Flowchart']];
+  const tabs=[['quality','Quality'],...[['deps','Dependencies'],['flow','Data flow'],['erd','ERD'],['js','JavaScript']].filter(t=>have.includes(SVGFILE[t[0]])),['changes','Changes'],['flowchart','Flowchart']];
   const T=tabs.some(t=>t[0]===UI.codeTab)?UI.codeTab:'quality';
   return '<div class="page"><div><h1>Code</h1><span class="muted">Metrics and documentation drawn from the code itself, one snapshot of the repository.</span></div>'
    +'<div class="tabs" role="tablist">'+tabs.map(t=>'<button role="tab" data-act="codetab" data-v="'+t[0]+'" aria-selected="'+(T===t[0])+'">'+t[1]+'</button>').join('')+'</div>'
    +(have.length?'':'<p class="muted" style="font-size:13px;margin:0">A code snapshot is not configured for this project.</p>')
-   +(T==='quality'?vQuality():T==='flowchart'?vHow():vDiagram(T))+'</div>';
+   +(T==='quality'?vQuality():T==='flowchart'?vHow():T==='changes'?vChanges():vDiagram(T))+'</div>';
 }
 function wfSvg(){
   const L=(cx,cy,ls,c)=>'<text'+(c?' class="'+c+'"':'')+' x="'+cx+'" y="'+(cy-(ls.length-1)*8+4)+'" text-anchor="middle">'+ls.map((l,i)=>'<tspan x="'+cx+'" dy="'+(i?16:0)+'">'+esc(l)+'</tspan>').join('')+'</text>';
