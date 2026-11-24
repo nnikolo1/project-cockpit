@@ -142,3 +142,47 @@ def test_week_crossing_a_month_start_has_no_week_row():
     ps = L._quota(qt, None)[1]["periods"]
     assert [(p["level"], p["key"]) for p in ps if p["level"] != "hour"] == [("day", "2026-11-30")]
     assert [p["key"][-5:] for p in ps if p["level"] == "hour"] == ["%02d:00" % h for h in range(11)]
+
+
+def m(ts, session, source="src-a", i=1, o=2, cw=3, cr=4):
+    return json.dumps(dict(ts=ts, source=source, session=session, message="x", model=None, input_tokens=i, output_tokens=o,
+                           cache_creation_input_tokens=cw, cache_read_input_tokens=cr))
+
+
+QUOTA = "\n".join(json.dumps(dict(ts=t, five_hour=dict(used_percentage=a, resets_at=1763650000), seven_day=dict(used_percentage=b, resets_at=1764000000)))
+                  for t, a, b in [("2026-11-20T10:00:00+00:00", 10, 20), ("2026-11-20T10:30:00+00:00", 40, 22), ("2026-11-20T12:10:00+00:00", 5, 25)])
+
+
+def test_transcript_missing_file_is_no_data():
+    assert L.transcript_report(None) is None
+    assert L.transcript_report("") == dict(periods=[], sources=[], sessions=[])
+
+
+def test_transcript_periods_follow_the_quota_grading_with_peaks():
+    quota = L.usage_report(None, None, lambda f: None, QUOTA)["quota"]
+    text = "\n".join([m("2026-11-20T10:05:00+00:00", "s1"), m("2026-11-20T10:50:00+00:00", "s1"), m("2026-11-19T08:00:00+00:00", "s2", source="src-b"), "bad"])
+    r = L.transcript_report(text, quota)
+    rows = {(p["level"], p["key"]): p for p in r["periods"]}
+    h10 = rows[("hour", "2026-11-20T10:00")]
+    assert (h10["messages"], h10["input_tokens"], h10["total"], h10["five_hour"], h10["seven_day"]) == (2, 2, 20, 40, 22)
+    assert rows[("hour", "2026-11-20T12:00")]["messages"] == 0 and ("hour", "2026-11-20T13:00") not in rows
+    assert rows[("day", "2026-11-19")]["total"] == 10 and rows[("day", "2026-11-19")]["five_hour"] is None
+    assert [p["label"] for p in r["periods"]][-1] == "2026-11-20 12:00"
+
+
+def test_transcript_sources_and_sessions_rank_by_total_and_cap():
+    lines = [m("2026-11-20T10:00:00+00:00", "s1"), m("2026-11-20T10:01:00+00:00", "s1", source="src-b", i=1000)]
+    lines += [m("2026-11-20T11:00:00+00:00", f"n{i}", source="src-c") for i in range(25)] + [m("2026-05-01T00:00:00+00:00", "old", source="src-old")]
+    r = L.transcript_report("\n".join(lines))
+    assert r["sources"][0]["key"] == "src-b" and r["sources"][0]["total"] == 1009 and "src-old" not in {s["key"] for s in r["sources"]}
+    assert len(r["sessions"]) == 20 and r["sessions"][0]["key"] == "s1" and r["sessions"][0]["source"] == "src-b"
+    assert r["sessions"][0]["messages"] == 1
+
+
+def test_get_usage_reads_the_transcript_file(tmp_path):
+    d = tmp_path / "proj"
+    d.mkdir()
+    (d / "transcript-usage.jsonl").write_text(m("2026-11-20T10:00:00+00:00", "s1"))
+    p = dict(name="proj", repo="o/proj")
+    assert C.get_usage(p, tmp_path, {"proj": p})["sessions"]["sources"][0]["total"] == 10
+    assert C.get_usage(p, tmp_path / "none", {"proj": p})["sessions"] is None
