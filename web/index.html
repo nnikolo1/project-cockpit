@@ -347,6 +347,7 @@ function moduleLevelAmb(){
   const a=META.ambiguity;
   if(a.status!=='ok')return '<div class="card" style="display:flex;flex-direction:column;gap:6px"><div class="row spread"><h2>Files claimed by several modules</h2>'+asOf(a)+'</div></div>';
   const ml=a.view.module_level,n=a.view.unassigned_nondoc;
+  if(!ml.length)return n>0?'<div class="card" style="display:flex;flex-direction:column;gap:6px"><div class="row spread"><h2>Files without a module</h2>'+asOf(a)+'</div><span class="muted">'+n+' code files belong to no module at all.</span></div>':'';
   return '<div class="card" style="display:flex;flex-direction:column;gap:6px"><div class="row spread"><h2>Files claimed by several modules</h2>'+asOf(a)+'</div>'
    +(ml.length?'<ul style="margin:0;padding-left:18px">'+ml.slice(0,15).map(u=>'<li><span class="mono">'+esc(u.path)+'</span> <span class="muted">could be '+esc((u.candidates||[]).join(' or '))+' · '+esc(u.reason||'no reason given')+'</span></li>').join('')+(ml.length>15?'<li class="muted">and '+(ml.length-15)+' more</li>':'')+'</ul>':'<span class="muted">None: every file has one module.</span>')
    +(n==null?'':'<span class="muted" style="font-size:13px">'+n+' code files belong to no module at all.</span>')+'</div>';}
