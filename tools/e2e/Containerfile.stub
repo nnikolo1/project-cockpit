@@ -1,0 +1,4 @@
+# The Workers' image with the model replaced by the stub (failure-path test, see README.md).
+FROM cockpit-worker:latest
+COPY stub_claude.py /usr/local/bin/claude
+RUN chmod 755 /usr/local/bin/claude

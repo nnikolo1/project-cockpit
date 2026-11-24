@@ -508,3 +508,25 @@ def test_state_roundtrip_and_missing(tmp_path):
     assert core.load_state(str(tmp_path / "s"))["workers"]["worker1"] == {"a": 1}
 
 
+
+
+def _main_image(tmp_path, monkeypatch, extra):
+    seen = {}
+
+    class Fake:
+        def __init__(self, settings, state, runtime, *a, **k):
+            seen["image"] = runtime.cfg.image
+
+        def fire(self):
+            pass
+
+    monkeypatch.setattr(core, "Dispatcher", Fake)
+    core.main(["--settings", str(tmp_path / "s.json"), "--state", str(tmp_path / "st.json"), "--area", str(tmp_path),
+               "--socket", str(tmp_path / "p.sock"), "--token-file", "t", "--usage-file", "u", "--repo", "o/r",
+               "--repo-dir", str(tmp_path), "--data-dir", str(tmp_path / "data"), *extra])
+    return seen["image"]
+
+
+def test_main_image_default_and_override(tmp_path, monkeypatch):
+    assert _main_image(tmp_path, monkeypatch, []) == "cockpit-worker:latest"
+    assert _main_image(tmp_path, monkeypatch, ["--image", "cockpit-worker:stub"]) == "cockpit-worker:stub"
