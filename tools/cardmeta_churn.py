@@ -13,7 +13,7 @@ Excluded by default (generated files): .coverage, **/package-lock.json, **/yarn.
 Each module and `unassigned` also gets `series.weekly` (own/total, 52 Mondays, from the same records and mapping).
 Shape: docs/contracts/card-metadata.md.
 
-Usage: python3 tools/cardmeta_churn.py --project NAME [--repo .] [--days 30 --days 90] [--until ISO] [--out-dir DIR] [--format json|md]
+Usage: python3 tools/cardmeta_churn.py --project NAME [--repo .] [--days 10 --days 30 --days 90] [--until ISO] [--out-dir DIR] [--format json|md]
 """
 from __future__ import annotations
 
@@ -30,12 +30,16 @@ import cardmeta_ambiguity as amb  # noqa: E402  (shared CLI helpers)
 import cardmeta_common as cm  # noqa: E402
 import cardmeta_map as mp  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import logic as L  # noqa: E402  (CARD_CHURN_DAYS: the window the cards show)
+
 log = logging.getLogger("cardmeta.churn")
 
 DEFAULT_EXCLUDES = [".coverage", "**/package-lock.json", "**/yarn.lock", "**/poetry.lock", "**/uv.lock", "docs/screens/**"]
 CATEGORIES = ("source", "tests", "docs")
 SOURCE_SUFFIXES = {".py": "#", ".js": "//", ".sh": "#", ".html": None, ".css": None, ".yml": "#", ".yaml": "#"}
 WEEKS = 52
+DEFAULT_DAYS = [L.CARD_CHURN_DAYS, 30, 90]  # the cards show the first; 30 and 90 stay for other views
 _HEADER = "@@@"
 _NUMSTAT = re.compile(r"^(\d+|-)\t(\d+|-)\t(.+)$")
 _BRACE = re.compile(r"^(.*)\{(.*) => (.*)\}(.*)$")
@@ -288,14 +292,14 @@ def render_md(res: dict, days: list[int]) -> str:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     amb.add_common_args(ap)
-    ap.add_argument("--days", type=int, action="append", help="window length in days, repeatable (default 30 and 90)")
+    ap.add_argument("--days", type=int, action="append", help="window length in days, repeatable (default %s)" % ", ".join(map(str, DEFAULT_DAYS)))
     ap.add_argument("--until", help="end of the windows, ISO date/time (default now, UTC)")
     ap.add_argument("--exclude", action="append", help="glob to exclude (repeatable; replaces the defaults)")
     ap.add_argument("--format", choices=["json", "md"], default="json", help="md prints a summary and writes nothing")
     a = ap.parse_args(argv)
     repo, map_path, project = amb.setup(a)
     out_dir = cm.resolve_out_dir(a.out_dir, repo, project)  # refuse a bad folder before any work
-    days = sorted(set(a.days or [30, 90]))
+    days = sorted(set(a.days or DEFAULT_DAYS))
     until = parse_until(a.until)
     pats = [glob_to_regex(p) for p in (a.exclude if a.exclude is not None else DEFAULT_EXCLUDES)]
     mmap = mp.load_map(map_path)

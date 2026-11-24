@@ -351,15 +351,14 @@ function churnLine(e,w){
   const tr=e.trend_pct==null?'new activity':(e.trend_pct>0?'↑ +':e.trend_pct<0?'↓ −':'→ ')+Math.abs(e.trend_pct).toFixed(0)+'% vs before';
   return '<div class="crow"><b>'+w+' d</b>'+bandChip(b)+'<span>'+e.commits+' commits · +'+e.added+' −'+e.removed+' · net '+sgn(e.net)+' · churn '+e.churn
     +(churnRel()&&e.rel!=null?' ('+(e.rel*100).toFixed(1)+'% of size)':'')+' · '+tr+'</span></div>';}
-function churnSum(id){  /* the 30-day band as a chip, for collapsed rows */
-  const c=META.churn,m=c.status==='ok'&&c.view.modules[id],e=m&&m.windows['30'];
-  return e?bandChip(e[churnRel()?'band_rel':'band_abs'])+' <span class="muted">30 d churn '+e.churn+'</span>':'<span class="muted">churn: no data</span>';}
-function churnHtml(id){
-  const c=META.churn,m=c.status==='ok'&&c.view.modules[id];
-  let h='<div style="display:flex;flex-direction:column;gap:4px"><div class="row spread"><span class="label">Change (churn)</span>'+asOf(c)+'</div>';
+function churnSum(id){  /* the card window's band as a chip, for collapsed rows */
+  const c=META.churn,w=c.status==='ok'&&c.view.card,m=w&&c.view.modules[id],e=m&&m.windows[w];
+  return e?bandChip(e[churnRel()?'band_rel':'band_abs'])+' <span class="muted">churn '+e.churn+', last '+w+' days</span>':'<span class="muted">churn: no data</span>';}
+function churnHtml(id){  /* only the card window (logic.CARD_CHURN_DAYS); the file's other windows serve other views */
+  const c=META.churn,w=c.status==='ok'&&c.view.card,m=w&&c.view.modules[id];
+  let h='<div style="display:flex;flex-direction:column;gap:4px"><div class="row spread"><span class="label">Change (churn), last '+(w||'?')+' days</span>'+asOf(c)+'</div>';
   if(!m)return h+(c.status==='ok'?'<span class="muted">no data for this module</span>':'')+'</div>';
-  const ws=c.view.windows.filter(w=>m.windows[w]);
-  return h+(ws.length?ws.map(w=>churnLine(m.windows[w],w)).join(''):'<span class="muted">no data for this module</span>')+'</div>';}
+  return h+(m.windows[w]?churnLine(m.windows[w],w):'<span class="muted">no '+w+'-day data for this module (run the card-metadata collector)</span>')+'</div>';}
 function footHtml(id){
   const f=META.footprint,m=f.status==='ok'&&f.view.modules[id];
   const head='<summary><span class="label">Persistence footprint</span>'+asOf(f)+'</summary>';
@@ -383,7 +382,7 @@ function ambHtml(id){
   return note+'<details'+(m.high?' open':'')+'>'+head(mark)+'<div>Module level: '+m.own+' files'+(sub?' · sub-modules: '+sub:'')+' · unsorted: '+m.unsorted.length+' of '+m.total+' files</div>'
    +(m.unsorted.length?'<ul>'+m.unsorted.filter(u=>!(u.candidates&&u.candidates.length)).slice(0,10).map(u=>'<li><span class="mono">'+esc(u.path)+'</span> <span class="muted">could be '+esc((u.candidates||[]).join(' or '))+' · '+esc(u.reason||'no reason given')+'</span></li>').join('')+(m.unsorted.length-m.ambiguous.length>10?'<li class="muted">and '+(m.unsorted.length-m.ambiguous.length-10)+' more</li>':'')+'</ul>':'')+'</details>';}
 const legendHtml=()=>'<details><summary><span class="label">How to read the card figures</span></summary><div class="legend" role="note"><span>Churn rank within the project:</span>'+['hot','mid','cold','dormant'].map(b=>bandChip(b)).join('')
-   +'<span>hot = top fifth, cold = bottom fifth, dormant = no change in the window. Churn = lines added + removed. Top-level modules and sub-modules are ranked among their own level. The colour follows '+(churnRel()?'size (changed lines / current lines)':'absolute churn')+'; change it in Settings, section Module cards.</span></div></details>';
+   +'<span>hot = top fifth, cold = bottom fifth, dormant = no change in the window. Churn = lines added + removed in the last '+((META.churn.view||{}).card||'?')+' days, the trend against the '+((META.churn.view||{}).card||'?')+' days before. Top-level modules and sub-modules are ranked among their own level. The colour follows '+(churnRel()?'size (changed lines / current lines)':'absolute churn')+'; change it in Settings, section Module cards.</span></div></details>';
 const metaBlock=id=>'<div class="meta">'+churnHtml(id)+footHtml(id)+ambHtml(id)+legendHtml()+'</div>';
 function metaNote(){
   const some=Object.values(META).some(c=>c&&c.status==='ok');
@@ -440,12 +439,12 @@ function vCockpit(){
      +'</div><button class="btn small" data-act="code" data-m="'+m.id+'" style="align-self:flex-start">Code quality</button></div>';
   });
   const u=(CODE.modules||{}).unassigned;const un=D.tasks.filter(t=>t.module==='unassigned').length;
-  const cu=META.churn.status==='ok'&&META.churn.view.unassigned&&META.churn.view.unassigned['30'];
+  const cw=META.churn.status==='ok'&&META.churn.view.card,cu=cw&&META.churn.view.unassigned&&META.churn.view.unassigned[cw];
   const showUn=!!((u&&((u.code||0)>0||(u.churn||0)>0))||un||(cu&&(cu.commits||cu.churn)));
   if(showUn)h+='<div class="card" style="border-style:dashed;display:flex;flex-direction:column;gap:10px"><h2>Not mapped to a module</h2><p class="muted" style="margin:0">'
    +(u?u.code.toLocaleString('en-US')+' code lines, '+(u.churn==null?'some':u.churn)+' recent commits touch files that no module claims. Mapping them is your decision.':'No code snapshot wired.')
    +(un?' '+un+' tasks have no module.':'')+'</p>'
-   +(META.churn.status==='ok'&&META.churn.view.unassigned&&META.churn.view.unassigned['30']?'<p class="muted" style="margin:0">Last 30 days: '+META.churn.view.unassigned['30'].commits+' commits, churn '+META.churn.view.unassigned['30'].churn+' in unmapped files. '+asOf(META.churn)+'</p>':'')
+   +(cu?'<p class="muted" style="margin:0">Last '+cw+' days: '+cu.commits+' commits, churn '+cu.churn+' in unmapped files. '+asOf(META.churn)+'</p>':'')
    +'<button class="btn small" data-act="code" data-m="unassigned" style="align-self:flex-start">Code quality</button></div>';
   return h+'</div></div>';
 }

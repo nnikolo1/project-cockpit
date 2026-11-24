@@ -52,7 +52,7 @@ def test_rank_bands_ties_and_tiny_sets_stay_mid():
 def test_churn_view_ranks_per_level_and_computes_relative_churn():
     v = L.churn_view(json.loads(texts()["churn"]))
     m = v["modules"]
-    assert v["windows"] == ["30", "90"]
+    assert v["windows"] == ["10", "30", "90"] and v["card"] == "10"
     assert m["module-a"]["windows"]["30"]["churn"] == 1000          # total, not own
     assert m["module-a"]["windows"]["30"]["rel"] == 0.4            # 1000 / (2000 + 500)
     assert m["module-b"]["windows"]["30"]["band_abs"] == "dormant" and m["module-b"]["windows"]["30"]["band_rel"] == "dormant"
@@ -160,3 +160,26 @@ def test_changes_view_sub_uses_own_and_top_uses_total_and_is_in_churn_view():
     ps = L.changes_view(m)
     assert len(ps[0]["weeks"]) == 3 and len(ps[1]["weeks"]) == 4
     assert [p["id"] for p in L.churn_view({"modules": m})["changes"]] == ["a", "a/x"]
+
+
+def test_cards_show_the_card_window_and_band_it_independently_of_30_days():
+    """Owner, 2026-11-24: churn on the cards shows only the last 10 days; one constant; bands ranked on that window."""
+    assert L.CARD_CHURN_DAYS == 10
+    v = L.churn_view(json.loads(texts()["churn"]))
+    w, m = v["card"], v["modules"]
+    assert w == "10" and m["module-a"]["windows"][w]["churn"] == 400 and m["module-a"]["windows"][w]["trend_pct"] == 100.0
+    assert [m[i]["windows"][w]["band_abs"] for i in ("module-a", "module-b", "module-c")] == ["hot", "mid", "cold"]
+    assert m["module-b"]["windows"]["30"]["band_abs"] == "dormant"  # the 30-day band is another one: the cards do not use it
+    assert [m[i]["windows"][w]["band_rel"] for i in ("module-a", "module-b", "module-c")] == ["mid", "cold", "hot"]  # colour by size
+    assert v["unassigned"][w]["churn"] == 2
+    assert L.churn_view({})["windows"][0] == "10"  # default when the file names no windows
+
+
+def test_card_text_says_last_n_days_and_reads_only_the_card_window():
+    page = (pathlib.Path(__file__).parent.parent / "web" / "index.html").read_text()
+    src = page[page.index("function churnSum("):page.index("function footHtml(")]
+    assert "'30'" not in src and "'90'" not in src and "c.view.card" in src and "windows.filter" not in src
+    assert "Change (churn), last '+(w||'?')+' days" in src and "last '+w+' days" in src
+    assert "churnRel()" in page[page.index("function churnLine("):page.index("function churnSum(")]  # the colour setting still applies
+    cards = page[page.index("function vCockpit("):page.index("\nfunction ", page.index("function vCockpit(") + 1)]
+    assert "unassigned['30']" not in cards and "Last '+cw+' days: '" in cards

@@ -138,3 +138,31 @@ def test_deleted_files_are_excluded_not_unassigned(tmp_path):
     assert sum(e["added"] + e["removed"] for e in a[-4:]) == 2
     # without the rule (existing=None) the deleted files fall to a module / unassigned as before
     assert ch.aggregate(recs, MAP, [28], until, [])["unassigned"]["28"]["churn"] == 1 + 6
+
+
+def test_default_card_window_counts_only_the_last_10_days_with_the_trend_against_the_10_before(tmp_path):
+    """Synthetic history: commits 5, 15 and 40 days old. The default run writes the card window (logic.CARD_CHURN_DAYS = 10) first,
+    keeps 30 and 90; the 10-day window holds only the 5-day commit and compares with days 10..20 (the 15-day commit)."""
+    import json
+    import subprocess
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+    import logic as L
+    assert L.CARD_CHURN_DAYS == 10 and ch.DEFAULT_DAYS[0] == L.CARD_CHURN_DAYS and {30, 90} <= set(ch.DEFAULT_DAYS)
+    repo, out = tmp_path / "repo", tmp_path / "out"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    until = datetime(2026, 11, 22, 12, tzinfo=timezone.utc)
+    _commit(repo, until - timedelta(days=40), "a/p.py", "1\n2\n3\n4\n")  # +4
+    _commit(repo, until - timedelta(days=15), "a/p.py", "1\n2\n")        # -2
+    _commit(repo, until - timedelta(days=5), "a/p.py", "1\n2\n3\n")      # +1
+    (tmp_path / "map.json").write_text(json.dumps(MAP))
+    assert ch.main(["--repo", str(repo), "--map", str(tmp_path / "map.json"), "--project", "demo", "--out-dir", str(out),
+                    "--until", until.isoformat()]) == 0
+    d = json.loads((out / "churn.json").read_text())
+    assert d["windows"] == [10, 30, 90]
+    w10, w30 = d["modules"]["a"]["total"]["10"], d["modules"]["a"]["total"]["30"]
+    assert (w10["commits"], w10["added"], w10["removed"], w10["net"], w10["churn"], w10["active_days"]) == (1, 1, 0, 1, 1, 1)
+    assert w10["source"]["churn"] == 1 and w10["files"] == 1
+    assert w10["prev_churn"] == 2 and w10["trend_pct"] == -50.0
+    assert w30["commits"] == 2 and w30["prev_churn"] == 4                # 30 days: the 5- and 15-day commits, before: the 40-day one
+    assert d["modules"]["a"]["total"]["90"]["commits"] == 3
