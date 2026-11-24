@@ -30,8 +30,8 @@ HERE = pathlib.Path(__file__).parent
 TYPES = ["feature", "bug", "decision", "research", "doc", "devops", "test"]
 # Global switches (steer, simulate) live in CFG. A project is a dict of PROJECT_KEYS plus its name; PROJECTS maps name -> project.
 # Without any registered project (tests, embedding) CFG itself doubles as the one project.
-CFG = dict(repo=None, manager=None, steer=False, simulate=False, project=None, git=None, modules=None, phases=None, code=None)
-PROJECT_KEYS = ("repo", "manager", "project", "git", "modules", "phases", "code")
+CFG = dict(repo=None, manager=None, steer=False, simulate=False, project=None, git=None, modules=None, phases=None, code=None, code_collect=None)
+PROJECT_KEYS = ("repo", "manager", "project", "git", "modules", "phases", "code", "code_collect")
 PROJECTS, DEFAULT = {}, None
 
 
@@ -57,7 +57,7 @@ def pk(p, what):
 def project_from_flags(a):
     """The implicit project of the single-project flags, named after the repo."""
     return dict(name=a["repo"].split("/")[-1], repo=a["repo"], manager=a.get("manager") or a["repo"].split("/")[0],
-                **{k: a.get(k) for k in PROJECT_KEYS[2:]})
+                **{k: a.get(k) for k in PROJECT_KEYS[2:-1]}, code_collect=L.collect_command(a.get("code_collect")))
 
 
 def projects_from_file(data):
@@ -75,6 +75,10 @@ def projects_from_file(data):
         p.update({k: os.path.expanduser(e[k]) if e.get(k) else None for k in ("git", "modules", "phases", "code")})
         if e.get("meta"):
             p["meta"] = os.path.expanduser(e["meta"])  # optional: absent means the default folder, see meta_dir()
+        try:
+            p["code_collect"] = L.collect_command(e.get("code_collect"))  # the snapshot's collector command, run by the daily refresh
+        except ValueError as ex:
+            raise ValueError(f"--projects: project {name!r}: {ex}") from None
         out.append(p)
     default = data.get("default") or out[0]["name"]
     if default not in [p["name"] for p in out]:
@@ -653,6 +657,7 @@ def save_card_settings(p, form):
 # The Token Usage tab's files, under DATA_DIR/<project name>/ (the folder the Settings page uses)
 USAGE_FILE, PLOG_FILE, AREA_DIR, QUOTA_FILE = "proxy-usage.jsonl", "processing/processing.jsonl", "area", "quota-history.jsonl"
 TRANSCRIPT_FILE, AGGREGATE_FILE = "transcript-usage.jsonl", "stats-cache-usage.jsonl"
+SNAPSHOT_REFRESH_FILE = "code-snapshot-refresh.json"  # the last result of tools/code_snapshot_refresh.py (card-metadata contract)
 
 
 def _read_text(path):
@@ -897,6 +902,8 @@ def biggest_by_module(p, ids):
 
 
 def code_snapshot(p=None):
+    """The Code tab's payload. `configured`: the project names a snapshot folder (without one the cards hide the snapshot lines);
+    `age_h`, `stale`, `max_age_h`: the snapshot's age against the 24 hours of the standing policy."""
     try:
         p = p or proj()
         d = pathlib.Path(p["code"]).expanduser()
@@ -904,10 +911,11 @@ def code_snapshot(p=None):
         big = cached(pk(p, "biggest"), lambda: biggest_by_module(p, list(view["modules"])), 120, swr=True, persist=True)
         for mid, m in view["modules"].items():
             m["biggest"] = big.get(mid, [])
-        return dict(wired=True, **view, diagrams=[k for k, f in SVGS.items() if (d / f).exists()], mods=local_modules_of(p))
+        age = L.snapshot_age(view["generated_at"], dt.datetime.now(dt.timezone.utc))
+        return dict(wired=True, configured=True, **view, **age, diagrams=[k for k, f in SVGS.items() if (d / f).exists()], mods=local_modules_of(p))
     except (OSError, ValueError, TypeError, KeyError) as ex:
         log.info("code snapshot not wired (%s)", ex)
-        return dict(wired=False, modules={}, diagrams=[], mods=local_modules_of(p) if p else [])
+        return dict(wired=False, configured=bool(p and p.get("code")), modules={}, diagrams=[], mods=local_modules_of(p) if p else [])
 
 
 def local_modules_of(p):
@@ -1221,7 +1229,7 @@ def resolve(a):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--projects", help="JSON {default, projects:[{name, repo, project?, manager?, modules?, git?, code?, phases?, meta?}]}: serve several projects (replaces the single-project flags)")
+    ap.add_argument("--projects", help="JSON {default, projects:[{name, repo, project?, manager?, modules?, git?, code?, code_collect?, phases?, meta?}]}: serve several projects (replaces the single-project flags)")
     ap.add_argument("--repo", help="OWNER/REPO")
     ap.add_argument("--manager", help="the one login whose protected labels count (default: the repo owner)")
     ap.add_argument("--port", type=int, default=8795)
@@ -1231,6 +1239,7 @@ def main():
     ap.add_argument("--modules", help="JSON {modules:[{id,name,docs?}], assign:[{path,module}]}")
     ap.add_argument("--phases", help="extra timeline.json ({module, events:[...]}) merged into the timeline")
     ap.add_argument("--code", help="code snapshot directory: metrics.json and erd|dataflow|deps|js.svg (see README)")
+    ap.add_argument("--code-collect", help="the code snapshot's collector command, run by tools/code_snapshot_refresh.py when the snapshot is stale")
     ap.add_argument("--token-file", help="keep the access token in this file (created 0600 if missing), so the URL survives restarts")
     ap.add_argument("--cache-dir", help="keep the slow answers on disk here (default: <data dir>/cache) so that a restarted service shows data at once; 'none' = memory only")
     ap.add_argument("--read-only", action="store_true", help="refuse every action (default: actions are enabled)")

@@ -2,7 +2,7 @@
 
 Modules: internal/metadata
 
-`tools/metadata_gaps.py --project NAME [--json]` reads what the Cockpit reads for a project and reports gaps; it changes nothing. The daily job reads the JSON.
+`tools/metadata_gaps.py --project NAME [--json]` reads what the Cockpit reads for a project and reports gaps; it changes nothing. The daily job reads the JSON. It runs `tools/code_snapshot_refresh.py --project NAME` first, so that a stale code snapshot is refreshed, not only reported ([card-metadata contract](card-metadata.md), "Code snapshot"); the `snapshot` gaps then cover a snapshot that is not configured, has no collector command, failed its last refresh or is unreadable, and a `stale` gap one older than 24 hours.
 
 Exit code: 0 no gap, 1 at least one gap, 2 unusable project or file argument.
 

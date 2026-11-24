@@ -334,6 +334,10 @@ const bandChip=b=>b?'<span class="band band-'+b+'">'+BAND[b][0]+' '+BAND[b][1]+'
 const sgn=n=>n>0?'+'+n:n<0?'−'+(-n):'0';
 const ageTxt=a=>a<1?'under 1 h ago':a<48?Math.round(a)+' h ago':Math.round(a/24)+' d ago';
 const hb=n=>n==null?'?':n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':(n/1048576).toFixed(1)+' MB';
+/* the code snapshot's age (CODE.age_h, CODE.stale against CODE.max_age_h, the 24 h of the standing policy) */
+function snapAge(){
+  if(!CODE.wired)return '<span class="muted">not readable</span>';
+  return '<span class="muted">'+(CODE.age_h==null?'age unknown':ageTxt(CODE.age_h))+'</span>'+(CODE.stale?' <span class="chip blocks">⚠ stale: older than '+(CODE.max_age_h||24)+' h</span>':'');}
 function asOf(c){
   if(c.status!=='ok')return '<span class="muted">no data'+(c.status==='invalid'?' ('+esc(c.reason)+')':'')+'</span>';
   return '<span class="muted">as of '+esc((c.generated_at||'unknown time').replace('T',' ').slice(0,16))+((c.generated_at||'').endsWith('Z')?' UTC':'')+(c.age_h==null?'':' · '+ageTxt(c.age_h))+'</span>'+(c.stale?' <span class="chip blocks">⚠ stale: older than 48 h</span>':'');}
@@ -425,7 +429,7 @@ function vCockpit(){
     h+='<div class="card" style="display:flex;flex-direction:column;gap:12px"><div class="row spread"><button class="linkbtn" data-act="mod" data-m="'+m.id+'"><h2>'+esc(m.name)+'</h2></button><span class="muted">'+(n?n+' tasks':'no tasks')+'</span></div>'
      +'<div class="bar" aria-hidden="true">'+bar+'</div><span class="muted" style="font-size:13px">'+txt+'</span>'
      +subBlock(m)
-     +'<dl class="facts"><dt>Code files / lines</dt><dd>'+(c.code==null?'<span class="muted">no data</span>':(c.codeFiles||0).toLocaleString('en-US')+' / '+c.code.toLocaleString('en-US'))+'</dd><dt>Worst complexity</dt><dd>'+nd(c.cc)+'</dd><dt>Import cycles</dt><dd>'+nd(c.cyc,x=>x+' files')+'</dd></dl>'
+     +(CODE.configured?'<dl class="facts"><dt>Code files / lines</dt><dd>'+(c.code==null?'<span class="muted">no data</span>':(c.codeFiles||0).toLocaleString('en-US')+' / '+c.code.toLocaleString('en-US'))+'</dd><dt>Worst complexity</dt><dd>'+nd(c.cc)+'</dd><dt>Import cycles</dt><dd>'+nd(c.cyc,x=>x+' files')+'</dd><dt>Code snapshot</dt><dd>'+snapAge()+'</dd></dl>':'')
      +dlForm(m,md)+metaBlock(m.id)
      +'<div style="border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:5px;font-size:13px">'
      +(feed.length?feed.map(f=>'<span><span class="mono muted">'+f.d.slice(5,10)+'</span> '+esc(f.text)+'</span>').join(''):'<span class="muted">Not documented yet.</span>')
@@ -698,10 +702,10 @@ function qLegend(){
 /* quality-bands:end */
 function vQuality(){
   const id=UI.codeMod;const c=CODE.modules[id];const mm=MODULES.find(m=>m.id===id);const nm=id==='unassigned'?'Not mapped to a module':(mm?(mm.parent?modShort(id):mm.name):id);
-  const snap=CODE.wired?'Snapshot '+esc(CODE.commit)+', '+esc((CODE.generated_at||'').slice(0,10))+'. Dimensions stay separate: no overall score, colours follow the thresholds in Settings.':'';
+  const snap=CODE.wired?'Snapshot '+esc(CODE.commit)+', '+esc((CODE.generated_at||'').slice(0,10))+', '+snapAge()+'. Dimensions stay separate: no overall score, colours follow the thresholds in Settings.':'';
   let h='<div class="page"><div><h1>Code: '+esc(nm)+'</h1><span class="muted">'+snap+'</span></div>';
   h+=modFilter(id,'codem',null,'whole module (roll-up)',false,[{id:'unassigned',short:'Unassigned'}]);
-  if(!c)return h+'<div class="card tile nw"><span class="label">Code snapshot</span><span class="v muted" style="font-size:18px">not wired</span><span class="muted" style="font-size:13px">'+(CODE.wired?'no metrics for this module in the snapshot':'point --code at a code snapshot directory')+'</span></div></div>';
+  if(!c)return h+'<div class="card tile nw"><span class="label">Code snapshot</span><span class="v muted" style="font-size:18px">not wired</span><span class="muted" style="font-size:13px">'+(CODE.wired?'no metrics for this module in the snapshot':CODE.configured?'the snapshot folder has no readable metrics.json; the daily refresh runs the collector (code_collect)':'no code snapshot configured: set the project\'s code folder and code_collect command')+'</span></div></div>';
   const T=(l,v,s)=>'<div class="card tile"><span class="label">'+l+'</span><span class="v">'+(v==null?'<span class="muted">n/a</span>':v)+'</span><span class="muted" style="font-size:13px">'+s+'</span></div>';
   const f1=(v,n)=>v==null?null:v.toFixed(n);
   const big=(c.biggest||[]).length?'<br>Biggest files:'+c.biggest.map(f=>'<br><a class="mono" target="_blank" rel="noopener" href="'+esc(f.url||'#')+'">'+esc(f.path)+'</a> '+f.lines.toLocaleString('en-US')+' lines'+(f.kind==='code'?'':' ('+f.kind+')')).join(''):'';

@@ -249,3 +249,73 @@ def test_transcript_retention_is_not_checked_for_a_project_without_the_tool():
     g = gaps(usage=dict(quota=LINE, transcript=None, proxy=LINE), retention=ret(None))
     assert "transcript_retention" not in {x["kind"] for x in g}
     assert gaps(retention=None) == []
+
+
+# ---------- code snapshot in the daily staleness check (project-agnostic) ----------
+SNAP = dict(configured=True, collector=True, last=None)
+
+
+def snap_gaps(**over):
+    return [x["what"] for x in gaps(**{"snapshot": SNAP, **over}) if x["kind"] == "snapshot"]
+
+
+def test_configured_snapshot_with_collector_and_fresh_data_has_no_gap():
+    assert gaps(snapshot=SNAP) == []
+
+
+def test_project_without_snapshot_setting_is_reported_as_not_configured():
+    g = gaps(metrics=None, snapshot=dict(configured=False, collector=False, last=None))
+    assert kinds(g) == [("snapshot", None)] and "not configured" in g[0]["what"]
+
+
+def test_snapshot_without_collector_command_is_a_gap():
+    w = snap_gaps(snapshot=dict(SNAP, collector=False))
+    assert len(w) == 1 and "code_collect" in w[0]
+
+
+def test_configured_but_unreadable_snapshot_is_not_wired():
+    assert snap_gaps(metrics=None) == ["code snapshot not wired (metrics.json missing or unreadable)"]
+
+
+def test_failed_last_refresh_is_a_gap_with_its_age():
+    last = dict(ts="2026-11-24T06:00:00Z", ok=False, reason="collector command exited with 3")
+    g = [x for x in gaps(snapshot=dict(SNAP, last=last)) if x["kind"] == "snapshot"]
+    assert len(g) == 1 and "exited with 3" in g[0]["what"] and g[0]["age_h"] == 6.0
+    assert snap_gaps(snapshot=dict(SNAP, last=dict(last, ok=True))) == []
+
+
+def test_snapshot_without_generated_at_has_an_unknown_age():
+    m = metrics()
+    del m["generated_at"]
+    assert any("generated_at" in w for w in snap_gaps(metrics=m))
+
+
+def test_snapshot_older_than_24_hours_is_stale_in_the_daily_check():
+    m = metrics()
+    m["generated_at"] = "2026-11-23T11:00:00Z"  # 25 h before NOW
+    assert "code snapshot is older than 24 hours" in [x["what"] for x in gaps(metrics=m, snapshot=SNAP)]
+
+
+def test_snapshot_age_and_stale_flag():
+    assert L.snapshot_age(STAMP, NOW) == dict(age_h=2.0, stale=False, max_age_h=24)
+    assert L.snapshot_age("2026-11-23T11:00:00Z", NOW)["stale"] and L.snapshot_age(None, NOW) == dict(age_h=None, stale=True, max_age_h=24)
+
+
+def test_collect_command_setting():
+    assert L.collect_command(None) is None and L.collect_command("") is None
+    assert L.collect_command("python3 tools/snap.py --out 'a b'") == ["python3", "tools/snap.py", "--out", "a b"]
+    assert L.collect_command(["make", "snapshot"]) == ["make", "snapshot"]
+    for bad in (3, ["make", 1], {"cmd": "x"}):
+        try:
+            L.collect_command(bad)
+            assert False, bad
+        except ValueError:
+            pass
+
+
+def test_refresh_outcome():
+    fresh = {"generated_at": STAMP}
+    assert L.refresh_outcome(0, fresh, NOW) == (True, "")
+    assert not L.refresh_outcome(None, fresh, NOW)[0] and not L.refresh_outcome(1, fresh, NOW)[0]
+    assert "unreadable" in L.refresh_outcome(0, None, NOW)[1]
+    assert "still stale" in L.refresh_outcome(0, {"generated_at": "2026-11-20T00:00:00Z"}, NOW)[1]

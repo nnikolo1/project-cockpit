@@ -5,6 +5,7 @@ import logging
 import math
 import pathlib
 import re
+import shlex
 
 log = logging.getLogger("cockpit")
 
@@ -642,6 +643,40 @@ def code_view(metrics, thresholds=None):
             hot=[[h["path"], h["churn"], h["cc_max"]] for h in (_g(x, "hotspots", "top") or [])[:5]])
         mods[mid]["bands"] = module_bands(mods[mid], thresholds)
     return dict(generated_at=metrics.get("generated_at"), commit=metrics.get("git_commit_short"), modules=mods)
+
+
+def snapshot_age(generated_at, now, max_h=None):
+    """The snapshot's `generated_at` -> dict(age_h, stale, max_age_h): stale when older than max_h (default: the 24 hours of the standing
+    policy) or when its time is missing or unreadable."""
+    max_h = GAPS_MAX_AGE_H if max_h is None else max_h
+    age = _age_h(generated_at, now) if generated_at else None
+    return dict(age_h=None if age is None else round(age, 1), stale=age is None or age > max_h, max_age_h=max_h)
+
+
+def collect_command(value):
+    """The project setting `code_collect` (a list of arguments, or one string split like a shell would) -> argv list, or None when unset.
+    Raises ValueError for anything else."""
+    if value in (None, "", []):
+        return None
+    if isinstance(value, str):
+        return shlex.split(value)
+    if isinstance(value, list) and all(isinstance(x, str) and x for x in value):
+        return list(value)
+    raise ValueError(f"code_collect: expected a command string or a list of strings (got {value!r})")
+
+
+def refresh_outcome(exit_code, metrics_after, now, max_h=None):
+    """Result of one run of the collector command -> (ok, reason). Ok only when the command succeeded and left a readable, fresh snapshot."""
+    if exit_code is None:
+        return False, "collector command could not run or timed out"
+    if exit_code != 0:
+        return False, f"collector command exited with {exit_code}"
+    if not isinstance(metrics_after, dict):
+        return False, "collector command succeeded but metrics.json is missing or unreadable"
+    a = snapshot_age(metrics_after.get("generated_at"), now, max_h)
+    if a["stale"]:
+        return False, "collector command succeeded but the snapshot is still stale (generated_at " + str(metrics_after.get("generated_at")) + ")"
+    return True, ""
 
 
 # ---------- GitHub payloads -> raw issues / events ----------
@@ -1504,7 +1539,7 @@ def _stale(project, kind, label, age, max_h, module=None):
 
 def metadata_gaps(project, now, modules, cards, metrics, usage, policies, max_age_h=GAPS_MAX_AGE_H, descs=None,
                   tracked=None, assign=None, docs_heads=None, content=None, data_root=None, data_entries=None, timings=None, timing_limit=3.0, quality=None,
-                  retention=None):
+                  retention=None, snapshot=None):
     """Pure detection of what the Cockpit shows as no data / not wired / not measured / stale / missing. Every fact comes from the project's own
     data, already read; -> list of gap dicts {project, module|None, kind, what, age_h|None}; an empty list means clean. A check whose input is
     None is not run (e.g. no clone: no `tracked`).
@@ -1517,7 +1552,8 @@ def metadata_gaps(project, now, modules, cards, metrics, usage, policies, max_ag
       docs_heads    {path: first text} of the tracked docs/*.md; content {id: {txt: bool, svg: bool}} of docs/modules/
       quality       dict(modules={id: the `/api/code` module payload}, thresholds=`quality_thresholds` of the card settings or None for the defaults)
       data_root     the project's data folder, data_entries the names in it; timings [(request, seconds|None)] of a live check
-      retention     dict(path, text|None, key, min_days) of the coding tool's settings file (transcript_retention_gaps)"""
+      retention     dict(path, text|None, key, min_days) of the coding tool's settings file (transcript_retention_gaps)
+      snapshot      dict(configured, collector, last) of the code snapshot settings and the last refresh record (_snapshot_gaps)"""
     g = []
     add = lambda kind, what, mod=None, age=None: g.append(_gap(project, kind, what, mod, age))
     mods = modules or []
@@ -1542,7 +1578,7 @@ def metadata_gaps(project, now, modules, cards, metrics, usage, policies, max_ag
             shown = max((_num(w.get("files")) or 0 for w in (c["data"].get("unassigned") or {}).values() if isinstance(w, dict)), default=0)
             if shown > actual:
                 add("churn", f"churn data counts {shown} unassigned files, the repository has {actual}: files that no longer exist", None, c["age_h"])
-    _snapshot_gaps(add, g, project, now, mods, metrics, max_age_h)
+    _snapshot_gaps(add, g, project, now, mods, metrics, max_age_h, snapshot)
     for mid in mods:
         if content is not None:
             c = content.get(mid) or {}
@@ -1663,12 +1699,25 @@ def _footprint_gaps(add, mods, have, age, data_root, data_entries):
                 add("footprint", f"file in the project's data folder not declared by any footprint: {name}", None, age)
 
 
-def _snapshot_gaps(add, g, project, now, mods, metrics, max_age_h):
+def _snapshot_gaps(add, g, project, now, mods, metrics, max_age_h, setting=None):
+    """setting: dict(configured, collector, last) of the project (`code` set, `code_collect` set, the last refresh record or None);
+    None: the settings are unknown and only the snapshot itself is checked."""
+    s = setting or {}
+    if setting is not None and not s.get("configured"):
+        add("snapshot", "code snapshot not configured (no `code` folder in the project settings)")
+        return
+    if setting is not None and not s.get("collector"):
+        add("snapshot", "code snapshot has no collector command (no `code_collect` in the project settings), so it is never refreshed")
+    last = s.get("last")
+    if isinstance(last, dict) and last.get("ok") is False:
+        add("snapshot", f"code snapshot refresh failed at {last.get('ts')}: {last.get('reason')}", None, _age_h(last.get("ts"), now))
     if metrics is None:
-        add("snapshot", "code snapshot not wired (not configured or metrics.json unreadable)")
+        add("snapshot", "code snapshot not wired (not configured or metrics.json unreadable)" if setting is None else "code snapshot not wired (metrics.json missing or unreadable)")
         return
     view = code_view(metrics)
-    age = _age_h(view["generated_at"], now)
+    age = _age_h(view["generated_at"], now) if view["generated_at"] else None
+    if age is None:
+        add("snapshot", "code snapshot has no readable generated_at, so its age is unknown")
     g += _stale(project, "stale", "code snapshot", age, max_age_h)
     for mid in mods:
         m = view["modules"].get(mid)

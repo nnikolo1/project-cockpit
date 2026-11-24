@@ -39,6 +39,7 @@ The Timeline and Token Usage tabs show a GitHub-style calendar heatmap (52 weeks
 
 ## Metadata gaps
 `python3 tools/metadata_gaps.py --project NAME [--projects-file F] [--data-dir D] [--max-age-hours 24] [--timing URL] [--tool-settings F] [--min-retention-days 3650] [--json]` reports what a project's cards, Quality view, Token Usage, Policies, module pages, footprints and documents show as missing or older than 24 hours, and a coding-tool transcript retention that is unset or too short, and exits non-zero when there is a gap (for the daily job). Read-only; every fact comes from the project's own files. Report shape: [docs/contracts/metadata-gaps.md](docs/contracts/metadata-gaps.md).
+`python3 tools/code_snapshot_refresh.py --project NAME [--projects-file F] [--data-dir D] [--max-age-hours 24] [--force] [--timeout 1800]` runs the project's `code_collect` command when its code snapshot is older than 24 hours and records the result for the gap check; the daily job runs it first. Settings and record: [docs/contracts/card-metadata.md](docs/contracts/card-metadata.md), "Code snapshot".
 
 ## Submit, Cancel and the budget panel
 Unless started with `--read-only`, the Task Queue table has a **Submit** column (embryos: releases the task as P2 without a deadline, the same as the Release form with its defaults) and a **Cancel** column (open tasks). Each button needs two clicks: the first turns it into "Confirm?" (it disarms after 6 seconds or on any other click), the second acts. No bulk selection. The **Budget** page shows the quota windows (used share, time to reset, age and stale marker), token numbers with the cap marked as an estimate, a table of tasks released by the boot-filling job and a table of its latest polls, all read from files a producer writes (`--quota-feed`, `--usage-report`, `--decision-log`). Contract: [docs/contracts/budget-panel.md](docs/contracts/budget-panel.md).
@@ -64,7 +65,7 @@ An agent that finds a file contradicting a standing policy files a task with `to
 ## Several projects
 `--projects FILE` serves several repos from one instance (replaces `--repo`, `--manager`, `--project`, `--git`, `--modules`, `--phases`, `--code`; `--port`, `--lan`, `--read-only`, `--token-file` stay global):
 `{"default": "widgets", "projects": [{"name": "widgets", "repo": "acme/widgets", "project": 3, "manager": "alice", "modules": "m.json", "git": "~/src/widgets", "code": "~/snap"}, {"name": "gadgets", "repo": "acme/gadgets"}]}`.
-Only `name` and `repo` are required (optional: `project`, `manager`, `modules`, `git`, `code`, `phases`, `meta`). With more than one project the header shows a selector (remembered in the browser); every `/api/*` call takes `?project=NAME` (default: the `default`), `/api/projects` lists `[{name, repo}]`, and only the visible project is polled.
+Only `name` and `repo` are required (optional: `project`, `manager`, `modules`, `git`, `code`, `code_collect`, `phases`, `meta`). With more than one project the header shows a selector (remembered in the browser); every `/api/*` call takes `?project=NAME` (default: the `default`), `/api/projects` lists `[{name, repo}]`, and only the visible project is polled.
 Rationale and limits: [ADR 0012](docs/adr/0012-several-projects-in-one-instance.md).
 
 ## Offline copy from a backup
