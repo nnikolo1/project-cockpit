@@ -247,6 +247,9 @@ function modFilter(cur,act,first,allOf,unsorted,extra){
   return h;}
 const pq=p=>PROJ?p+(p.includes('?')?'&':'?')+'project='+encodeURIComponent(PROJ):p;
 async function api(path,opt){const r=await fetch(pq(path),opt);let j={};try{j=await r.json();}catch(e){}if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j;}
+async function loadPrs(fresh){  /* never blocks or fails anything else: its own request, its own state */
+  try{PRS=await api('/api/rulesprs'+(fresh?'?fresh=1':''));}catch(e){PRS={configured:true,available:false,pending:[],error:e.message};}
+}
 async function loadQuestions(fresh){  /* fresh: only the owner's Refresh click on the Open questions pane */
   try{Q=await fetch('/api/questions'+(fresh?'?fresh=1':'')).then(async r=>{const j=await r.json();if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j;});}
   catch(e){Q=Object.assign({},Q,{projects:[{name:'all',error:String(e.message||e)}]});}
@@ -254,22 +257,32 @@ async function loadQuestions(fresh){  /* fresh: only the owner's Refresh click o
 /* reload(pane): pane is the pane whose Refresh the owner clicked, else nothing is forced (timers, page loads, actions never bypass the hour).
    The pane decides which GitHub-sourced request is fetched now: the task state (Cockpit, Task Queue, Timeline, Code), the commit and rule inputs
    of the Timeline, the rules' pull requests (Settings, Policies), every project's state (Open questions). */
-const PANE_STATE=['cockpit','backlog','timeline','code'];
+const PANE_STATE=['cockpit','backlog','timeline'];  /* the panes that show the GitHub task state; Code, Settings and Token Usage are local */
 async function reload(pane){
   const mine=PROJ,fresh=PANE_STATE.includes(pane),ft=pane==='timeline',fr=pane==='settings',fq=pane==='questions';
-  const qp=loadQuestions(fq);
+  const errs=[],soft=(pr,d,w)=>pr.catch(e=>{errs.push(w+': '+e.message);return d;});  /* one failing part must not blank the others */
+  /* 1. the local parts (no GitHub at all: Token Usage, Settings, Task Queue's Dispatcher part, code snapshot, card data): drawn as soon as they arrive,
+        never waiting for the GitHub requests below */
   try{
-    const errs=[],soft=(pr,d,w)=>pr.catch(e=>{errs.push(w+': '+e.message);return d;});  /* one failing part must not blank the others */
-    const [s,f,c,r,mt,se,cs,us,ql]=await Promise.all([soft(api('/api/state'+(fresh?'?fresh=1':'')),null,'state'),soft(api('/api/timeline'+(ft?'?fresh=1':'')),{entries:[],activity:[]},'timeline'),soft(api('/api/code'),{wired:false,modules:{},diagrams:[]},'code'),api('/api/rules'+(fr?'?fresh=1':'')).catch(e=>({configured:false,error:e.message})),api('/api/cardmeta').catch(e=>null),api('/api/settings').catch(e=>null),api('/api/cardsettings').catch(e=>null),api('/api/usage').catch(e=>null),api('/api/queue').catch(e=>null)]);SET=se;CSET=cs;USE=us;QL=ql;  /* local parts first: they never wait for or depend on GitHub */
+    const [c,mt,se,cs,us,ql]=await Promise.all([soft(api('/api/code'),{wired:false,modules:{},diagrams:[]},'code'),api('/api/cardmeta').catch(e=>null),api('/api/settings').catch(e=>null),api('/api/cardsettings').catch(e=>null),api('/api/usage').catch(e=>null),api('/api/queue').catch(e=>null)]);
+    if(mine!==PROJ)return;
+    SET=se;CSET=cs;USE=us;QL=ql;CODE=c;META=mt||NOMETA();if(!D)MODULES=c.mods||[];  /* the Code tab's modules come from the local module map, not from GitHub */
+    if(!CODE.modules[UI.codeMod]&&!MODULES.some(m=>m.id===UI.codeMod&&m.parent)){const k=MODULES.find(m=>!m.virtual);UI.codeMod=CODE.modules[k&&k.id]?k.id:'unassigned';}
+    render();
+  }catch(e){if(mine!==PROJ)return;errs.push(String(e.message||e));}
+  /* 2. the GitHub-sourced parts: a failure leaves the copy the page already has, and the banner says so */
+  const qp=loadQuestions(fq),pp=loadPrs(fr);
+  try{
+    const [s,f,r]=await Promise.all([soft(api('/api/state'+(fresh?'?fresh=1':'')),null,'state'),soft(api('/api/timeline'+(ft?'?fresh=1':'')),{entries:[],activity:[]},'timeline'),api('/api/rules').catch(e=>({configured:false,error:e.message}))]);
     if(mine!==PROJ)return;  /* the user switched project while this was loading: drop the answer */
     if(fresh)for(const k in MODDOC)delete MODDOC[k];
     if(s){D=s;TODAY=D.today;MODULES=D.modules;FEED=f.entries;ACT=f.activity||[];}  /* a failed state keeps the copy the page already has */
-    CODE=c;RULES=r;META=mt||NOMETA();UI.err=errs.join('; ');
+    RULES=r;UI.err=errs.join('; ');
     if(!CODE.modules[UI.codeMod]&&!MODULES.some(m=>m.id===UI.codeMod&&m.parent)){const k=MODULES.find(m=>!m.virtual);UI.codeMod=CODE.modules[k&&k.id]?k.id:'unassigned';}
   }catch(e){if(mine!==PROJ)return;UI.err=String(e.message||e);}
   render();  /* the questions of the other projects may take longer: they fill in when they arrive */
   clearTimeout(staleTimer);if(D&&D.stale&&mine===PROJ)staleTimer=setTimeout(()=>reload(false),4000);  /* a newer copy is being fetched: ask again shortly */
-  await qp;
+  await qp;await pp;
   if(mine===PROJ)render();
 }
 let staleTimer=0;
@@ -307,7 +320,8 @@ function revSet(sha,v){rev()[sha]=v;try{localStorage.setItem('cockpit-reviewed:'
 function isUn(c){const v=rev()[c.sha];return v===false||(v==null&&c.date>=rev().since);}
 const ruleChanges=()=>RULES.configured?RULES.changes:[];
 const unreviewed=()=>ruleChanges().filter(isUn);
-const pendingPrs=()=>RULES.configured?RULES.pending:[];
+let PRS={configured:false,available:false,pending:[]};  /* /api/rulesprs: the one GitHub-sourced part of Policies, loaded on its own */
+const pendingPrs=()=>PRS.available?PRS.pending:[];
 
 /* Two-click confirmation: the first click on Submit or Cancel arms the button (it asks "Confirm?"), the second click within 6 s does it. */
 function armBtn(kind,t){
@@ -435,8 +449,8 @@ function paneBar(R){
   let at=null,after=null;
   if(PANE_STATE.includes(R)&&D){at=D.source.fetchedAt;after=D.refreshAfter;}
   else if(R==='questions'){const a=Q.projects.filter(p=>p.age_s!=null).map(p=>Date.now()/1000-p.age_s);if(a.length){at=Math.min(...a);after=at+3600;}}
-  else if(R==='settings'&&UI.setSec==='policies'&&RULES&&RULES.prsAt){at=RULES.prsAt;after=at+3600;}
-  else if(!(R==='cockpit'||R==='backlog'||R==='timeline'||R==='code'||R==='questions'||R==='settings'))return '';
+  else if(R==='settings'&&UI.setSec==='policies'&&PRS.at){at=PRS.at;after=at+3600;}
+  else if(!(R==='cockpit'||R==='backlog'||R==='timeline'||R==='questions'||R==='settings'))return '';
   else if(R==='settings'&&UI.setSec!=='policies')return '';
   return '<div class="page" style="padding-bottom:0"><div class="row" style="gap:10px"><span class="muted" style="font-size:13px" title="GitHub data is refreshed lazily, at most once an hour; Refresh fetches this pane\'s data now">'+(at?'data from '+hm(at)+(after?', next refresh after '+hm(after):''):'no data yet')+'</span><button class="btn small" data-act="refresh" data-pane="'+R+'">Refresh</button></div></div>';
 }
@@ -656,6 +670,7 @@ function vRules(){
   const g=UI.rulesGroup,un=unreviewed(),base='https://github.com/'+RULES.repo+'/commit/';
   const cl=(sha)=>'<a class="mono" target="_blank" rel="noopener" href="'+base+sha+'">'+sha+'</a>';
   let h=head+'<div class="card strip"><span class="label" style="color:var(--accent)">To review</span><span><b>'+un.length+'</b> policy changes since you last looked</span><button class="btn small" data-act="revall" style="margin-left:auto"'+(un.length?'':' disabled')+'>Mark all reviewed</button></div>';
+  if(PRS.configured&&!PRS.available)h+='<div class="card"><span class="muted">Pending pull requests: not available now'+(PRS.error?' ('+esc(PRS.error)+')':'')+'.</span></div>';
   if(pendingPrs().length)h+='<div class="card" style="border-color:var(--warn-ink)"><span class="label" style="color:var(--accent)">Needs you</span><h2 style="margin-top:4px">Pending pull requests that would change policies</h2><div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">'
     +pendingPrs().map(p=>'<div><a target="_blank" rel="noopener" href="'+esc(p.url)+'"><b>#'+p.number+'</b></a> '+esc(p.title)+' <span class="muted">by '+esc(p.author)+', '+p.created+'</span> <span class="mono muted">'+esc(p.files.map(f=>f.path).join(', '))+'</span></div>').join('')+'</div></div>';
   h+='<div class="filters" role="group" aria-label="Group">'+['all'].concat(RULES.groups).map(x=>'<button class="f" data-act="rg" data-v="'+esc(x)+'" aria-pressed="'+(g===x)+'">'+(x==='all'?'All':esc(x))+'</button>').join('')+'</div>';
@@ -861,10 +876,11 @@ function render(){
      +'</div>';}
   h+='</div>';
   h+=paneBar(R);
-  const LOCAL=R==='settings'||R==='usage'||R==='questions'||R==='backlog';  /* tabs with a local part: shown without the GitHub state */
-  if(D&&D.staleNote){const n=D.staleNote;h+='<div class="page" style="padding-bottom:0"><div class="card" style="border-color:var(--warn,var(--danger))"><b class="warnline">GitHub data is old.</b> <span class="muted">Showing the copy from '+esc(D.source.fetched)+' ('+ageMin(n.age_s)+' old). '+(n.rate_limited?'GitHub rate limit reached; ':'GitHub could not be read ('+esc(n.error)+'); ')+(n.until?'next try at '+esc(new Date(n.until*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}))+'. ':'next try within a minute. ')+'</span> <button class="btn small" data-act="refresh">Retry</button></div></div>';}
-  if(UI.err&&!D)h+='<div class="page" style="padding-bottom:0"><div class="card" style="border-color:var(--danger)"><b class="warnline">Could not load from GitHub, and no earlier copy exists.</b> <span class="muted">'+esc(UI.err)+'</span> <button class="btn small" data-act="refresh">Retry</button></div></div>';
-  else if(UI.err)h+='<div class="page" style="padding-bottom:0"><div class="card" style="border-color:var(--danger)"><span class="warnline">Some parts could not be loaded:</span> <span class="muted">'+esc(UI.err)+'</span></div></div>';
+  const LOCAL=R==='settings'||R==='usage'||R==='questions'||R==='backlog'||R==='code';  /* tabs with a local part: shown without the GitHub state */
+  const GHR=PANE_STATE.includes(R);  /* only these tabs show GitHub-state banners */
+  if(GHR&&D&&D.staleNote){const n=D.staleNote;h+='<div class="page" style="padding-bottom:0"><div class="card" style="border-color:var(--warn,var(--danger))"><b class="warnline">GitHub data is old.</b> <span class="muted">Showing the copy from '+esc(D.source.fetched)+' ('+ageMin(n.age_s)+' old). '+(n.rate_limited?'GitHub rate limit reached; ':'GitHub could not be read ('+esc(n.error)+'); ')+(n.until?'next try at '+esc(new Date(n.until*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}))+'. ':'next try within a minute. ')+'</span> <button class="btn small" data-act="refresh">Retry</button></div></div>';}
+  if(GHR&&UI.err&&!D)h+='<div class="page" style="padding-bottom:0"><div class="card" style="border-color:var(--danger)"><b class="warnline">Could not load from GitHub, and no earlier copy exists.</b> <span class="muted">'+esc(UI.err)+'</span> <button class="btn small" data-act="refresh">Retry</button></div></div>';
+  else if(GHR&&UI.err)h+='<div class="page" style="padding-bottom:0"><div class="card" style="border-color:var(--danger)"><span class="warnline">Some parts could not be loaded:</span> <span class="muted">'+esc(UI.err)+'</span></div></div>';
   if(!D&&!LOCAL){if(!UI.err)h+='<div class="page"><span class="muted">Loading…</span></div>';}
   else{
   h+=R==='cockpit'?vCockpit():R==='backlog'?vBacklog():R==='questions'?vQuestions():R==='timeline'?vTimeline():R==='settings'?vSettings():R==='usage'?vUsage():vCode();

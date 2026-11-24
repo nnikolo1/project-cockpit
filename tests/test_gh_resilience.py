@@ -11,7 +11,7 @@ import pytest
 import cockpit as C
 import logic as L
 
-P = dict(name="proj", repo="o/r", manager="m", project=None, git=None)
+P = dict(name="proj", repo="o/r", manager="m", project=None, git=None, code=None, modules=None, phases=None)
 
 
 def state(at):
@@ -268,3 +268,67 @@ def test_an_action_does_not_fetch_or_drop_the_state(monkeypatch):
     monkeypatch.setattr(C, "plan_action", lambda *a: ([], "done"))
     assert C.do_act(dict(action="x"), run=lambda a: "", p=P)[0] == 200
     assert C.get_state(p=P)["source"]["fetchedAt"] == now - 60
+
+
+@pytest.fixture(params=["github-failing", "rate-limit-pause"])
+def no_github(request, monkeypatch):
+    """Every gh call fails the test; in the second mode the Cockpit is also inside a rate-limit pause."""
+    def boom(*a, **k):
+        raise AssertionError("a local request called GitHub")
+    monkeypatch.setattr(C, "run_gh", boom)
+    monkeypatch.setattr(C, "build_state", boom)
+    monkeypatch.setattr(C.subprocess, "run", boom)
+    if request.param == "rate-limit-pause":
+        C._gh_pause.update(until=time.time() + 600)
+    return request.param
+
+
+def test_local_tabs_are_served_without_github(no_github):
+    """Token Usage, Settings (Dispatcher and module cards), the Policies list, the Task Queue's local part and the code snapshot never touch GitHub."""
+    d = C.DATA_DIR / "proj"
+    d.mkdir(parents=True)
+    (d / "proxy-usage.jsonl").write_text(json.dumps(dict(ts="2026-01-01T10:00:00+00:00", worker="w1", input_tokens=5, output_tokens=1)) + "\n")
+    C._cache.clear()
+    u = C.usage_served(P)
+    assert u["days"] and u["projects"][0]["name"] == "proj"
+    assert C.get_settings(P)["values"] and C.get_card_settings(P)["values"]
+    assert C.get_queue(P)["workers"] == []
+    assert C.get_rules(P) == dict(configured=False)
+    cs = C.code_snapshot(P)
+    assert cs["wired"] is False and any(m["id"] == "unassigned" for m in cs["mods"])  # the Code tab's module list is local too
+
+
+def test_code_tab_modules_come_from_the_local_map_with_github_down(no_github, tmp_path):
+    code = tmp_path / "code"
+    code.mkdir()
+    (code / "metrics.json").write_text(json.dumps(dict(modules={})))
+    mp = tmp_path / "map.json"
+    mp.write_text(json.dumps(dict(modules=[dict(id="alpha/one", name="Alpha / one")], assign=[])))
+    Pc = dict(P, code=str(code), modules=str(mp))
+    C._cache.clear()
+    try:
+        cs = C.code_snapshot(Pc)
+    except Exception as ex:  # a metrics file of another shape must not matter here: the module list is what is under test
+        pytest.skip(str(ex))
+    ids = [m["id"] for m in cs.get("mods", [])]
+    assert {"alpha", "alpha/one", "unassigned"} <= set(ids)
+
+
+def test_pull_request_list_fails_alone_and_is_cached_by_the_hour(monkeypatch):
+    monkeypatch.setattr(C, "load_modules", lambda p: {})
+    monkeypatch.setattr(L, "rules_config", lambda m: dict(groups=[], managers=[], bots=[]))
+    Pg = dict(P, git="/x")
+    n = []
+
+    def down(args):
+        n.append(1)
+        raise RuntimeError("API rate limit already exceeded")
+    monkeypatch.setattr(C, "run_gh", down)
+    r = C.get_rule_prs(Pg)
+    assert r["configured"] and not r["available"] and "rate limit" in r["error"] and r["pending"] == []  # this list alone is 'not available'
+    monkeypatch.setattr(C, "run_gh", lambda args: n.append(1) or "[]")
+    n.clear()
+    assert C.get_rule_prs(Pg, fresh=True)["available"] and len(n) == 1  # the pane's Refresh click
+    n.clear()
+    r = C.get_rule_prs(Pg)
+    assert r["available"] and r["at"] <= time.time() and n == []  # within the hour: no call

@@ -730,7 +730,7 @@ def run_git(p, args, timeout=30):
     return subprocess.run(["git", "-C", p["git"], *args], capture_output=True, text=True, check=True, timeout=timeout).stdout
 
 
-def build_rules(p=None, fresh=False):
+def build_rules(p=None):
     p = p or proj()
     rc = L.rules_config(load_modules(p))
     if not rc or not p["git"]:
@@ -740,27 +740,33 @@ def build_rules(p=None, fresh=False):
     changes = L.parse_rule_changes(run_git(p, fmt + ["--since=90.days.ago", "--numstat", "--", *spec]), run_git(p, fmt + ["--since=90.days.ago", "-p", "-U0", "--", *spec]), gs, rc["managers"], rc["bots"])
     last = L.parse_last_changes(run_git(p, fmt + ["--name-only", "--", *spec]), gs)
     files = L.rule_files([p for p in run_git(p, ["ls-files", "-z", "--", *spec]).split("\0") if p], last, gs)
+    log.info("rules: %d files, %d changes in %.1fs", len(files), len(changes), time.time() - t0)
+    return dict(configured=True, groups=[g["name"] for g in gs], files=files, changes=changes, repo=p["repo"])
+
+
+def get_rules(p=None):
+    """The rule view from local files and local git only (no GitHub): Settings > Policies renders from it whatever GitHub does."""
+    p = p or proj()
+    return cached(pk(p, "rules"), lambda: build_rules(p), 120, swr=True, persist=True)
+
+
+def get_rule_prs(p, fresh=False):
+    """The open pull requests that touch rule files: the one GitHub-sourced part of Policies, served separately so that it can never block or fail
+    the rest. Hourly cache; fresh (the owner's Refresh click on the pane) bypasses it. -> dict(configured, available, pending, at, error)."""
+    rc = L.rules_config(load_modules(p))
+    if not rc or not p.get("git"):
+        return dict(configured=False, available=False, pending=[])
+    k = pk(p, "rulesprs")
+    if fresh:
+        _expire(k)
+        log.info("owner Refresh of the rule pull requests of %s", p.get("name", ""))
+    fetch = lambda: dict(at=time.time(), prs=json.loads(run_gh(["pr", "list", "-R", p["repo"], "--state", "open", "--json", "number,title,author,files,url,createdAt"])))
     try:
-        k = pk(p, "rulesprs")
-        if fresh:
-            _expire(k)
-        raw = cached(k, lambda: json.loads(run_gh(["pr", "list", "-R", p["repo"], "--state", "open", "--json", "number,title,author,files,url,createdAt"])),
-                     GH_REFRESH_S, swr=not fresh, persist=True, disk_fresh=DISK_FRESH_S, queue=True)
-        pending = L.pending_rule_prs(raw, gs)
+        v = cached(k, fetch, GH_REFRESH_S, swr=not fresh, persist=True, disk_fresh=DISK_FRESH_S, queue=True)
     except (RuntimeError, ValueError) as ex:
         log.warning("rules: open pull requests unavailable (%s)", str(ex)[:80])
-        pending = []
-    log.info("rules: %d files, %d changes, %d pending PRs in %.1fs", len(files), len(changes), len(pending), time.time() - t0)
-    return dict(configured=True, groups=[g["name"] for g in gs], files=files, changes=changes, pending=pending, repo=p["repo"], prsAt=time.time())
-
-
-def get_rules(p=None, fresh=False):
-    """The rule view. fresh (the owner's Refresh on a pane): the GitHub part (open pull requests) is fetched now, the old copy kept for a failure."""
-    p = p or proj()
-    if fresh:
-        _expire(pk(p, "rules"))
-        log.info("owner Refresh of the rules of %s", p.get("name", ""))
-    return cached(pk(p, "rules"), lambda: build_rules(p, fresh), 120, swr=not fresh, persist=True)
+        return dict(configured=True, available=False, pending=[], error=str(ex)[:200])
+    return dict(configured=True, available=True, pending=L.pending_rule_prs(v["prs"], rc["groups"]), at=v["at"])
 
 
 # ---------- timeline / code ----------
@@ -791,7 +797,7 @@ def build_timeline(S, p=None, fresh=False):
             if not m.get("virtual"):
                 feed += L.static_entries(L.module_dir(p["git"], m), m["id"], p["repo"])
     try:
-        feed += L.rule_feed(get_rules(p, fresh).get("changes", []), p["repo"])
+        feed += L.rule_feed(get_rules(p).get("changes", []), p["repo"])
     except Exception as ex:  # the timeline must not break because the rule view could not be built
         log.warning("timeline: rule changes unavailable (%s)", str(ex)[:80])
     if p["phases"]:
@@ -890,10 +896,23 @@ def code_snapshot(p=None):
         big = cached(pk(p, "biggest"), lambda: biggest_by_module(p, list(view["modules"])), 120, swr=True, persist=True)
         for mid, m in view["modules"].items():
             m["biggest"] = big.get(mid, [])
-        return dict(wired=True, **view, diagrams=[k for k, f in SVGS.items() if (d / f).exists()])
-    except (OSError, ValueError, TypeError) as ex:
+        return dict(wired=True, **view, diagrams=[k for k, f in SVGS.items() if (d / f).exists()], mods=local_modules_of(p))
+    except (OSError, ValueError, TypeError, KeyError) as ex:
         log.info("code snapshot not wired (%s)", ex)
-        return dict(wired=False, modules={}, diagrams=[])
+        return dict(wired=False, modules={}, diagrams=[], mods=local_modules_of(p) if p else [])
+
+
+def local_modules_of(p):
+    """The Code tab's module list from the local module map file (and the local clone for the gap and document counts); no GitHub."""
+    try:
+        cfgm = load_modules(p)
+    except (OSError, ValueError) as ex:
+        log.warning("module map of %s unreadable: %s", p.get("name", ""), ex)
+        cfgm = None
+    mods = L.local_modules((cfgm or {}).get("modules", []))
+    for m in mods:
+        m["gaps"], m["ndocs"] = L.module_facts(L.module_dir(p["git"], m)) if p.get("git") and not m.get("virtual") else (None, None)
+    return mods
 
 
 def card_metadata(p=None, now=None):
@@ -1036,7 +1055,9 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/usage":
                 return self.send(200, usage_served(p))
             if u.path == "/api/rules":
-                return self.send(200, get_rules(p, fresh=bool(q.get("fresh"))))
+                return self.send(200, get_rules(p))
+            if u.path == "/api/rulesprs":
+                return self.send(200, get_rule_prs(p, fresh=bool(q.get("fresh"))))
             if u.path == "/api/code":
                 return self.send(200, code_snapshot(p))
             if u.path == "/api/moduledoc":

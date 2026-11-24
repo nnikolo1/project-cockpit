@@ -1691,3 +1691,16 @@ def queue_local(state_text, plog_text, limit=15):
     log_ = [dict(time=r["time"], task=r.get("task"), state=r.get("state"), reason=r.get("reason"), worker=r.get("worker"), heartbeat=r.get("heartbeat"))
             for r in recs[-limit:]][::-1]
     return dict(workers=workers, log=log_)
+
+
+def local_modules(mods):
+    """The module list the Code tab needs, from the module map file alone (no issues): the listed modules plus missing ancestors, each with
+    its short name, parent and children; task counts are zero (they come from GitHub and the Code tab does not show them)."""
+    mods = [dict(m) for m in mods]
+    with_parents(mods)
+    for m in mods:
+        m["short"] = short_name(m["name"])
+    if not any(m["id"] == "unassigned" for m in mods):
+        mods.append(dict(id="unassigned", name="Not mapped to a module", short="Unassigned", virtual=True))
+    add_tree(mods, [])
+    return mods
