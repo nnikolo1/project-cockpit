@@ -327,6 +327,32 @@ def module_files(paths, assign, mid):
     return [p for p in paths if (m := map_path(p, assign)) == mid or m.startswith(mid + "/")]
 
 
+def code_lines(sizes, assign, ids):
+    """{path: physical lines} of the clone -> {module id: lines of its code files, sub-modules included (tests and documents not counted)}."""
+    code = {p: v for p, v in sizes.items() if file_kind(p) == "code"}
+    return {mid: sum(code[p] for p in module_files(list(code), assign, mid)) for mid in ids}
+
+
+def snapshot_lines(metrics):
+    """metrics.json of the code snapshot -> {module id: code lines}, test kinds left out (the fallback of code_lines without a clone)."""
+    return {mid: sum(v.get("code", 0) for k, v in ((m.get("metrics") or {}).get("loc") or {}).items() if "test" not in k)
+            for mid, m in (metrics.get("modules") or {}).items()}
+
+
+def order_modules(mods, lines):
+    """The one module order of every list (cards, chips, module navigation): top-level modules by size (`lines` {id: code lines}),
+    biggest first, equal sizes by name; unsized ones after them in their map order; virtual entries ("Unassigned") last. Each top-level
+    module is followed by its sub-modules in their own order. Sets `lines` (None when unknown) on every module; returns a new list."""
+    mods = [dict(m, lines=lines.get(m["id"])) for m in mods]
+    pos = {m["id"]: i for i, m in enumerate(mods)}
+    tops = [m for m in mods if not parent_id(m["id"])]
+    tops.sort(key=lambda m: (bool(m.get("virtual")), m["lines"] is None, -(m["lines"] or 0),
+                             m["name"].lower() if m["lines"] is not None else "", pos[m["id"]]))
+    out = [x for t in tops for x in [t] + [m for m in mods if m["id"].startswith(t["id"] + "/")]]
+    seen = {m["id"] for m in out}
+    return out + [m for m in mods if m["id"] not in seen]  # a sub-module without its parent listed is never dropped
+
+
 def doc_modules(text):
     """The ids named by the `Modules:` line near the top of a document ([] when there is none)."""
     for line in (text or "").splitlines()[:15]:
