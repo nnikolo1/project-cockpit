@@ -634,9 +634,10 @@ function vQuality(){
   if(!c)return h+'<div class="card tile nw"><span class="label">Code snapshot</span><span class="v muted" style="font-size:18px">not wired</span><span class="muted" style="font-size:13px">'+(CODE.wired?'no metrics for this module in the snapshot':'point --code at a code snapshot directory')+'</span></div></div>';
   const T=(l,v,s)=>'<div class="card tile"><span class="label">'+l+'</span><span class="v">'+(v==null?'<span class="muted">n/a</span>':v)+'</span><span class="muted" style="font-size:13px">'+s+'</span></div>';
   const f1=(v,n)=>v==null?null:v.toFixed(n);
+  const big=(c.biggest||[]).length?'<br>Biggest files:'+c.biggest.map(f=>'<br><a class="mono" target="_blank" rel="noopener" href="'+esc(f.url||'#')+'">'+esc(f.path)+'</a> '+f.lines.toLocaleString('en-US')+' lines'+(f.kind==='code'?'':' ('+f.kind+')')).join(''):'';
+  if(!c.filesN)return h+'<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(230px,1fr))">'+T('Size',null,'files of this module'+big)+'<div class="card tile nw"><span class="label">Quality metrics</span><span class="v muted" style="font-size:18px">not measured</span><span class="muted" style="font-size:13px">the snapshot analyses Python and JavaScript files only; this module has none</span></div></div></div>';
   h+='<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(230px,1fr))">'
-   +T('Size',c.code==null?null:c.code.toLocaleString('en-US'),'code lines'+(c.files?' · '+esc(c.files):'')
-     +((c.biggest||[]).length?'<br>Biggest files:'+c.biggest.map(f=>'<br><a class="mono" target="_blank" rel="noopener" href="'+esc(f.url||'#')+'">'+esc(f.path)+'</a> '+f.lines.toLocaleString('en-US')+' lines'+(f.kind==='code'?'':' ('+f.kind+')')).join(''):''))
+   +T('Size',c.code==null?null:c.code.toLocaleString('en-US'),'code lines'+(c.files?' · '+esc(c.files):'')+big)
    +T('Complexity',c.cc,'worst block'+(c.ccAt?' ('+esc(c.ccAt)+')':'')+' · mean '+(c.mean==null?'n/a':c.mean.toFixed(1))+' · '+(c.dfe==null?'n/a':c.dfe)+' blocks rated D to F')
    +T('Maintainability',f1(c.mi,1),'mean index')
    +T('Lint',c.lint,esc(c.lintNote||'default ruleset'))

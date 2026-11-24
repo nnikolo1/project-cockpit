@@ -146,7 +146,7 @@ def test_build_moduledoc_reads_content_next_to_the_map_without_a_clone(tmp_path)
 
 def test_file_kind_classifies_code_tests_and_other():
     assert [L.file_kind(x) for x in ("cockpit.py", "tests/test_x.py", "pkg/test_y.py", "a_test.go", "docs/a.md", "web/index.html", "x/tests/data.json")] == [
-        "code", "test", "test", "test", "other", "other", "test"]
+        "code", "test", "test", "test", "other", "code", "test"]
 
 
 def test_biggest_files_takes_code_first_then_tests_then_other():

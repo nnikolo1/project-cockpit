@@ -299,7 +299,7 @@ def group_files(paths, limit=8):
     return [dict(dir=d, count=len(n), names=n[:limit]) for d, n in sorted(g.items())]
 
 
-CODE_EXT = (".py", ".js", ".mjs", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java", ".kt", ".c", ".h", ".cc", ".cpp", ".rb", ".sh", ".swift", ".sql")
+CODE_EXT = (".html", ".css", ".py", ".js", ".mjs", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java", ".kt", ".c", ".h", ".cc", ".cpp", ".rb", ".sh", ".swift", ".sql")
 
 
 def file_kind(path):
@@ -650,7 +650,7 @@ def code_view(metrics):
             lint=_g(x, "lint", "total"), lintNote=f"{_g(x, 'lint', 'per_kloc')} per 1,000 lines" + ("; " + ", ".join(f"{k} {v}" for k, v in list(top)[:2]) if top else ""),
             dead=_g(x, "dead_code", "candidates"), cyc=_g(x, "structure", "files_in_cycles"), dup=_g(x, "duplication", "pct_of_code_lines"),
             doc=_g(x, "docstring_coverage", "pct_documented"), cov=_g(x, "test_coverage", "pct_statements_covered"), covN=_g(x, "test_coverage", "statements"),
-            pyN=_g(loc, "python_source", "files") or 0,
+            pyN=_g(loc, "python_source", "files") or 0, filesN=x.get("files_total") or 0,
             churn=_g(x, "churn", "commits_touching_files"), churnNote=f"{_g(x, 'churn', 'commits_touching_files')} commits touching {_g(x, 'churn', 'files_touched')} files in {_g(x, 'churn', 'window_days')} days",
             testRatio=_g(x, "tests", "test_to_code_ratio_python"), testsNote=f"{_g(x, 'tests', 'source_files_with_mirror_test')} source files have a mirror test",
             hot=[[h["path"], h["churn"], h["cc_max"]] for h in (_g(x, "hotspots", "top") or [])[:5]])
