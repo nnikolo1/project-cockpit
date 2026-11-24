@@ -1,0 +1,64 @@
+import plistlib
+
+import pytest
+
+from dispatcher import launchd as L
+from dispatcher import runtime as rt
+
+ARGS = dict(project="demo", repo="o/n", repo_dir="/r", token_file="/t", data_dir="/data", cockpit_dir="/cp")
+
+
+def _roundtrip(d):
+    return plistlib.loads(plistlib.dumps(d))
+
+
+def test_dispatcher_plist():
+    d = _roundtrip(L.dispatcher_plist(**ARGS))
+    assert d["Label"] == "com.project-cockpit.dispatcher.demo"
+    assert d["StartInterval"] == 120
+    assert d["WorkingDirectory"] == "/cp" and d["EnvironmentVariables"]["PYTHONPATH"] == "/cp"
+    a = d["ProgramArguments"]
+    assert a[:3] == ["python3", "-m", "dispatcher.core"]
+    for flag, val in (("--settings", "/data/demo/dispatcher-settings.json"), ("--socket", "/data/demo/proxy.sock"), ("--repo", "o/n"),
+                      ("--repo-dir", "/r"), ("--token-file", "/t"), ("--data-dir", "/data/demo/processing"),
+                      ("--usage-file", "/data/demo/proxy-usage.jsonl"), ("--area", "/data/demo/area")):
+        assert a[a.index(flag) + 1] == val
+    assert "--state" in a and "--image" not in a
+    assert d["StandardOutPath"] == d["StandardErrorPath"]
+
+
+def test_dispatcher_image_optional():
+    a = L.dispatcher_plist(image="img:1", **ARGS)["ProgramArguments"]
+    assert a[a.index("--image") + 1] == "img:1"
+
+
+def test_proxy_plist_caffeinate_and_workers():
+    d = _roundtrip(L.proxy_plist("demo", "/t", data_dir="/data", cockpit_dir="/cp"))
+    assert d["Label"] == "com.project-cockpit.proxy.demo"
+    assert d["KeepAlive"] is True and d["RunAtLoad"] is True
+    a = d["ProgramArguments"]
+    assert a[:6] == ["caffeinate", "-i", "python3", "-m", "dispatcher.proxy", "--socket"]
+    workers = [a[i + 1] for i, x in enumerate(a) if x == "--worker"]
+    assert workers == [f"worker{i}=dummy-worker{i}" for i in range(1, rt.Config.image_workers + 1)]
+
+
+def test_socket_limit():
+    with pytest.raises(ValueError):
+        L.dispatcher_plist(**{**ARGS, "data_dir": "/d" * 60})
+    with pytest.raises(ValueError):
+        L.proxy_plist("demo", "/t", data_dir="/d" * 60)
+
+
+def test_render_writes_files_and_installs_nothing(tmp_path, capsys):
+    L.render(["--project", "demo", "--repo", "o/n", "--repo-dir", str(tmp_path), "--token-file", str(tmp_path / "tok"), "--out", str(tmp_path / "o")])
+    out = capsys.readouterr().out
+    files = sorted((tmp_path / "o").glob("*.plist"))
+    assert [f.name for f in files] == ["com.project-cockpit.dispatcher.demo.plist", "com.project-cockpit.proxy.demo.plist"]
+    assert out.count("launchctl bootstrap") == 2 and all(str(f) in out for f in files)
+    for f in files:
+        assert plistlib.loads(f.read_bytes())["WorkingDirectory"].startswith("/")
+
+
+def test_main_requires_render():
+    with pytest.raises(SystemExit):
+        L.main([])

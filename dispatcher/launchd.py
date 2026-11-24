@@ -1,0 +1,94 @@
+"""The two LaunchAgent property lists of the Dispatcher (3c) and of the proxy service (4d).
+
+Pure rendering (plistlib); the command line only writes the files and prints the install commands, it installs nothing.
+
+    python3 -m dispatcher.launchd render --project NAME --repo OWNER/NAME --repo-dir DIR --token-file F [--out DIR]
+"""
+import argparse
+import pathlib
+import plistlib
+import sys
+
+from dispatcher import runtime as rt
+
+COCKPIT_DIR = pathlib.Path(__file__).resolve().parent.parent
+DATA_DIR = pathlib.Path("~/.local/share/project-cockpit").expanduser()  # as cockpit.DATA_DIR
+SOCKET_LIMIT = 104  # bytes, 4f
+INTERVAL = 120      # seconds, 3c
+PREFIX = "com.project-cockpit"
+
+
+def paths(project, data_dir=DATA_DIR):
+    """The per-project files, under <data dir>/<project>/ (the folder the Cockpit reads: settings_path, USAGE_FILE, PLOG_FILE, AREA_DIR)."""
+    d = pathlib.Path(data_dir) / project
+    return dict(dir=d, settings=d / "dispatcher-settings.json", state=d / "dispatcher-state.json", area=d / "area",
+                socket=d / "proxy.sock", usage=d / "proxy-usage.jsonl", processing=d / "processing", launchd=d / "launchd")
+
+
+def check_socket(sock):
+    if len(str(sock).encode()) >= SOCKET_LIMIT:
+        raise ValueError(f"socket path {sock} is {len(str(sock).encode())} bytes; a Unix socket path must be shorter than {SOCKET_LIMIT}")
+    return str(sock)
+
+
+def _env(cockpit_dir):
+    return {"PYTHONPATH": str(cockpit_dir)}
+
+
+def dispatcher_plist(project, repo, repo_dir, token_file, image=None, data_dir=DATA_DIR, cockpit_dir=COCKPIT_DIR, python="python3"):
+    """3c: the Dispatcher job, started every 2 minutes with the arguments of dispatcher.core.main()."""
+    p = paths(project, data_dir)
+    args = [python, "-m", "dispatcher.core", "--settings", p["settings"], "--state", p["state"], "--area", p["area"],
+            "--socket", check_socket(p["socket"]), "--token-file", token_file, "--usage-file", p["usage"],
+            "--repo", repo, "--repo-dir", repo_dir, "--data-dir", p["processing"]]
+    if image:
+        args += ["--image", image]
+    return dict(Label=f"{PREFIX}.dispatcher.{project}", ProgramArguments=[str(a) for a in args], StartInterval=INTERVAL,
+                WorkingDirectory=str(cockpit_dir), EnvironmentVariables=_env(cockpit_dir),
+                StandardOutPath=str(p["dir"] / "dispatcher.log"), StandardErrorPath=str(p["dir"] / "dispatcher.log"))
+
+
+def proxy_plist(project, token_file, image_workers=rt.Config.image_workers, data_dir=DATA_DIR, cockpit_dir=COCKPIT_DIR, python="python3"):
+    """4d: the proxy kept alive under `caffeinate -i`, so the host stays awake exactly as long as the proxy runs."""
+    p = paths(project, data_dir)
+    args = ["caffeinate", "-i", python, "-m", "dispatcher.proxy", "--socket", check_socket(p["socket"]), "--token-file", token_file]
+    for i in range(1, image_workers + 1):
+        u = f"worker{i}"
+        args += ["--worker", f"{u}={rt.dummy_token(u)}"]
+    args += ["--usage-file", p["usage"]]
+    return dict(Label=f"{PREFIX}.proxy.{project}", ProgramArguments=[str(a) for a in args], KeepAlive=True, RunAtLoad=True,
+                WorkingDirectory=str(cockpit_dir), EnvironmentVariables=_env(cockpit_dir),
+                StandardOutPath=str(p["dir"] / "proxy.log"), StandardErrorPath=str(p["dir"] / "proxy.log"))
+
+
+def render(argv=None):
+    ap = argparse.ArgumentParser(prog="dispatcher.launchd render", description="write the two LaunchAgent files; installs nothing")
+    ap.add_argument("--project", required=True)
+    ap.add_argument("--repo", required=True, help="owner/name")
+    ap.add_argument("--repo-dir", required=True)
+    ap.add_argument("--token-file", required=True)
+    ap.add_argument("--out", help="default: <data dir>/<project>/launchd")
+    ap.add_argument("--image")
+    a = ap.parse_args(argv)
+    out = pathlib.Path(a.out or paths(a.project)["launchd"]).expanduser().resolve()
+    absolute = lambda s: str(pathlib.Path(s).expanduser().resolve())
+    token, repo_dir = absolute(a.token_file), absolute(a.repo_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    for plist in (dispatcher_plist(a.project, a.repo, repo_dir, token, a.image), proxy_plist(a.project, token)):
+        f = out / f"{plist['Label']}.plist"
+        f.write_bytes(plistlib.dumps(plist))
+        print(f)
+    print("To install (by hand):")
+    for plist in (proxy_plist(a.project, token), dispatcher_plist(a.project, a.repo, repo_dir, token)):
+        print(f"  launchctl bootstrap gui/$(id -u) {out / (plist['Label'] + '.plist')}")
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if not argv or argv[0] != "render":
+        sys.exit("usage: python3 -m dispatcher.launchd render --project NAME --repo OWNER/NAME --repo-dir DIR --token-file F [--out DIR]")
+    render(argv[1:])
+
+
+if __name__ == "__main__":
+    main()
