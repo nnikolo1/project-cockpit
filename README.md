@@ -27,6 +27,17 @@ Sub-modules: a slash id, `alpha/one` (parent = prefix; list the parent too; opti
 `assign` paths match by longest prefix, so a sub-module entry beats its parent; files matching only the parent stay in it. Deadlines inherit: task, parent task, sub-module, module (`MODULE_DEADLINES` keys are full ids); the Task Queue names the source.
 The metrics snapshot may carry `alpha/one` entries under `modules`; the parent's entry is the producer's roll-up, a sub-module without one shows "not wired". The Code tab reads `DIR/metrics.json` plus optional `erd|dataflow|deps|js.svg` (`js.svg` is shown as the "JavaScript" view); a view appears as a sub-tab only when its file exists (the **Workflow** sub-tab always appears: it draws the task workflow of the Owner, the Interactive Session Agent, the Dispatcher and the Workers, and must be redrawn when the workflow changes), and without any a note says the code snapshot is not configured. Contract: see `code_view` in `logic.py`.
 
+## Install
+In a nutshell, from "I have a project" to "the Cockpit shows it, the daily job and the Task Queue run for it". Detail, expected output and the by-hand steps: [docs/deployment.md](docs/deployment.md), "Installation workflow".
+1. Prerequisites, by hand: macOS on Apple silicon, Python 3.10+, `gh auth login` as the Manager, Apple's `container` tool, the model credential in a 0600 file.
+2. Get it: `git clone https://github.com/nnikolo1/project-cockpit`.
+3. Add a project: `python3 tools/project_sync.py init` (planned: PC-92); until then `kit/setup.sh OWNER/REPO` and an entry in `~/.config/project-cockpit/projects.json`, by hand.
+4. Viewer as a service: `python3 cockpit.py --projects FILE --token-file F` in a LaunchAgent or systemd unit, by hand.
+5. Daily upkeep job (planned: PC-91); Dispatcher: `python3 -m dispatcher.launchd render --project NAME --repo OWNER/NAME --repo-dir DIR --token-file F`, then the printed `launchctl bootstrap` lines and the image build, by hand.
+6. First run: `python3 tools/code_snapshot_refresh.py --project NAME`, `python3 tools/cardmeta_collect.py --project NAME --repo DIR --map MAP`, then `python3 tools/metadata_gaps.py --project NAME` lists the gaps to expect.
+7. Verify: one self-test command (planned, no task yet).
+8. Upgrade: `git pull --ff-only` and restart; uninstall: unload the jobs, delete the data folder.
+
 ## Card metadata
 Module and sub-module cards show three blocks read from files a producer writes: **churn** (commits, lines, net, trend for 30 and 90 days, coloured by rank within the project: `▲ hot` top fifth, `▽ cold` bottom fifth, `– dormant` no change; a button switches to churn relative to size), **persistence footprint** (tables, files and folders, logging, volume, backup and retention, with "undocumented" shown as a gap) and **file ambiguity** (unsorted files with candidates, a marker above 30 percent; module-level ambiguous files on the overview). Every block says "as of" and warns when older than 48 hours; no file means "no data". The Code tab has a **Changes** sub-tab: one small bar chart per module (sub-modules indented), weekly churn of the last 52 weeks split into source, tests and documents, ranked by the last 30 days; it reads the optional `series.weekly` key of `churn.json` (a module without it shows "no weekly data yet"). Contract: [docs/contracts/card-metadata.md](docs/contracts/card-metadata.md); folder setting `meta` per project: [docs/deployment.md](docs/deployment.md).
 

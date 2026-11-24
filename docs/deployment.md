@@ -4,6 +4,67 @@ How to run the cockpit, and how far the Manager / Orchestrator / Worker separati
 
 **Read this first.** In phase 1 (one GitHub identity for everyone) nothing is enforced; the rule is followed by agreement. Enforcement starts only when each role has its own identity (phase 2) and its own credentials that the other roles cannot read (phase 3). Section labels below: **[GitHub]** enforced by GitHub, **[OS]** enforced by the operating system, **[after]** reverted or flagged after the fact, **[convention]** nothing stops a violation.
 
+## Installation workflow
+
+One ordered path from "I have a project" to "the Cockpit shows it, the daily job and the Task Queue run for it". The README has the same steps in a nutshell; this is the detail. Markers: **by hand** (a person does it; the wrinkle rule of the constitution wants it automated or covered by an open task), **planned: PC-nn** (the command does not exist yet; do not expect it to work). Examples use the project `widgets`, the repo `acme/widgets` cloned at `~/src/widgets`, the Cockpit at `~/src/project-cockpit`.
+
+### 1. Prerequisites (by hand)
+
+| What | Why | Check (expected output) |
+|---|---|---|
+| macOS on Apple silicon | the Dispatcher runs under launchd, the Workers' image is Alpine arm64 and runs in Apple's `container` tool; the viewer alone also runs on Linux (systemd unit in 5) | `uname -sm`: `Darwin arm64` |
+| Python 3.10+, stdlib only | everything in this repository | `python3 --version`: `Python 3.10` or newer |
+| `git` and the GitHub CLI `gh`, logged in as the Manager | the Cockpit acts as the `gh` login and stores no GitHub token | `gh auth status`: `Logged in to github.com account LOGIN` |
+| Apple's `container` tool, its service started | the Workers' container | `container system status`: the service is running |
+| The model credential in a file outside git, mode 0600 (the owner's subscription token) | the Dispatcher's proxy adds it to the Workers' requests; it is never logged | `ls -l TOKENFILE`: `-rw-------` |
+| The Claude Code binary for Alpine arm64, named `claude`, in the image build context | the Workers' image fetches nothing at run time (`dispatcher/image/Containerfile`) | `file CONTEXT/claude`: an ELF arm64 executable |
+| The owner's status-line script writing `~/.local/share/pmpoc/quota.json` | the quota collector reads it; without it the Budget and Token Usage pages show no quota | the file exists and changes while a session runs |
+| `"cleanupPeriodDays": 3650` in `~/.claude/settings.json` | transcripts feed the token statistics and the backups | `metadata_gaps.py` stops reporting `transcript_retention` |
+
+Created by hand and why: the `gh` login and the model credential are the owner's secrets (no tool may create them for the owner); the `claude` binary is not committed (licence and size); the status-line script lives in the owner's tool settings.
+
+### 2. Get the Cockpit
+
+    git clone https://github.com/nnikolo1/project-cockpit ~/src/project-cockpit
+
+Expected: a clone with `cockpit.py` at its root. Nothing is installed elsewhere.
+
+### 3. Add a project
+
+**Planned: PC-92.** `python3 tools/project_sync.py init` will create the project's `.cockpit/` folder with the templates of the manifest, the module map and the footprint declaration. Until then, by hand:
+
+1. Labels in the project's repo: `kit/setup.sh acme/widgets` (idempotent; prints one line per label created or updated).
+2. The project's entry in `~/.config/project-cockpit/projects.json` (format: README, "Several projects"), for example `{"default": "widgets", "projects": [{"name": "widgets", "repo": "acme/widgets", "git": "~/src/widgets", "modules": "~/src/widgets/docs/cockpit-modules.json"}]}`.
+3. A module map (`{modules:[{id,name}], assign:[{path,module}]}`, the Cockpit's own is `docs/cockpit-modules.json`) and a footprint declaration (the Cockpit's own is `docs/footprint-declared.json`) committed in the project.
+4. Optional: `kit/.github` to `.github` in the project (issue forms, policy Action), see 4, phase 1.
+
+### 4. Start the Cockpit viewer as a service (by hand)
+
+Write the LaunchAgent (macOS) or the systemd user unit (Linux) of section 5 with `--projects ~/.config/project-cockpit/projects.json --token-file ~/.local/share/project-cockpit/token`, then load it (table in 5). Expected: `launchctl print gui/$(id -u)/org.example.project-cockpit | grep state` shows `state = running`; the check of "Token, upgrade, check" answers `303`, then JSON. A trial without a service: `python3 cockpit.py --projects ~/.config/project-cockpit/projects.json` prints the `http://127.0.0.1:8795/?t=TOKEN` URL.
+
+### 5. Install the daily upkeep job and the Dispatcher
+
+- **Daily upkeep job, planned: PC-91 (with PC-92).** Until then its steps run by hand, per project, in this order: `tools/code_snapshot_refresh.py`, `tools/cardmeta_collect.py`, `tools/module_map_upkeep.py`, `tools/metadata_gaps.py`, `tools/project_backup.py` (each in the README).
+- **The Workers' image (by hand)**: copy the `claude` binary to the root of a build context that holds this repository's layout, then `container build --dns 1.1.1.1 -t cockpit-worker:latest -f dispatcher/image/Containerfile CONTEXT`. Expected: the build ends with the image tag; `container image list` shows `cockpit-worker`.
+- **The Dispatcher and the quota collector**: `python3 -m dispatcher.launchd render --project widgets --repo acme/widgets --repo-dir ~/src/widgets --token-file TOKENFILE` prints the paths of the two property lists and the two `launchctl bootstrap gui/$(id -u) FILE` commands; run those **by hand**, quota collector first. Expected: `launchctl print gui/$(id -u)/com.project-cockpit.dispatcher.widgets` shows the job; the Settings page shows the Dispatcher's values (it is on by default; switch it off there to install without starting Workers).
+
+### 6. First collectors run and the first check
+
+    python3 tools/code_snapshot_refresh.py --project widgets
+    python3 tools/cardmeta_collect.py --project widgets --repo ~/src/widgets --map ~/src/widgets/docs/cockpit-modules.json
+    python3 tools/metadata_gaps.py --project widgets
+
+Expected: `code_snapshot_refresh.py` exits 0 (`fresh` or `refreshed`), or 2 with `not_configured` while the project has no `code` folder and `code_collect` command. `cardmeta_collect.py` logs `written: .../cardmeta/footprint.json`, `churn.json` and `ambiguity.json` under `~/.local/share/project-cockpit/widgets/cardmeta/`; after a reload the module cards show churn, footprint and ambiguity "as of" now. `metadata_gaps.py` prints one line per gap (`project | module | what | age`), then `N gap(s)`, and exits 1. A new project typically shows: `code snapshot not configured`; `Token Usage: no quota history`, `no transcript usage file`, `no proxy usage file` (until the quota collector and the first Worker ran); `no backup recorded`; `module page has no diagram`; `document has no Modules: line`; `declared file does not exist` for footprint paths the jobs have not created yet; a module above 30 percent unsorted files; and the transcript retention, if step 1's setting is missing. Each gap is a step of this list not done yet, or a task to file.
+
+### 7. Verify with one command
+
+**Planned (no task yet).** A self-test that reports "ready" or lists what is missing (the prerequisites of step 1, the project entry, the service answering, the jobs loaded, the gap check) does not exist. Until then: the checks of steps 1, 4, 5 and 6 one by one.
+
+### 8. Upgrade and uninstall
+
+- **Upgrade**: `git -C ~/src/project-cockpit pull --ff-only`, then restart the viewer (unload and load: a kick-start reuses the old definition) and re-render and reload the Dispatcher's two jobs; rebuild the image when `dispatcher/image/` or `dispatcher/relay.py` changed. Nothing to migrate.
+- **Uninstall**: `launchctl bootout gui/$(id -u)/com.project-cockpit.dispatcher.widgets` and `.../com.project-cockpit.quota.widgets`, stop the viewer (section 5), `container stop cockpit-workers` and `container delete cockpit-workers`, delete the property lists, the unit, the project's entry in the projects file and `~/.local/share/project-cockpit/widgets`. Nothing was written to GitHub except by your own actions, the Workers' pull requests and the kit labels.
+
 ## 1. What runs where
 
 | Piece | Where | Notes |
@@ -172,7 +233,7 @@ Instead of one service per repo, list the repos in a `--projects` file (see the 
 - **Daily backup to Google Drive (PC-62)**: the daily job runs, per project, `python3 tools/project_backup.py --project NAME --drive "<the folder the Drive desktop app syncs, its My Drive>" --transcripts <the coding tool's transcript folder of the project, e.g. ~/.claude/projects/-Users-you-src-NAME>` (repeat `--transcripts` for several folders). It writes `project_cockpits/NAME/NAME-YYYY-MM-DD.tar.gz` there, create-only (a taken name gets `-2`, `-3`, ...; nothing in Drive is ever edited or deleted by it), and the Drive app uploads it. The archive holds the project's cache files, the listed files of its data folder (processing log, token statistics, settings, state, card data, good-bye notes), the code snapshot, the projects file and the mirror of the raw session transcripts (`<data dir>/NAME/transcripts/`, never pruned); never the token files, an environment file or any other file whose name marks a secret, never logs or task bundles, and nothing that lies inside the project's clone. The transcripts hold conversation text and may hold secrets or personal data: point `--drive` only at the owner's own Drive. Every run writes `<data dir>/NAME/backup-status.json`; the gap checker reports a missing, failed or stale (over 24 hours) backup as kind `backup`, the daily job files it as a task, and the Task Queue tab shows the last backup's time and result. Exit code 0 written, 1 failed, 2 unusable arguments.
 - **Retention in Drive (manual step of the owner)**: in script.google.com create a project under the owner's own account, paste `tools/drive_retention.gs`, run `installDailyTrigger` once (it asks for Drive access) and log the installation in the manual-interventions log. Every day it keeps the newest 30 archives of each sub-folder of `project_cockpits` and moves older ones to the bin; it counts, it does not look at ages, so a pause in the backups never removes the last ones.
 - **Transcript retention**: the coding tool deletes session transcripts older than its retention period (Claude Code: `cleanupPeriodDays`, default 30 days), and the transcripts are the source of the token statistics and an input of the backups; set it to 3650 or more in the user settings file of the account that runs the sessions (`~/.claude/settings.json`, e.g. `"cleanupPeriodDays": 3650`). `tools/metadata_gaps.py` reports it as a `transcript_retention` gap until it is set.
-- **Uninstall**: stop the service (tables above), delete the unit or plist and the data folder. Nothing was written to GitHub except by your own actions and the kit labels.
+- **Uninstall**: see the installation workflow, step 8.
 - **Policy workflow cost**: the 10-minute schedule is about 4,300 runs a month. On a public repo standard runners are free (documented); on a private repo included usage is a dollar amount ($12 on Free, $18 on Pro or Team; documented) and a minimum 1-minute rounding per run would put the schedule near $26 a month at the 2-core Linux rate (our estimate, unverified). Loosen the cron if that matters (5 minutes is the minimum; runs can be delayed under load; scheduled runs use the default branch; documented).
 
 ## 7. Threat notes: what is still possible
