@@ -631,7 +631,7 @@ function vChanges(){
      +(p.weeks?chgBars(p)+'<span class="muted" style="font-size:12px">'+p.churn52+' lines in 52 weeks · '+p.commits90+' commits in 90 days</span>':'<span class="muted">no weekly data yet (run the card-metadata collector)</span>')+'</div>';}).join('')+'</div>';}
 function vCode(){
   const have=CODE.wired?CODE.diagrams:[];
-  const tabs=[['quality','Quality'],...[['deps','Dependencies'],['flow','Data flow'],['erd','ERD'],['js','JavaScript']].filter(t=>have.includes(SVGFILE[t[0]])),['changes','Changes'],['flowchart','Flowchart']];
+  const tabs=[['quality','Quality'],...[['deps','Dependencies'],['flow','Data flow'],['erd','ERD'],['js','JavaScript']].filter(t=>have.includes(SVGFILE[t[0]])),['changes','Changes'],['flowchart','Workflow']];
   const T=tabs.some(t=>t[0]===UI.codeTab)?UI.codeTab:'quality';
   return '<div class="page"><div><h1>Code</h1><span class="muted">Metrics and documentation drawn from the code itself, one snapshot of the repository.</span></div>'
    +'<div class="tabs" role="tablist">'+tabs.map(t=>'<button role="tab" data-act="codetab" data-v="'+t[0]+'" aria-selected="'+(T===t[0])+'">'+t[1]+'</button>').join('')+'</div>'
@@ -641,33 +641,39 @@ function vCode(){
 function wfSvg(){
   const L=(cx,cy,ls,c)=>'<text'+(c?' class="'+c+'"':'')+' x="'+cx+'" y="'+(cy-(ls.length-1)*8+4)+'" text-anchor="middle">'+ls.map((l,i)=>'<tspan x="'+cx+'" dy="'+(i?16:0)+'">'+esc(l)+'</tspan>').join('')+'</text>';
   const box=(cx,cy,w,h,ls,c)=>'<rect class="box '+(c||'')+'" x="'+(cx-w/2)+'" y="'+(cy-h/2)+'" width="'+w+'" height="'+h+'" rx="8"/>'+L(cx,cy,ls);
-  const pill=(cx,cy,w,t)=>'<rect class="st" x="'+(cx-w/2)+'" y="'+(cy-16)+'" width="'+w+'" height="32" rx="16"/>'+L(cx,cy,[t]);
+  const pill=(cx,cy,w,t,k)=>'<rect class="st" x="'+(cx-w/2)+'" y="'+(cy-16)+'" width="'+w+'" height="32" rx="16"'+(k?' style="stroke:var(--s-'+k+');stroke-width:2.5"':'')+'/>'+L(cx,cy,[t]);
   const dia=(cx,cy,w,h,ls)=>'<polygon class="dia" points="'+cx+','+(cy-h/2)+' '+(cx+w/2)+','+cy+' '+cx+','+(cy+h/2)+' '+(cx-w/2)+','+cy+'"/>'+L(cx,cy,ls);
   const ar=d=>'<path class="ar" d="'+d+'" marker-end="url(#wa)"/>';
   const lab=(x,y,t)=>'<text class="sm" x="'+x+'" y="'+y+'">'+esc(t)+'</text>';
   const note=(cx,cy,w,ls)=>'<rect class="note" x="'+(cx-w/2)+'" y="'+(cy-ls.length*8-8)+'" width="'+w+'" height="'+(ls.length*16+16)+'" rx="8"/>'+L(cx,cy,ls,'sm');
-  let s='<svg class="wf" viewBox="0 0 900 1130" role="img" aria-label="Task workflow flowchart in three lanes: Manager, Orchestrator, Worker"><defs><marker id="wa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z"/></marker></defs>';
-  [[10,290,'Manager (you)',155],[310,290,'Orchestrator (AI agent)',455],[610,280,'Worker (AI agent)',750]].forEach(l=>{s+='<rect class="lane" x="'+l[0]+'" y="40" width="'+l[1]+'" height="1080" rx="10"/><text class="lh" x="'+l[3]+'" y="28" text-anchor="middle">'+l[2]+'</text>';});
-  s+=box(155,86,230,46,['File a task or sub-task'],'m')+box(455,86,250,46,['Orchestrator files an embryo','(a suggestion)'])+pill(155,166,120,'Embryo')
-   +dia(155,250,170,76,['Release it?'])+box(155,350,250,56,['Release: set priority P1 to P3','and an optional deadline'],'m')+pill(155,422,120,'Released')
-   +dia(455,422,200,80,['All blockers','merged?'])+box(455,520,260,62,['Rank the queue: priority, deadline,','tasks that unblock the most,','must before nice'])
-   +box(455,606,250,44,['Assign to a free Worker','(workers setting)'])+box(750,606,230,56,['Work in its own work tree','and commit on a branch'],'w')
-   +dia(455,712,170,76,['Checks pass?'])+box(455,806,230,44,['Accept, merge and push'])+pill(455,876,130,'Merged')
-   +box(155,806,240,44,['Cancel at any time','before merged'],'m')+pill(155,876,130,'Cancelled')
-   +'<text class="lh" x="155" y="944" text-anchor="middle" style="text-anchor:middle">Change requests</text>'
-   +box(455,1010,270,56,['Orchestrator proposes a new','priority or deadline'])+dia(155,1010,190,80,['Accept the','proposal?'])+box(155,1090,230,40,['Change applied as the Manager'],'m');
-  s+=ar('M155 109V150')+ar('M455 109V166H215')+ar('M155 182V212')+ar('M155 288V322')+lab(166,308,'yes')
-   +ar('M70 250H35V166H95')+lab(40,241,'no')+ar('M155 378V406')+ar('M215 422H355')
-   +ar('M555 422H588V366H455V382')+lab(594,398,'no: wait')+ar('M455 462V489')+lab(466,478,'yes')+ar('M455 551V584')+ar('M580 606H635')
-   +ar('M700 634V664H455V674')+ar('M540 712H780V634')+lab(560,704,'no: rework')+ar('M455 750V784')+lab(466,770,'yes')+ar('M455 828V860')+ar('M155 828V860')
-   +ar('M320 1010H250')+ar('M155 1050V1070')+lab(166,1062,'yes')+ar('M60 1010H30')+lab(12,1034,'no: dismissed');
-  s+=note(750,150,250,['Priority and deadline are set only','by the Manager. A task without a','deadline inherits it from its parent','task, then from its module.'])
-   +note(750,290,250,['The Orchestrator makes the token','estimate before it assigns a task.','You never enter estimates.'])
-   +note(750,440,250,['Workers never write to the task','list. The Orchestrator records','what they did.']);
+  let s='<svg class="wf" viewBox="0 0 1100 1520" role="img" aria-label="Task workflow flowchart in four lanes: Owner, Interactive Session Agent, Dispatcher, Worker"><defs><marker id="wa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z"/></marker></defs>';
+  [[10,'Owner',140],[280,'Interactive Session Agent',410],[550,'Dispatcher',680],[820,'Worker (AI agent)',950]].forEach(l=>{s+='<rect class="lane" x="'+l[0]+'" y="40" width="260" height="1470" rx="10"/><text class="lh" x="'+l[2]+'" y="28" text-anchor="middle">'+l[1]+'</text>';});
+  s+=box(140,86,200,46,['Owner files a task'],'m')+box(410,86,230,46,['Interactive Session Agent','files a task'])+box(140,160,230,46,['A scheduled job files','a task'])
+   +pill(140,240,120,'Embryo','embryo')+dia(140,322,170,76,['Released?'])+pill(140,414,120,'Released','released')
+   +note(410,322,250,['Counts as released:','Owner’s task: at once','Interactive agent’s task: after','10 days','Scheduled job’s task: the Owner','releases it','Questions and decisions: never','automatically'])
+   +box(140,600,230,56,['Cancel at any time','before merged'],'m')+pill(140,690,120,'Cancelled')
+   +box(680,414,230,56,['Fires every 2 minutes','(a setting; can be disabled)'])+dia(680,510,170,80,['Disk below','10 GiB?'])
+   +box(680,600,230,56,['Start the proxy and the','container if not running'])+dia(680,700,190,80,['Egress check:','outside reachable?'])
+   +box(680,800,240,70,['Choose the task: priority,','deadline, what it unblocks,','must before nice'])+box(680,900,240,56,['Hand over the main bundle','and the task; start a Worker'])
+   +pill(680,990,120,'WIP','wip')+box(680,1100,240,56,['Each firing: kill a runaway','(40 min, 20 min idle, no start)'])
+   +dia(680,1250,230,100,['Bundle holds a commit','and the Worker did','not give up?'])+pill(410,1250,130,'Unmerged','unmerged')
+   +box(410,1340,240,64,['Mop-up: the Interactive Session','Agent merges and sets merged.','Out of scope for now'])+pill(410,1430,120,'Merged','merged')
+   +pill(680,1350,120,'Failed','failed')+note(680,1450,250,['Failed because of: no start,','over 40 minutes, no activity,','no note, an unusable note,','no commit, or the Worker gave up'])
+   +box(950,900,220,56,['Work in its own clone','(unprivileged user)'],'w')+box(950,990,220,44,['Write outbox/started'],'w')+box(950,1070,220,44,['Commit on worker/<task-id>'],'w')
+   +box(950,1150,220,56,['Write result.bundle and','goodbye.json'],'w')+dia(950,1250,230,100,['End check','passes?']);
+  s+=ar('M40 86H25V240H80')+ar('M140 183V224')+ar('M410 109V240H200')+ar('M140 256V284')+ar('M140 360V398')+lab(150,382,'yes')
+   +ar('M225 322H255V240H200')+lab(226,314,'no: wait')
+   +ar('M200 414H565')+ar('M140 628V674')
+   +ar('M680 442V470')+ar('M680 550V572')+lab(690,562,'no')+ar('M765 510H805')+lab(770,502,'skip')
+   +ar('M680 628V660')+ar('M775 700H805')+lab(780,692,'skip')+ar('M680 740V765')+lab(690,756,'no')+ar('M680 835V872')
+   +ar('M800 900H840')+ar('M950 928V968')+ar('M840 990H740')+ar('M950 1012V1048')+ar('M950 1092V1122')+ar('M950 1178V1200')
+   +ar('M1065 1250H1075V1150H1060')+lab(1040,1232,'no')+lab(830,1302,'no: the stop is refused once')
+   +ar('M835 1250H795')+lab(805,1242,'yes')+ar('M565 1250H475')+lab(520,1242,'yes')+ar('M680 1300V1334')+lab(690,1320,'no')
+   +ar('M410 1266V1308')+ar('M410 1372V1414');
   return s+'</svg>';
 }
 function vHow(){
-  return '<div><h2>Flowchart</h2><span class="muted">The life of a task, who does each step, and where the decisions are.</span></div>'
+  return '<div><h2>Workflow</h2><span class="muted">The life of a task, who does each step, and where the decisions are.</span></div>'
    +'<div class="legend"><span><b>Rounded box</b> a step</span><span><b>Diamond</b> a decision</span><span><b>Pill</b> a state of the task</span><span><b>Arrow</b> what happens next</span></div>'
    +'<div class="dg">'+wfSvg()+'</div>'
    +'<div class="card" style="max-width:75ch"><h2>What to call these diagrams</h2><p style="margin:8px 0 0">This one is a <b>flowchart</b> (steps, decisions, arrows) with lanes for who acts. Because the pills are the task\u2019s states, it also works as a <b>state diagram</b>. A <b>data-flow diagram</b> is a different picture: it shows data moving between parts of the system. That is the Data flow tab under Code, which shows which code reads and writes which database tables.</p></div>';
