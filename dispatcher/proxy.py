@@ -7,6 +7,7 @@ subscription token, tells the Workers apart by their own dummy token and records
 The token is read from the file F (outside git); it is never logged or printed.
 """
 import argparse
+import datetime as dt
 import http.client
 import json
 import logging
@@ -86,7 +87,7 @@ class Usage:
                 t[k] += usage.get(k) or 0
             if self.path:
                 with open(self.path, "a") as f:
-                    f.write(json.dumps({"worker": label, **{k: usage.get(k) or 0 for k in USAGE_FIELDS}}) + "\n")
+                    f.write(json.dumps({"ts": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "worker": label, **{k: usage.get(k) or 0 for k in USAGE_FIELDS}}) + "\n")
 
 
 def make_handler(token, workers, usage, upstream):

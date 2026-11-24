@@ -9,6 +9,7 @@ start checks), (3) starts at most one new Worker unless it must skip (disk, prox
 (4) writes the heartbeat line. The tasks, the processing log, the container and every probe are injected.
 """
 import argparse
+import datetime as dt
 import json
 import logging
 import os
@@ -102,7 +103,7 @@ class Probes:
     """Everything a firing reads from the outside world; tests inject fakes."""
     now: object = time.time
     free_disk: object = None            # () -> bytes free on the data volume
-    proxy_counts: object = None         # () -> {worker label: requests so far}; {} if the proxy cannot tell
+    proxy_last: object = None           # () -> {worker label: epoch seconds of its last request}; {} if the proxy cannot tell
     transcript_mtime: object = None     # (user) -> epoch seconds or None
     alive: object = None                # (pid) -> bool
     kill: object = None                 # (pid) -> None
@@ -138,13 +139,10 @@ class Dispatcher:
     # -- the running Workers (3e, 3i, 3j, 3o, 4n) --
     def manage(self, st):
         now = self.probes.now()
-        counts = self.probes.proxy_counts()
+        last = self.probes.proxy_last()
         for user, w in list(st["workers"].items()):
-            n = counts.get(user)
-            if n is not None:
-                if n > w.get("req_count", 0):
-                    w["last_request"] = now      # the usage file has no times: seen at this firing
-                w["req_count"] = n
+            if user in last:
+                w["last_request"] = last[user]   # the `ts` of the proxy's last usage line for this Worker
             started, note, reason = self.runtime.read_outbox(w["task_id"])
             if started and not w["started"]:
                 w["started"] = True
@@ -224,7 +222,7 @@ class Dispatcher:
             return f"{task.id} failed (cannot prepare)"
         st["workers"][user] = {
             "task_id": task.id, "repo": task.repo, "folder": folder, "pid": proc.pid, "launched": self.probes.now(),
-            "started": False, "req_count": self.probes.proxy_counts().get(user, 0)}
+            "started": False}
         self.plog.event(task.id, folder, "launched")
         log.info("started %s for task %s (pid %s)", user, task.id, proc.pid)
         return f"started {user} on {task.id}"
@@ -290,21 +288,22 @@ def _stats_line(runtime):
     return " ".join(raw.split())[:300] if raw else "not reported"
 
 
-def read_proxy_counts(path):
-    """Requests per Worker label from the proxy's JSONL usage file; {} if there is no file."""
-    counts = {}
+def read_proxy_last(path):
+    """The time (epoch seconds) of each Worker label's last request, from the `ts` of the proxy's JSONL usage file; {} if there is no file."""
+    last = {}
     try:
         with open(path) as f:
             for line in f:
                 try:
-                    label = json.loads(line).get("worker")
-                except ValueError:
+                    rec = json.loads(line)
+                    label, t = rec.get("worker"), dt.datetime.fromisoformat(rec["ts"]).timestamp()
+                except (ValueError, KeyError, TypeError, AttributeError):
                     continue
-                if label:
-                    counts[label] = counts.get(label, 0) + 1
+                if label and t > last.get(label, 0):
+                    last[label] = t
     except OSError:
         pass
-    return counts
+    return last
 
 
 def pid_alive(pid):
@@ -381,6 +380,22 @@ def ensure_relay(runtime, relay_path):
         raise rt.ContainerError(f"relay did not start: {out}")
 
 
+def _run(args, cwd, timeout):
+    """Run a command with a time limit; its stdout, or a RuntimeError carrying the stderr."""
+    p = subprocess.run(args, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+    if p.returncode:
+        raise RuntimeError(f"{args[0]} {args[1] if len(args) > 1 else ''} failed ({p.returncode}): {p.stderr.strip()[:300]}")
+    return p.stdout
+
+
+def make_gh(tool, timeout):
+    return lambda args: _run([tool, *args], None, timeout)
+
+
+def make_git(tool, timeout):
+    return lambda args, cwd: _run([tool, *args], cwd, timeout)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="One firing of the Dispatcher.")
     ap.add_argument("--settings", required=True, help="the settings JSON file (6a)")
@@ -393,10 +408,16 @@ def main(argv=None):
     ap.add_argument("--container-data", default=os.path.expanduser("~/Library/Application Support/com.apple.container"),
                     help="the container tool's data folder (size in the heartbeat)")
     ap.add_argument("--container-tool", default="container")
+    ap.add_argument("--repo", required=True, help="the task repository, owner/name")
+    ap.add_argument("--repo-dir", required=True, help="the task repository's clone on the host")
+    ap.add_argument("--data-dir", required=True, help="the processing log's data folder (outside any git repository)")
+    ap.add_argument("--gh", default="gh", help="the GitHub CLI")
+    ap.add_argument("--git", default="git", help="git")
+    ap.add_argument("--call-timeout", type=int, default=60, help="seconds a gh or git call may take")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
-    from dispatcher.plog import ProcessingLog   # built by the other part; same signatures as the brief
+    from dispatcher.plog import ProcessingLog
     from dispatcher.tasks import GitHubTasks
 
     s = load_settings(a.settings)
@@ -404,14 +425,15 @@ def main(argv=None):
     runtime = rt.Runtime(cfg)
     probes = Probes(
         free_disk=lambda: shutil.disk_usage(a.area).free,
-        proxy_counts=lambda: read_proxy_counts(a.usage_file),
+        proxy_last=lambda: read_proxy_last(a.usage_file),
         transcript_mtime=lambda user: transcript_mtime(runtime, user),
         alive=pid_alive, kill=lambda pid: os.kill(pid, signal.SIGKILL),
         ensure_proxy=lambda: ensure_proxy(a.socket, a.token_file, a.usage_file, cfg.image_workers),
         ensure_relay=lambda: ensure_relay(runtime, a.relay_path),
         commits_ahead=commits_ahead,
         heartbeat_parts=lambda: host_readings(a.area, a.container_data, runtime))
-    Dispatcher(s, a.state, runtime, GitHubTasks(), ProcessingLog(), probes).fire()
+    tasks = GitHubTasks(a.repo, make_gh(a.gh, a.call_timeout), make_git(a.git, a.call_timeout), a.repo_dir)
+    Dispatcher(s, a.state, runtime, tasks, ProcessingLog(a.data_dir), probes).fire()
 
 
 if __name__ == "__main__":
