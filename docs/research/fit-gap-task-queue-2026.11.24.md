@@ -16,6 +16,8 @@ Owner briefs:
 - F-758: incremental path.
 - F-759 and F-760: the spine is task isolation, Worker images, and sessions and context.
 - F-761: frameworks for context.
+- F-762 to F-766: network policy, Claude focus, hand-crafted context, piggy-backing.
+- F-767 to F-783: Claude-only frameworks, prior art (HPC, hybrids, write-ups), trust rules, the gap-coverage method, the decision table, earlier reports.
 
 ## Short answer
 
@@ -28,6 +30,118 @@ Owner briefs:
 - **Secondary:**
   - Do not adopt a batch scheduler (Slurm, Grid Engine, HTCondor, pueue). On one node it replaces little and mirrors task state (section 5).
   - The vendor's cloud (Projects, cloud sessions) covers isolation, images and context best. It conflicts with the owner's rules on push, determinism and the local log.
+- **The most promising mongrel** (section 0.3): our Dispatcher (task state, queue, ranking, note) + a standard container engine (images with layer cache, a container per task, network per container) + Claude Code's own mechanisms (memory, hooks, `setup-token`, usage metrics). The three own disjoint state, so nothing is stored twice.
+
+## 0. The method (F-772): today's gaps, a coverage matrix, the best combinations
+
+### 0.1 The gaps we have right now
+
+| Gap | Today | Missing | Source |
+|---|---|---|---|
+| **G1** One queue for all projects | One Dispatcher per repository: `--repo` is a single value (`dispatcher/core.py:478-504` [V]) | Several projects in one ranking, cockpit first | Constitution "The Dispatcher" (owner, 2026-11-24) |
+| **G2** Project-bound Workers, warm clone, pre-built stack | A bundle of main per task, one generic image [V] | A per-project stack and an incrementally updated clone | Owner, F-746 and F-758; constitution "Context management" (attachment) |
+| **G3** Worker image management | One hand-built `cockpit-worker:latest`; the agent binary is "copied there by hand" (Containerfile [V]) | A recipe per project, a hash key, a base plus project layer, a rebuild trigger, a pinned agent | Owner, F-759 |
+| **G4** Task isolation per task and per project | Users, mode-700 homes and a private mount namespace in one shared container, one 4 GB cap (runtime.py:50, :91-95 [V]); the namespace was added after the shared mount was found to ignore modes (c0ae6e5, observed) | Per-task limits; a boundary not resting on an unsupported tool version | Owner, F-759; spec 4b, 4c; container-seam review §1 |
+| **G5** Network policy per task kind | No network but the model for every Worker (4c, 4s [V]) | An owner-held policy per kind, default none, named allowlists | Owner, F-762 and F-763 |
+| **G6** Session and context management | Per-Worker config folder, `CLAUDE.md` in the clone, transcripts mirrored [V]; the owner's hand-crafted practices not yet applied to Workers | Project memory for Workers, the dated synopsis (PC-70) | Constitution "Context management"; owner, F-760 and F-765 |
+| **G7** Accounting of the shared model quota | Proxy counts per Worker (4h), transcript and statistics-cache usage, quota history (commits c8396d7, 47d5b1b [V]) | One view across interactive sessions and Workers per window (3h: statistics only) | Spec 3h, 4h; owner, F-758 |
+| **G8** Scheduling of the daily jobs | Separate LaunchAgents per job (commits 2377cb3, b8a028e, c8396d7 [V]); the daily backup and upkeep jobs exist (PC-62, PC-50, PC-54 [V]) | One place that schedules and reports all daily jobs [I] | Owner, F-758 |
+| **G9** Retries and failure handling | Failure reasons recorded (5b); no retries, a setting exists (3f) [V] | A retry policy actually applied; requeue after host or tool faults [I] | Spec 3f; owner, F-758; observed: aborted launches (commit 95c6f67) |
+| **G10** Host choice | The laptop, with Apple `container` 1.7.1 on an unsupported macOS (seam review §1 [V]) | A supported boundary; an option for a Linux host | Owner, F-748, F-751, F-754 |
+
+### 0.2 Coverage matrix
+
+**Candidate rules** (F-776 to F-779):
+- A repository is a candidate only if it has at least 10 stars **and** a commit since 2026-10-25. The stars and the last commit date are stated, read on 2026-11-24 from the repository page and its commit feed [V].
+- Popularity only ranks. Products and specifications without a repository (the vendor's cloud, the Dev Container spec, host timers) are judged on their documentation.
+- A repository that fails the rules, or another verifiable trust check (no licence, a single anonymous author), is labelled **untrusted** in appendix B and is not a candidate.
+- **Untrusted code is never installed or run in our set-up.** Only its ideas may be read as a pattern, and only after the owner's review.
+
+**C** covers, **P** partly, **N** no. Evidence is in the sections named in the last column, or in §5 "Prior art".
+
+| Candidate (stars; last commit) | G1 | G2 | G3 | G4 | G5 | G6 | G7 | G8 | G9 | G10 | Evidence |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| **Ours (today)** | N | P | P | P | P | P | P | P | P | P | 0.1 |
+| Docker (moby 72.3k; 2026-11-24) / Podman (33.4k; 2026-11-24), with layer cache and a container per task | N | C | C | C | C | N | N | N | N | P (native on Linux; VM on macOS) | §2, §3 [V cache; I rest] |
+| Dev Container spec (specification) | N | P | C | P | P (firewall script) | N | N | N | N | P | §3 [V] |
+| Claude Code's own mechanisms (`autoMemoryDirectory`, hooks, `setup-token`, OpenTelemetry; product) | N | N | N | N | P (Bash sandbox allowlist) | C | P (per-session tokens) | N | N | C | §4, §2 [V] |
+| Sandbox runtime `srt` (7.3k; 2026-11-12) | N | N | N | P (no limits) | C (settings per run) | N | N | N | N | C (both hosts) | §2 [V; I limits] |
+| Sandcastle (9.3k; 2026-11-16; Claude Code support not stated on its page) | N | N | N | C (bubblewrap, Seatbelt, Docker or Podman providers) | N (not covered) | N | N | N | N | C | §5 [V] |
+| Claude cloud (Projects, cloud environments, scheduled tasks; product) | P (Claude chooses) | C (setup snapshot) | C (setup script, rebuild triggers) | C (VM per session) | C (per environment) | C (project memory, cloud only) | P (plan limits) | C (scheduled tasks) | P (continue at limit reset) | C | §2-§5 [V]; conflicts with push (3e), determinism, local log (5c) |
+| GitHub Action (10.1k; 2026-11-24) on a self-hosted runner | P (per repository) | N | P | P (Linux containers) | N | N | N | C (cron) | P (re-run) [I] | P | §5 [V] |
+| **Kelos** (360; 2026-11-24; Apache-2.0): Kubernetes, tasks from GitHub issues | P (TaskSpawner from issues, label "agent-ready"; no ranking stated) | C (workspace: repo, setup command, image) | P | C (pod per task, resources) | N (not described) | P (injected files) | P ("token usage" in task status) | C (cron trigger) | P [I] | P (needs Kubernetes) | §5 [V] |
+| **Optio** (1.1k; 2026-11-22; MIT): Kubernetes, tickets to PRs | P (queue on BullMQ and Postgres, several repos) | C (pod per repo) | P | P (pod per repo, worktrees inside) | N (author: no egress restrictions) | N | N | N | C (auto-resume on failures) | P (Kubernetes) | §5 [V] |
+| **ProPR** (40; 2026-11-24; Apache-2.0, v0.9.3): labelled issue to PR | P (label per issue; Epic mode in order) | P | P [I] | C (container and worktree per run) | P (optional allowlist firewall, off by default) | N | N | N | P [I] | P (Linux amd64) | §5 [V] |
+| **Cyrus** (913; 2026-11-24; Apache-2.0): assigned issues to sessions | P (Linear, GitHub, GitLab) | P (worktree per issue) | N | P (worktree only) | N (not documented) | N | N | N | N | C [I] | §5 [V] |
+| **CodeForge** (15; 2026-11-23; MIT): REST task queue, Docker | P (REST tasks; label trigger only as middleware) | N | N | P ("isolated in Docker") | N | N | P ("cost and usage tracking", "key pool (subscription mode)") | N | N | P | §5 [V] |
+| Slurm (4.5k; 2026-11-24) / Grid Engine, i.e. Open Cluster Scheduler (57; 2026-11-23), on one node | C (one queue, partitions) | N | N | P (cgroups) | N | N | N (CPU, not tokens) | P [I] | C (`--requeue`) | P (Linux only) | §5 [V] |
+| HTCondor (339; 2026-11-23) | C | N | N | P | N | N | N | P [I] | P | P | §5 [V partly] |
+| pueue (6.4k; 2026-11-18) | P (groups) | N | N | N | N | N | N | P (`--delay`) | P [I] | C | §5 [V] |
+| launchd / systemd timers (system tools) | N | N | N | N | N | N | N | C | N | C | [I] |
+| Claude Agent SDK (8.6k; 2026-11-23) | N | N | N | N | N | P (resume, fork) | P | N | N | C | §4 [V] |
+| Ruflo (82.3k; 2026-11-24) | N | N | N | N | N | P (cross-session memory) | N | N | N | P | §4 [V] |
+
+**What the matrix shows:**
+- No candidate covers G1 the way the owner's rules require: an owner release gate, deterministic ranking, cockpit first. Kelos, Optio, ProPR and Cyrus come closest; each takes work straight from issues or labels and lets the agent push and open PRs.
+- G3, G4 and G5 are covered by a container engine.
+- G6 is covered by Claude Code's own mechanisms.
+- G8 is covered by host timers or Kelos' cron.
+- G9 is covered by Optio's auto-resume or a scheduler's requeue, and cheaply by our own setting.
+- **Network:** none of the real hybrids found makes a no-network sandbox the default. ProPR's allowlist is optional and off; Optio's author says agents have open egress.
+
+### 0.3 The best combinations
+
+| Combination | Covers | Seam: who owns what, how they talk | Effort [I] | Risks |
+|---|---|---|---|---|
+| **M1: Ours + container engine + Claude Code mechanisms** (+ host timers) | G2-G6 and G8 borrowed; G1, G7 and G9 stay ours (small) | Task state: GitHub through our Dispatcher only. Images and containers: the engine (no task state). Sessions and memory: Claude Code's files. Our runtime adapter calls the engine's CLI (as today with the Apple tool); hooks call small scripts. | 4-6 days: images 1, per-task container and network 1-2, context 1-1.5, one queue 1 | One source of task state. Glue is the existing adapter plus two hooks. On macOS a per-task container costs a VM each (Apple tool) and Docker Desktop cannot mount the socket reliably (seam review §3), so full G4 and G5 favour Linux, while G3 and G6 work on both hosts. |
+| **M2: Ours + `srt` + Claude Code mechanisms** | G4 (no limits on macOS), G5, G6, G10; G3 not covered (no image model) | Task state ours; the sandbox is a per-run settings file | 2-4 days | No per-project stack without a separate environment manager; `srt` is beta |
+| **M5: Kelos (or Optio) as the runner + our gate** (Linux, Kubernetes, for example k3s) | G2, G4, G8 (Kelos) or G9 (Optio), G7 partly (Kelos) | **Two task-state sources**: GitHub labels (ours) and Kelos Tasks or Optio's Postgres queue. Our Dispatcher would set the trigger label only after release and ranking. | 1-2 weeks [I] | Kubernetes on one node; agents push and open PRs (3e); no default network policy; the runner's own queue mirrors ours |
+| **M3: Slurm + Apptainer images + a sandbox + our thin layer** (the HPC mongrel) | G1 (queue), G3, G4, G9 (requeue); G5 only with a sandbox | **Two task-state sources**: GitHub (ours) and the Slurm queue (mirrored hold and release) | 2-3 weeks [I] | The mirrored queue is the failure class of 2026-11-20; MUNGE and the daemons; built for shared clusters |
+| **M4: Ours + Claude cloud** (the Dispatcher starts `claude --cloud` sessions) | G2-G6, G8, G10 from the cloud | Task state in GitHub plus session state in the cloud; results arrive as pushed branches | 2-3 days | Conflicts with 3e (no push), 5c (local log) and the hard cap; two state sources; research-preview terms |
+
+### 0.4 Decision table: build, borrow or mongrel (F-780)
+
+Efforts and maintenance are estimates [I], based on the sizes in §3 and §7, the line counts of our code, and what each tool's documentation asks to be run.
+
+**Host obstacles on macOS** (§6): the Apple tool on an unsupported OS, the socket path and relay, one VM per container, Docker Desktop's socket mount, launchd lifecycle quirks, memory shared with interactive work.
+
+**Trigger** means the macOS obstacles of that row outweigh its benefit, so the Linux mini-PC option (kept open, F-754) applies.
+
+| Row | Gaps covered | Effort for the rest | Upkeep for one person | Main risks (trust) | Host needs; what a move changes | Trigger? | Verdict |
+|---|---|---|---|---|---|---|---|
+| **Keep building (ours, today)** | partly all, fully none | G1-G9 by hand: ~2-3 weeks | Highest; all our code | Apple tool on an unsupported OS | macOS with the obstacles named; moving makes G4 and G5 easier | Only if the Apple tool breaks | Not alone |
+| Docker / Podman | G2, G3, G4, G5 | G1, G6-G9: ~1 week | Low (a mature engine) | None new (trusted) | Linux natively; macOS through a VM | Yes, for per-task G4 and G5 | Borrow, inside M1 |
+| `srt` | G4 (partly), G5, G10 | G2, G3, G6-G9 | Low, but beta | Beta configuration format (trusted) | Both as is | No | Borrow only if the Apple tool fails (M2) |
+| Claude cloud | G2-G6, G8, G10 | G1 deterministic, G7, G9, plus the rule conflicts | Lowest | Lock-in; second state; 3e and 5c conflicts | None (cloud) | n/a | Not now (owner rules) |
+| Kelos | G2, G4, G8; G1, G6, G7 partly | Release gate, ranking, no-push, network policy: ~1-2 weeks | Medium (Kubernetes) | Second task state; agents push (trusted) | Linux with Kubernetes | Yes (it needs Linux) | Pattern; borrow only within M5 |
+| Optio | G2, G9; G1, G3, G4 partly | Gate, ranking, network, no-push: ~1-2 weeks | Medium-high (Kubernetes, Postgres, BullMQ) | Second state; open egress; auto-merge (trusted) | Linux with Kubernetes | Yes | Pattern |
+| ProPR | G4; G1, G2, G5 partly | Gate, ranking, G6, G7: ~1 week | Medium (pre-1.0) | Pushes PRs; small (40 stars) (trusted) | Linux amd64 | Yes | Pattern (allowlist firewall) |
+| Cyrus | G10; G1, G2, G4 partly | Most of G3-G9 | Medium | Worktree-only isolation (trusted) | Either | No | Pattern |
+| CodeForge | G1, G4, G7 partly | Most | Medium (15 stars) | Small project (trusted, near floor) | Docker | Yes | Pattern |
+| Slurm / Grid Engine / HTCondor | G1, G9; G4 partly | Gate mirror, G2-G7: ~2-3 weeks | High (daemons, MUNGE) | Second task state; failure class of 2026-11-20 (trusted) | Linux (HTCondor also lists macOS) | Yes | Build, not borrow |
+| pueue | G10; G1, G8, G9 partly | Most | Low | None (trusted) | Both | No | Not needed |
+| GitHub Action, self-hosted | G8; G1, G3, G4 partly | Gate, no-push, network | Low-medium | Pushes; per-repository workflows (trusted) | macOS runner; containers need Linux | Partly | Not now |
+| **M1: ours + container engine + Claude Code mechanisms** | G2-G6, G8 borrowed; G1, G7, G9 ours | 4-6 days | Low-medium: one adapter, two hooks | One state source (all trusted) | G3 and G6 on macOS as is; G4 and G5 per task better on Linux | Yes for G4 and G5 per task; no for G3 and G6 | **Mongrel (recommended)** |
+| M2: ours + `srt` + Claude Code mechanisms | G4, G5, G6, G10 | G3 needs an environment manager | Low | `srt` beta | Both as is | No | Fallback mongrel |
+| M3: Slurm + Apptainer + sandbox + ours | G1, G3, G4, G9 | Gate mirror, G5-G7: 2-3 weeks | High | Second state | Linux | Yes | No |
+| M4: ours + Claude cloud | G2-G6, G8, G10 | Rule conflicts | Low | 3e and 5c conflicts; lock-in | None | n/a | No, unless the owner relaxes 3e and 5c |
+| M5: Kelos or Optio + our gate | G2, G4, G8 or G9 | Gate mirror, network, no-push: 1-2 weeks | Medium-high | Second state; Kubernetes | Linux | Yes | Keep as the alternative if M1 falls short |
+
+**Patterns worth copying, from write-ups and trusted repositories** (F-775; as useful as a tool):
+- **dev-agents** (dev.to; pattern only, its repository is unreachable). An issue label leads, through a self-hosted runner, to a filesystem queue of YAML files. Priority is set by the file-name prefix, there is a per-project `flock`, and it runs on one small box on a Pro subscription. This is a minimal G1 pattern close to ours.
+- **Anthropic's sandboxing post** (2025-10-20). Network access goes only "through a unix domain socket connected to a proxy server running outside the sandbox". That is the design our proxy and relay already follow, which validates keeping them.
+- **ProPR's optional allowlist firewall**, and Kelos' `podOverrides`. Patterns for G5 and per-task limits in M1.
+- A **CONNECT-only proxy with a named allowlist per job** is described by an untrusted repository (appendix B). It may be read as an idea only after the owner's review. ProPR's optional allowlist firewall is the trusted reference for the same G5 pattern.
+
+**The most promising mongrel is still M1.** It holds together because:
+- each part owns a different kind of state (tasks, images and containers, sessions), so nothing is mirrored;
+- the seams already exist in our code (the runtime adapter, the Stop hook);
+- every part is mature and widely used with Claude Code;
+- it adds no daemon beyond the container engine.
+
+The real hybrids (M5) prove the combination is common, but each one hands the queue and the push to the runner, and that conflicts with the owner's release gate and with 3e.
+
+**Hosts.** On the laptop M1 gives G3 and G6 at once, and G4 and G5 per task only at the cost of a VM per container. On a Linux host it gives all of them natively. That is the concrete trigger for the host question (G10), not a head start for Linux.
 
 ## 1. The needs, with their sources
 
@@ -45,6 +159,33 @@ Owner briefs:
 | 10 | Small, local, understandable by one person | constitution "Principles"; ADR 0009 |
 
 **Earlier studies.** The overlap note (`overlap-2a-2b-2026.11.22.md`) recorded that both studies rejected Temporal, Airflow, Slurm and BPMN engines; that is not repeated here. The note also says "tasks needing local data cannot run in the cloud". That is now out of date: a Project thread can run on the owner's computer through Remote Control. Such a thread runs without project memory loaded [V, [Projects](https://code.claude.com/docs/en/claude-projects)].
+
+## 1a. What the earlier reports already established (F-783)
+
+Read on 2026-11-24 from git history without checking out (`git log --all -- docs/research/*`, then `git show <commit>:<path>`). Dates are those of the reports.
+
+| Report (date) | What it covered; main finding | This report: agrees, differs (why), reuses |
+|---|---|---|
+| orchestration-fit-gap-a, -b (2026-11-22) | Under the older brief: no workflow engine; a stateless reconciliation loop over GitHub; at-most-once starts by an intent marker read back; WIP limit by Little's law; hybrid concurrency control | Agrees on no engine and on one source of task state. The WIP limit was later dropped by the owner (synthesis, "no review-backlog cap"), so it is not proposed here. |
+| sota-ai-orchestration, study C (2026-11-22) | Literature on graphs, lazy execution and scheduling for LLM agents; ideas transfer, products do not | Not repeated; theory unchanged |
+| review-orchestration (2026-11-22) | Engines do not remove the claim-to-start window; mutual exclusion really rests on one dispatcher on one machine | Agrees: M1 keeps one Dispatcher on one host. Reused as the reason against M3 and M5's second queue. |
+| study2-a, study2-b (2026-11-22) | Adopt the vendor cloud (scheduled tasks, Projects), GitHub as queue, PRs as acceptance | **Differs**: since then the owner specified a local Dispatcher, no push (3e) and a local log (5c). The cloud remains row M4. |
+| review2-orchestration (2026-11-22) | Issue triggers cannot be filtered by label; the cloud proxy blocks GraphQL; branch protection unavailable on the private repository's plan [observed]; 25 of 44 released tasks need local data | Reused: these facts still weigh against M4. The local-data count supports local Workers (M1). Not re-verified here. |
+| decision-memo (2026-11-22) | Merged five sources; a no-regret core (complete reads or no decision, claim before start); rejected Baton (3 commits, idle since 2026-03-27) | Agrees; Baton would also fail the trust rules (F-779) |
+| build-baseline (2026-11-22) | The build: tick, processing log, heartbeat, limits and kills, good-bye note, launcher, adopted sandbox | It is the "keep building" row of §0.4 |
+| oss-survey (2026-11-22) | No open-source framework covers the dispatcher's defining needs (user and clone per worker, kill policy, verified note, counting proxy); engines supply the cheap parts; AI orchestrators (Symphony and ports, Bernstein, Gas Town, vibe-kanban and others) conflict with no-retry and no-merge | Agrees and reuses its engine and orchestrator verdicts. This report adds issue-to-PR runners not named in its summary (Kelos, Optio, ProPR, Cyrus, CodeForge). Their verdict is the same: pattern, not borrow. |
+| deep-three (2026-11-22) | Adopt no engine; build with a seam; DBOS as fallback; engines cannot kill a process inside a container (moby#9098); large deadwood | Agrees; the kill point reappears in the seam review. Its DBOS and Temporal fallback is kept implicitly (out of scope here, since no engine is proposed). |
+| apple-container-vs-orbstack (2026-11-22) | Apple's tool wins on egress (no-network mode plus a socket relay) if three hands-on tests pass on macOS 15.3; otherwise upgrade or OrbStack with a weaker boundary | Agrees; the tests later passed (seam review §1). New here: the Linux host option (F-748), kept neutral (F-754). |
+| sandbox-options (2026-11-22) | The boundary must be the OS or a VM, not the agent's tool lists; a linked worktree is not self-contained (its `.git` points outside) | Agrees; spec 4k (separate clones, no hardlinks) already follows it |
+| feasibility-container-networking (2026-11-23) | Documentation and source of Apple's tool; not run at first (no installation) | Superseded by the later observed run (seam review §1) |
+| synthesis-build-vs-borrow (2026-11-23) | Build the small dispatcher, adopt components; credential through a Console API key, because a host proxy injecting a subscription token "conflicts with the vendor text" | Agrees on build-with-seam. **Differs on the credential**: the owner has since specified subscription access (spec 4g) and recorded his reading of the terms for his single-user case (F-755 to F-757). §9 quotes the same vendor text and finds no clear conflict with that use case. The synthesis' reading is not discarded; it remains the documented alternative, and the decision is the owner's. |
+| trenches (2026-11-22) | Practitioner reports: silent failure dominates; review is the bottleneck; deterministic machinery outside the model gets the credit | Agrees; supports keeping the deterministic decision core and the end check. Reused instead of repeating a practitioner survey. |
+
+**What is new in this report** compared with all of the above:
+- the spine items (Worker images, a network policy per task kind, context management), from owner needs raised after 2026-11-23 (F-759, F-760, F-763);
+- the Claude-only and trust rules (F-767, F-777 to F-779);
+- the Linux host option (F-748);
+- the gap-coverage method (F-772).
 
 ## 2. Task isolation (spine 1)
 
@@ -215,13 +356,15 @@ The target agent is Claude Code and its SDK. The candidates are ranked by how cl
 | 3 | Claude Code GitHub Action | Vendor | [repo](https://github.com/anthropics/claude-code-action): 10.1k stars, 2.3k forks, 498 issues | Yes |
 | 4 | Sandbox runtime `srt` | Vendor, "built for Claude Code", "Beta Research Preview" | [repo](https://github.com/anthropics/sandbox-runtime): 7.3k stars, 896 commits | Likely, but the configuration format may change [V: README says so] |
 | 5 | Projects, cloud sessions, scheduled tasks | Vendor | Docs above; beta or research preview | Likely; terms and limits move |
-| 6 | container-use (Dagger) | Claude Code first among MCP agents | [repo](https://github.com/dagger/container-use): 4.1k stars, "stability-experimental" | Uncertain: experimental |
+| — | container-use (Dagger) | Claude Code first among MCP agents | [repo](https://github.com/dagger/container-use): 4.1k stars; last commit 2026-08-12 | **Untrusted (stale)**, appendix B |
 | 7 | Claude Squad | Several agents (Claude Code, Codex, Gemini, Aider); tmux and worktrees, no containers | [repo](https://github.com/smtg-ai/claude-squad): about 8.9k stars, AGPL-3.0 | Uncertain; interactive tool, no queue |
 | 8 | Ruflo (formerly claude-flow) | "An agent meta-harness for Claude Code and Codex"; multi-model | [repo](https://github.com/ruvnet/claude-flow): about 82.3k stars, 10,644 commits; speed and security claims self-reported | Popular, but a large surface at odds with need 10 [I] |
 | 9 | Sculptor (Imbue) | Claude Code and others; "experimental research preview" | [repo](https://github.com/imbue-ai/sculptor): 285 stars | Short-lived risk [I] |
 | — | Slurm, HTCondor, Grid Engine, pueue, Docker/Podman, GitHub runners | Not tied to a model; in scope (F-767) | above | Maintained; only container tooling solves a spine item |
 
 Generic multi-model frameworks and tools are not in this table (appendix A).
+
+Last commits, read from the commit feeds on 2026-11-24 [V]: claude-code-action 2026-11-24, claude-agent-sdk-python 2026-11-23, sandbox-runtime 2026-11-12, Claude Squad 2026-11-13, Ruflo 2026-11-24, Sculptor 2026-11-23. All of these pass F-779. container-use (2026-08-12) does not and is untrusted (appendix B).
 
 Open issues about using a Claude Code subscription with these tools were not searched issue by issue. That is a gap of this report.
 
@@ -245,53 +388,77 @@ Open issues about using a Claude Code subscription with these tools were not sea
 - **Self-hosted environments** [V, [self-hosted](https://code.claude.com/docs/en/self-hosted-environments)]: "public beta on Team and Enterprise plans" only.
 - **Projects** [V]: a thread limit "isn't a hard cap"; threads open PRs.
 - **Agent view** [V, [agent view](https://code.claude.com/docs/en/agent-view)]: interactive background sessions in worktrees.
-- **Claude Squad** (tmux and worktrees, several agents) and **container-use** are interactive tools with no queue [V repos above].
+- **Claude Squad** (tmux and worktrees, several agents) is an interactive tool with no queue [V]. container-use is untrusted (stale, appendix B).
 
 Each of these lacks one of: deterministic choice (constitution "The Dispatcher"), no push (3e), or a local log (5c). These are owner rules, not conveniences. **Keep the Dispatcher's queue and ranking.**
 
-### Prior art: Claude Code under Slurm, SGE and other cluster managers (F-769)
+### Prior art: hybrids of Claude Code with schedulers, runners and issue trackers (F-769, F-771, F-774 to F-779)
 
 **Searches tried (2026-11-24):**
-- `"claude code" slurm sbatch headless "claude -p" HPC cluster`
-- `Claude Code agents Slurm job submission orchestrator github repository`
-- `"claude" "grid engine" OR "qsub" OR "HTCondor" OR "LSF" claude code agent batch jobs`
-- `hpc-agent pypi SGE SLURM array batch Claude Code orchestrator github`
-- `anthropic "long-running" Claude Code Slurm tmux compute node`
-- `github issues to slurm jobs claude code agent "sbatch" ...`
+- Slurm: `"claude code" slurm sbatch headless "claude -p" HPC cluster`; `Claude Code agents Slurm job submission orchestrator github repository`.
+- Other cluster managers: `"claude" "grid engine" OR qsub OR HTCondor OR LSF claude code agent batch jobs`; `hpc-agent pypi SGE SLURM ...`.
+- HPC: `anthropic "long-running" Claude Code Slurm tmux compute node`; `Claude Code Apptainer Singularity container HPC compute node no internet`; `HPC centre documentation coding agents Claude Code compute nodes outbound internet proxy job array agents`; `ORNL claude-hpc wrapper container`.
+- Workflow engines: `Claude Code Temporal workflow orchestration coding agents sandbox open source`.
+- Kubernetes and issue loops: `Claude Code Kubernetes jobs agents queue github issues pull requests open source operator`; `github issues to slurm jobs claude code ...`; `self-hosted autonomous Claude Code issue label queue docker sandbox network allowlist pull request runner`.
+- CI and queues: `Claude Code GitLab CI OR Buildkite OR Jenkins OR Celery headless agent jobs`.
+- Write-ups: `blog "claude code" unattended queue github issues label docker sandbox ...`; `Hacker News "Show HN" Claude Code agents parallel containers issues queue orchestrator`; `anthropic engineering blog Claude Code autonomous agents sandbox container network isolation`.
 
-**Found:** a fair amount for Slurm, two projects naming SGE, and nothing for LSF or HTCondor beyond generic scheduler pages.
+**What the searches show.** Hybrids are common, but each one is partial:
+- **Issue-to-PR runners on Kubernetes or Docker:** several trusted ones (Kelos, Optio, ProPR, Cyrus, CodeForge).
+- **Claude Code under Slurm:** well documented by HPC centres.
+- **Grid Engine:** only untrusted projects.
+- **LSF, Buildkite, Jenkins and Celery:** nothing specific. The vendor documents GitLab CI/CD (beta) [V, [GitLab CI/CD](https://code.claude.com/docs/en/gitlab-ci-cd)].
+- **Temporal:** one community proof of concept (no Claude Code named) and one untrusted repository.
+- **Nothing found combines** an owner release gate, a no-network default, subscription access through the vendor's binary, per-project images and context hand-over. This suggests our mix of needs is uncommon rather than solved elsewhere [I].
 
-| Item | What it shows | Mark |
-|---|---|---|
-| [Kempner Institute handbook](https://handbook.eng.kempnerinstitute.harvard.edu/s5b_agentic_ai_workflows/using_agentic_ai_on_the_cluster.html) (updated 2026-10-11) | Long tasks run "in print mode (`claude -p`) in a batch job". The login (institutional SSO) "is saved in your home directory, so it works on every node and in batch jobs"; keep `ANTHROPIC_API_KEY` unset. Compute nodes have outbound access, so bypass mode is discouraged. Sessions are resumed from `~/.claude/projects/` on any node; `--continue` does not pick up a `-p` session. | [V] |
-| [ResearchLoop](https://researchloop.github.io/researchloop/) ([PyPI](https://pypi.org/project/researchloop/) 0.3.4, 2026-05-22, MIT) | **The closest hybrid.** An orchestrator "submits jobs to the cluster over SSH" for "your SLURM or SGE cluster". A runner inside each job chains `claude -p` steps; "All steps share a single Claude session (via `--resume`)". Global, cluster and study context files carry context; completion arrives by webhook. Authentication on nodes, token accounting and sandboxing are not stated on the pages read. | [V] |
-| [hpc-agent](https://pypi.org/project/hpc-agent/) (releases 0.3.0 and 0.4.0, 2026-05-21/22 per its release feed) | The reverse direction: Claude Code drives array-batch experiments on SGE or SLURM. It installs slash commands, skills and Stop hooks, and chains waves with scheduler dependencies. Claude itself is not run as the job. | [V via search summary of the PyPI page and release feed; the PyPI page itself did not load] |
-| Purdue RCAC ([on cluster](https://docs.rcac.purdue.edu/agentic-ai/running_agents/on_cluster/)) | The agent runs on a login node and submits real work with `sbatch`. Claude Code's sandbox "uses Linux namespaces", which "are often unavailable or disabled on shared login nodes". | [V] |
-| [NERSC](https://docs.nersc.gov/development/coding-agents/claude-code/) | Claude Code on login nodes. Authentication by subscription login, `claude setup-token` (`CLAUDE_CODE_OAUTH_TOKEN`) or an API key. Compute-node batch use is not covered. | [V] |
-| [JHPCE](https://jhpce.jhu.edu/sw/claude-example/) (2026-10-05) | Interactive `srun` session on a compute node; an API key in `~/.claude/settings.json`. | [V] |
-| MCP servers for Slurm ([slurm-mcp](https://glama.ai/mcp/servers/dongwookim-ml/slurm-mcp), [srunx](https://ksterx.github.io/srunx/how-to/mcp-usage/)) | Claude Code submits and watches jobs as tools: the agent drives the scheduler. | [V via search summaries; not opened] |
-| Anthropic's write-up on long-running Claude with Slurm (a job script that starts Claude Code in tmux on a compute node, a progress file, a test oracle) | Found in search results only. Both fetched URLs returned 404, so it is not verified. | [I] |
+**Repositories that pass the trust rules** (at least 10 stars and a commit since 2026-10-25; both read 2026-11-24 [V]). Reputation per F-782 is from the owner and organisation pages read on 2026-11-24 [V] unless marked.
 
-**What an SGE or Slurm plus Claude Code set-up looks like in these examples** [I, synthesised from the [V] items]:
-- a job script runs `claude -p` with a prompt;
-- the login or token sits in the user's home on a shared file system, or in an environment variable;
-- compute nodes have open outbound network;
-- context passes between jobs through files (progress files, context files) or `--resume` of one session;
-- the scheduler gives wall time, memory and queueing.
+| Repository | Stars; last commit | Set-up | Gaps addressed | Maturity | Reputation |
+|---|---|---|---|---|---|
+| [Kelos](https://github.com/kelos-dev/kelos) | 360; 2026-11-24 | Kubernetes controller. TaskSpawner turns GitHub issues (and Jira, Linear, cron, webhooks) into agent pods; workspaces with repo, setup command and image; task status records "token usage"; PRs opened "without merging it" | G1, G2, G4, G6, G7, G8 (P or C, see matrix) | Active; Apache-2.0; 102 open issues | Organisation with 12 repositories, the others 0-3 stars; no public members; 49 forks. A young organisation centred on one project [I]. |
+| [Optio](https://github.com/jonwiggins/optio) | 1.1k; 2026-11-22 | Kubernetes, BullMQ and Postgres. Tickets from GitHub Issues or Linear lead to a pod per repo, Claude Code or Codex in worktrees, CI watched, auto-resume, optional auto-merge | G1, G2, G4, G9 | Active; MIT; [Show HN](https://hn.svelte.dev/item/47520220), 88 points | Single author with 74 followers and other non-trivial repositories (90, 75 and 27 stars); 137 forks of Optio; discussed on HN |
+| [ProPR](https://github.com/integry/propr) | 40; 2026-11-24 | A labelled issue leads to a Docker container and worktree per run, then a PR. Subscription or key; optional allowlist firewall | G1, G2, G4, G5 | v0.9.3, pre-1.0; Apache-2.0 | Single author (13 followers); an older PHP project (17 stars); 9 forks. Low external reference: none found in the searches. |
+| [Cyrus](https://github.com/ceedaragents/cyrus) | 913; 2026-11-24 | Issues assigned in Linear, GitHub or GitLab lead to a worktree per issue and an agent session, with approvals | G1, G2, G4 | Active; Apache-2.0 | Backed by a product with paid plans (README) [V]; 193 forks; the organisation page returned 404 |
+| [CodeForge](https://github.com/freema/codeforge) | 15; 2026-11-23 | Go service: REST task queue, Docker, Redis progress, a `create-pr` endpoint, a "key pool (subscription mode)", cost and usage tracking | G1, G4, G7 | Small; MIT | Single author with 32 followers and several MCP repositories (187, 105, 73 stars); a dev.to write-up by the same author |
+| [Sandcastle](https://github.com/mattpocock/sandcastle) | 9.3k; 2026-11-16 | Library: agents in bubblewrap, Seatbelt, Docker, Podman or cloud sandboxes, with branch strategies | G4, G10 | MIT; Claude Code not named on its page | Author with 56.9k followers and widely used repositories (`skills` 332k stars, `ts-reset` 8.7k); 996 forks |
 
-None of the examples found:
-- takes its tasks from GitHub issues;
-- isolates jobs from each other beyond the scheduler's users and cgroups;
-- cuts the network to the model only;
-- counts tokens per job.
+Vendor repositories (Anthropic: `sandbox-runtime`, `claude-code-action`, `claude-agent-sdk-python`) and the established engines (Slurm by SchedMD, HTCondor, Podman, Moby) are maintained by established organisations. Their stars and commit dates are in the matrix (§0.2).
 
-**What it would take for our case** [I]:
-- Slurm or SGE on one Linux node (section 5).
-- A job script equal to today's launch (bundle in, `claude -p`, note and bundle out), wrapped in a container to get our network policy and per-task isolation. The examples run with open network.
-- Our thin layer to compute release from GitHub and submit, hold or release jobs.
-- Our token accounting.
+**Write-ups** (not filtered by stars). Per F-781 the linked repository is checked:
+- **W**: a working system described, and its repository passes the trust rules.
+- **P**: pattern source only; the linked tool fails the rules or cannot be checked.
+- **S**: a sketch or documentation with no repository.
 
-**Does it change the recommendation? No.** The prior art confirms the pattern (headless `claude -p` in a batch job, context through files or `--resume`). It adds nothing to the three spine items that the borrowed parts in sections 2 to 4 do not already give. ResearchLoop's file-based context hierarchy and single-session `--resume` chaining are a useful example for context management, and are consistent with the piggy-back route in section 4.
+| Title; author or site; date | Linked repository: stars; last commit | Set-up described | Gaps | Mark |
+|---|---|---|---|---|
+| "Making Claude Code safer with sandboxing"; Anthropic engineering; 2025-10-20 [V, [post](https://www.anthropic.com/engineering/claude-code-sandboxing)] | `anthropics/sandbox-runtime`: 7.3k; 2026-11-12 | Network only "through a unix domain socket connected to a proxy server running outside the sandbox"; "effective sandboxing requires both filesystem and network isolation" | G4, G5 | W |
+| "From GitHub issue to merged PR ..."; dev.to; posted 13 March, year not shown [V, [post](https://dev.to/hassan_4e2f0901edda/from-github-issue-to-merged-pr-building-an-ai-coding-pipeline-that-runs-itself-4gbk)] | `bing107/dev-agents`: link returned 404 | Issue label, `repository_dispatch`, self-hosted runner on a Raspberry Pi 4; filesystem YAML queue, priority by file-name prefix; per-project `flock`; Pro subscription; auto-merge | G1, G9 | P (repository unreachable) |
+| "I built a small self-hosted runner for AI coding tasks"; Tomáš Grasl; dev.to; 15 February, footer 2026 [V, [post](https://dev.to/tom_grasl_798b66e85f7aa/i-built-a-small-self-hosted-runner-for-ai-coding-tasks-3a37)] | `freema/codeforge`: 15; 2026-11-23 | REST tasks, Docker, Redis; label trigger as middleware | G1, G4 | W |
+| "Show HN: Optio"; jawiggins; about 7 months before 2026-11-24 [V] | `jonwiggins/optio`: 1.1k; 2026-11-22 | See Optio above; the author says agents have no egress restrictions | G1, G2, G9 | W |
+| "Show HN: Fleet"; sermakarevich; about 5 months before 2026-11-24 [V, [thread](https://hn.svelte.dev/item/48256389)] | `sermakarevich/fleet`: 19; 2026-09-29 (stale) | `claude -p` sessions claim tasks from a git-backed queue (beads) in `~/.fleet`; `max_concurrent` 3; per-task logs; several subscriptions rotated | G1, G7 | P (untrusted, stale) |
+| Kempner Institute handbook; Harvard; updated 2026-10-11 [V, [page](https://handbook.eng.kempnerinstitute.harvard.edu/s5b_agentic_ai_workflows/using_agentic_ai_on_the_cluster.html)] | none | `claude -p` in batch jobs; login in the home directory works "on every node and in batch jobs"; outbound access on compute nodes; resume from `~/.claude/projects/` | G6, G10 | S (institutional documentation) |
+| ExCL `claude-hpc`; ORNL; guidance introduced at the July 2026 meeting [V, [docs](https://docs.excl.ornl.gov/quick-start-guides/claude-code)] | `code.ornl.gov/7ry/claude-hpc` (GitLab): stars and commit date not checked | Claude Code in an Apptainer container from `claude-code.def`; persistent container home with the login; repo at `/work`; Slurm configuration and MUNGE bound; network not stated | G3, G4 | P (repository unverified) |
+| Duke DCC AI access [V, [page](https://dcc.duke.edu/dcc/ai-access/)] | none | An SSH proxy provisions or reuses a Slurm job; a watchdog ends idle jobs | G9, G10 | S |
+| Purdue RCAC [V, [page](https://docs.rcac.purdue.edu/agentic-ai/running_agents/on_cluster/)]; NERSC [V, [page](https://docs.nersc.gov/development/coding-agents/claude-code/)]; JHPCE, 2026-10-05 [V, [page](https://jhpce.jhu.edu/sw/claude-example/)] | none | Agents on login nodes submitting `sbatch`; sandbox namespaces "often unavailable" there (Purdue); `setup-token` (NERSC); API key in settings (JHPCE) | G10 | S |
+| NICHD BSPC, "Running agents in containers" [V, [page](https://nichd-bspc.github.io/llm/running-containers.html)] | not checked | Singularity on the NIH cluster; "These containers do NOT lock down network access" | G4 | S |
+| Temporal "Sandbox Orchestration Harness"; 2026-05-07 [V, [post](https://temporal.io/blog/temporal-sandbox-orchestration-harness-the-missing-layer-for-running-agents)] | a temporalio "ephemeral-workers-poc" repository named in the post: not checked | Temporal plus sandbox providers; no coding agent named; proof of concept | G9 | S |
+| Anthropic write-up on long-running Claude with Slurm and tmux | — | Seen in search results only; both URLs returned 404 | — | not verified |
+
+**What a Slurm or Grid Engine plus Claude Code set-up looks like in these examples** [I, synthesised]:
+- a job script or SSH proxy runs `claude -p` or a tmux session on a compute node;
+- the login sits in the home directory or in `setup-token`;
+- compute nodes have outbound network;
+- context passes through files or `--resume`;
+- Apptainer images are built ahead (ORNL).
+
+None takes tasks from GitHub issues with a release gate, cuts the network to the model, or counts tokens per job.
+
+**Does it change the recommendation? No.** The hybrids confirm M1's parts:
+- container per task and per-project images (Kelos, Optio, ProPR, ORNL);
+- a proxy outside the sandbox (Anthropic's own post);
+- a small file queue on one box (dev-agents).
+
+They also confirm that the queue and the release gate are where every existing tool differs from the owner's rules.
 
 ### Summary fit-gap, needs 1 to 10
 
@@ -435,3 +602,17 @@ None of these is the only way to meet a spine item:
 - **OpenHands** (models "supported by LiteLLM" [V, [docs](https://docs.openhands.dev/openhands/usage/llms/llms)]);
 - **SWE-agent** (superseded by mini-swe-agent [V, [repo](https://github.com/SWE-agent/SWE-agent)]);
 - **Vibe Kanban** ("sunsetting" [V, [README](https://raw.githubusercontent.com/BloopAI/vibe-kanban/HEAD/README.md)]).
+
+## Appendix B. Untrusted repositories (F-777 to F-779; checked 2026-11-24)
+
+Untrusted code is never to be installed or run in our set-up. Only its ideas may be read as a pattern, and only after the owner's review.
+
+- [husk](https://github.com/MeteoSwiss/husk): 4 stars; last commit date not visible. Untrusted (below 10 stars). Idea: a CONNECT-only proxy with an allowlist per job, and a Slurm broker outside a seccomp and bubblewrap sandbox.
+- [ResearchLoop](https://github.com/researchloop/researchloop): 2 stars; last commit date not visible. Untrusted (below 10 stars). Idea: `claude -p` steps chained with `--resume` inside Slurm or SGE jobs.
+- [sagaflow](https://github.com/npow/sagaflow): 0 stars. Untrusted (below 10 stars). Idea: Temporal activities, with results surfaced by a SessionStart hook.
+- [k3sc](https://github.com/abix-/k3sc): 0 stars. Untrusted (below 10 stars). Idea: labels as a state machine (ready, claude-X, needs-review, needs-human) and `max_slots`.
+- [Fleet](https://github.com/sermakarevich/fleet): 19 stars; last commit 2026-09-29. Untrusted (stale).
+- [container-use](https://github.com/dagger/container-use): 4.1k stars; last commit 2026-08-12. Untrusted (stale).
+- [claude-code-containers](https://github.com/ghostwriternr/claude-code-containers): 246 stars; last commit 2025-06-24. Untrusted (stale).
+- [hpc-agent](https://pypi.org/project/hpc-agent/): repository and stars not found. Unverified, not a candidate.
+- dev-agents (its repository link returned 404). Only the write-up counts.
