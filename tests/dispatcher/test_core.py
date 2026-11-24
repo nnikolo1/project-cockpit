@@ -797,3 +797,12 @@ def test_a_finding_is_not_chosen_by_the_agent_that_filed_it():
     f.filed_by = "cockpit-3"
     assert core.choose_task([f], set(), "cockpit-3") is None                 # the Worker's id may also be the task id it worked on
     assert core.choose_task([f, g], set()).id == "cockpit-9"                 # no Worker id: no check
+
+
+def test_a_launch_that_starts_no_worker_leaves_no_task_folder(tmp_path):
+    w = World(tmp_path, [T("x-1")])
+    discarded = []
+    w.runtime.discard_task = discarded.append
+    w.runtime.launch = lambda u, t: (_ for _ in ()).throw(rt.ContainerError("clone failed"))
+    assert "clone failed" in w.fire()
+    assert discarded == ["x-1"]

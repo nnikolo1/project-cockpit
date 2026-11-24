@@ -253,7 +253,11 @@ class Dispatcher:
             if not self.runtime.egress_blocked(user):
                 raise Skip(f"egress check failed for {user}")
             folder = self.runtime.prepare_task(task.id, self.repo_dir, f"# {task.title}\n\n{task.text}\n")
-            proc = self.runtime.launch(user, task.id)
+            try:
+                proc = self.runtime.launch(user, task.id)
+            except BaseException:  # no Worker started: the folder must not mark the task as attempted
+                getattr(self.runtime, "discard_task", lambda t: None)(task.id)
+                raise
         except rt.ContainerTimeout as e:
             raise Skip(f"container call over its time limit: {e}")
         except rt.ContainerError as e:

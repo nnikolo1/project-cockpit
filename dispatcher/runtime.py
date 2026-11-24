@@ -200,6 +200,11 @@ class Runtime:
         log.info("task folder ready: %s", base)
         return base
 
+    def discard_task(self, task_id):
+        """Remove the task folder of a launch that did not start a Worker, so that the task can be selected again (3m)."""
+        shutil.rmtree(self.task_dir(task_id), ignore_errors=True)
+        log.warning("task folder of %s removed: its launch did not start a Worker", task_id)
+
     def read_outbox(self, task_id):
         """(started, note, reason): `note` is the parsed good-bye note, or None with `reason` 'no note' or
         'unusable note' (5b)."""
@@ -227,6 +232,7 @@ class Runtime:
         """Clone main.bundle into <task-id>/clone on the container's own disk, no hardlinks (4k, 4l)."""
         check_task_id(task_id)
         home = f"/home/{user}/{task_id}"
+        self.exec(user, "rm", "-rf", home, timeout=60)  # a clone left by an earlier aborted launch of this task would block the new one
         rc, out = self.exec(user, "git", "clone", "--no-hardlinks", f"/area/{task_id}/inbox/main.bundle",
                             f"{home}/clone", timeout=120)
         if rc:

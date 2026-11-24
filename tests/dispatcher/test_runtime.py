@@ -232,7 +232,8 @@ def test_read_outbox_unusable(tmp_path, repo, note):
 def test_clone_without_hardlinks(tmp_path):
     r, f = make(tmp_path)
     assert r.clone_main("worker2", "T-4") == "/home/worker2/T-4/clone"
-    args = f.calls[0][0]
+    assert "rm" in f.calls[0][0] and "-rf" in f.calls[0][0] and "/home/worker2/T-4" in f.calls[0][0]  # a stale clone goes first
+    args = f.calls[1][0]
     assert "--no-hardlinks" in args and "/area/T-4/inbox/main.bundle" in args and "worker2" in args
     r, _ = make(tmp_path, ("clone", (1, "bad")))
     with pytest.raises(rt.ContainerError):
@@ -319,3 +320,10 @@ def test_worker_starts_in_its_own_session(tmp_path):
     r = rt.Runtime(cfg, run=lambda *a, **k: (0, ""), spawn=lambda cmd, **k: seen.update(k) or ("spawned", cmd))
     r.launch("worker1", "T-7")
     assert seen.get("start_new_session") is True  # launchd would end the Worker with the firing otherwise
+
+
+def test_discard_task_removes_the_folder(tmp_path):
+    r, f = make(tmp_path)
+    os.makedirs(os.path.join(r.task_dir("T-3"), "inbox"))
+    r.discard_task("T-3")
+    assert not os.path.exists(r.task_dir("T-3"))
