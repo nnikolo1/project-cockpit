@@ -916,6 +916,7 @@ CARD_KINDS = ("footprint", "churn", "ambiguity")
 STALE_HOURS = 48       # a file older than this is shown with a stale warning
 UNSORTED_WARN = 0.30   # unsorted files above this share of a module's files raise the marker
 HOT_SHARE = 0.2        # top fifth of the churn ranking is hot, bottom fifth cold
+CARD_CHURN_DAYS = 10   # the churn window the module cards show, and the collector's first window (owner, 2026-11-24)
 GAP_WORDS = ("", "undocumented", "unknown", "none", "n/a")
 
 
@@ -963,10 +964,10 @@ def rank_bands(values, share=HOT_SHARE):
 
 
 def churn_view(data):
-    """churn.json -> {windows, modules: {id: {windows: {'30': {..entry, rel, band_abs, band_rel}}, size, lines}}, unassigned, excluded, mapping_check}.
-    Cards show `total` (the module with its sub-modules; `own` when there is no total). Bands are ranked per level (top-level
+    """churn.json -> {windows, card, modules: {id: {windows: {'10': {..entry, rel, band_abs, band_rel}}, size, lines}}, unassigned, excluded, mapping_check}.
+    `card` is the window the cards show (CARD_CHURN_DAYS as a string). Cards show `total` (the module with its sub-modules; `own` when there is no total). Bands are ranked per level (top-level
     modules among themselves, sub-modules among themselves), by churn (abs) and by churn per current line (rel)."""
-    wins = [str(w) for w in (data.get("windows") or [30, 90])]
+    wins = [str(w) for w in (data.get("windows") or [CARD_CHURN_DAYS, 30, 90])]
     mods = {}
     for mid, m in (data.get("modules") or {}).items():
         if not isinstance(m, dict):
@@ -988,7 +989,7 @@ def churn_view(data):
                 bands = rank_bands({i: f(mods[i]["windows"][k]) for i in ids if k in mods[i]["windows"]})
                 for i, b in bands.items():
                     mods[i]["windows"][k]["band_" + mode] = b
-    return dict(windows=wins, modules=mods, unassigned=data.get("unassigned"), excluded=data.get("excluded"), mapping_check=data.get("mapping_check"),
+    return dict(windows=wins, card=str(CARD_CHURN_DAYS), modules=mods, unassigned=data.get("unassigned"), excluded=data.get("excluded"), mapping_check=data.get("mapping_check"),
                 changes=changes_view(data.get("modules")))
 
 

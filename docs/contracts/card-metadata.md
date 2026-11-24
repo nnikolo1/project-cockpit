@@ -14,13 +14,13 @@ Per project one folder: the key `meta` of the project in the `--projects` file, 
 
 ## `churn.json`
 ```
-{header, "windows": [30, 90],
+{header, "windows": [10, 30, 90],
  "modules": {"module-a": {
-    "own":   {"30": WINDOW, "90": WINDOW},     # files mapped to the module itself, sub-modules excluded
-    "total": {"30": WINDOW, "90": WINDOW},     # the module with its sub-modules; for a sub-module equal to own
+    "own":   {"10": WINDOW, "30": WINDOW, "90": WINDOW},     # files mapped to the module itself, sub-modules excluded
+    "total": {"10": WINDOW, "30": WINDOW, "90": WINDOW},     # the module with its sub-modules; for a sub-module equal to own
     "size":  {"source_lines": n, "test_lines": n, "files": n},
     "series": {"weekly": {"own": [WEEK, ...], "total": [WEEK, ...]}}}},    # optional, additive
- "unassigned": {"30": WINDOW, ..., "series": {...}}, "excluded": {"30": WINDOW, ...}, "mapping_check": {...}}
+ "unassigned": {"10": WINDOW, ..., "series": {...}}, "excluded": {"30": WINDOW, ...}, "mapping_check": {...}}
 WINDOW = {commits, files, added, removed, net, churn,
           "source": {added, removed, churn}, "tests": {...}, "docs": {...},
           active_days, prev_churn, trend_pct}
@@ -30,10 +30,11 @@ WEEK = {"w": "YYYY-MM-DD", commits, added, removed, tests, docs}
 - `series` (optional; a reader must work without it, the schema stays 1): `weekly.own` and `weekly.total` (own files of the module / with its sub-modules; for the `unassigned` entry both are the same) each hold 52 elements, one per week, oldest first, the last being the week of `generated_at`. `w` is the Monday (UTC) of the week; weeks without change are zeros. `added` and `removed` count all lines; `tests` and `docs` are the churn (added + removed) of test files and documents in that week, so source churn = added + removed - tests - docs. Same git walk, mapping and exclusions as the windows.
 - `excluded` = `{files, lines, by_reason}`; `by_reason` holds `generated` (generated files such as lock files) and `deleted files` (each `{files, lines}`). History of a file that is not in the current tree is not code of any module and not "unmapped": it goes to `excluded` under `deleted files`, in no module bucket and not in `unassigned`, in the windows and in `series` alike. A file renamed or moved is followed to its new path (the commit that renames it); earlier history under the old path counts as deleted. `mapping_check`: `raw_lines` = `bucket_lines` + `excluded_lines` (generated + deleted files).
 - Keys of the window objects are the window lengths as strings.
-- The card shows `total` (falling back to `own`). The cockpit uses `size` for the relative view and shows `unassigned` on the "Not mapped" card; `excluded` and `mapping_check` are carried through, not shown yet.
+- **Card window**: the cards show only the window of `CARD_CHURN_DAYS` days (`logic.py`, 10 since 2026-11-24, owner: "churn shall show only the last 10 days"); `tools/cardmeta_churn.py` writes it by default together with 30 and 90, which stay in the file for other views (the Code tab's Changes view ranks by 30 days) and are not shown on the cards. A file without the card window shows "no 10-day data" on the card until it is collected again. Changing the window is that one constant.
+- The card shows `total` (falling back to `own`). The cockpit uses `size` for the relative view and shows `unassigned` (card window) on the "Not mapped" card; `excluded` and `mapping_check` are carried through, not shown yet.
 
 ### Colour coding (computed by the cockpit)
-- Rank by `churn` among the modules of the same level (top-level modules together, sub-modules together), per window. Top fifth `hot`, bottom fifth `cold`, the rest `mid`; churn 0 is `dormant` and not ranked. Ties stay together. With fewer than 3 ranked modules, or all equal, everything stays `mid`.
+- Rank by `churn` among the modules of the same level (top-level modules together, sub-modules together), per window; the cards use the card window's band. Top fifth `hot`, bottom fifth `cold`, the rest `mid`; churn 0 is `dormant` and not ranked. Ties stay together. With fewer than 3 ranked modules, or all equal, everything stays `mid`.
 - Option "colour by size": the same ranking on `churn / (source_lines + test_lines)`; without `size` the module shows no relative value.
 - Each band has a symbol and a word beside the colour: `▲ hot`, `● mid`, `▽ cold`, `– dormant`. Colours reuse the priority palette (red, amber, blue, dashed grey).
 
