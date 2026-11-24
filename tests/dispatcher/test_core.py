@@ -110,7 +110,7 @@ class World:
         self.ahead = 1
         self.runtime, self.tasks, self.plog = FakeRuntime(tmp_path), FakeTasks(tasks), FakeLog()
         self.state = str(tmp_path / "state.json")
-        self.settings = dict(core.DEFAULTS, **settings)
+        self.settings = dict(core.DEFAULTS, **{"interval_minutes": 0, **settings})
 
     @property
     def killed(self):
@@ -211,6 +211,30 @@ def test_switched_off_starts_nothing(tmp_path):
     w = World(tmp_path, [T("x-1")], enabled=False)
     assert "switched off" in w.fire()
     assert w.runtime.launched == []
+
+
+def test_interval_skips_early_firing_and_keeps_stored_time(tmp_path):
+    w = World(tmp_path, [T("x-1"), T("x-2")], interval_minutes=2)
+    assert "started" in w.fire()
+    w.now += 60
+    assert "skipped: interval" in w.fire()
+    assert len(w.runtime.launched) == 1
+    assert "skipped: interval" in w.plog.beats[-1]
+    w.now += 60            # 120 s after the first firing; the skipped one did not move the stored time
+    assert "started" in w.fire()
+
+
+def test_interval_tolerance_and_first_firing(tmp_path):
+    w = World(tmp_path, [T("x-1"), T("x-2")], interval_minutes=2)
+    assert "started" in w.fire()
+    w.now += 90            # inside the 30 s tolerance
+    assert "started" in w.fire()
+
+
+def test_interval_bad_stored_time_never_skips(tmp_path):
+    w = World(tmp_path, [T("x-1")], interval_minutes=2)
+    (tmp_path / "state.json").write_text(json.dumps({"workers": {}, "last_fired": "x"}))
+    assert "started" in w.fire()
 
 
 def test_skip_low_disk(tmp_path):
