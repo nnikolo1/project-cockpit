@@ -75,6 +75,7 @@
   {"path": "tests/test_usage_order.py", "module": "githubclient", "basis": "tests the order of the Token Usage cards (the one list USAGE_ORDER in the page)"},
   {"path": "tests/test_sessions_history.py", "module": "githubclient", "basis": "tests the Interactive sessions history card of the Token Usage page"},
   {"path": "tests/test_token_reconcile.py", "module": "githubclient", "basis": "tests the token reconciliation script and its page card"},
+  {"path": "tests/test_install_commands.py", "module": "docs", "basis": "checks that every command in the README install section exists"},
   {"path": "tests/test_projects.py", "module": "githubclient", "basis": "tests the --projects handling in cockpit.py"},
   {"path": "tests/test_workflow.py", "module": "cockpitwebpage", "basis": "guards the Workflow page (web/index.html) against going stale; tests follow the code"},
   {"path": "tests/test_usage.py", "module": "githubclient", "basis": "tests usage_report in logic.py and the usage endpoint in cockpit.py; tests follow the code"},
