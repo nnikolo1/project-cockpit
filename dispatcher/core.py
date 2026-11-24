@@ -14,7 +14,6 @@ import json
 import logging
 import os
 import shutil
-import signal
 import socket as socketlib
 import subprocess
 import sys
@@ -105,10 +104,7 @@ class Probes:
     free_disk: object = None            # () -> bytes free on the data volume
     proxy_last: object = None           # () -> {worker label: epoch seconds of its last request}; {} if the proxy cannot tell
     transcript_mtime: object = None     # (user) -> epoch seconds or None
-    alive: object = None                # (pid) -> bool
-    kill: object = None                 # (pid) -> None
     ensure_proxy: object = None         # () -> None; raises Skip/ContainerError if it cannot be started (3k)
-    ensure_relay: object = None         # () -> None; same, inside the container (3k)
     commits_ahead: object = None        # (repo, task_id) -> int, commits of worker/<task-id> beyond main (3e)
     heartbeat_parts: object = None      # () -> dict of the host and container readings (3g)
 
@@ -122,6 +118,7 @@ class Dispatcher:
     plog: object                        # ProcessingLog
     probes: Probes
     actions: list = field(default_factory=list)
+    relay_path: str = "/opt/relay.py"   # the relay script inside the image
 
     # -- bookkeeping --
     def _fail(self, st, user, w, reason):
@@ -148,7 +145,7 @@ class Dispatcher:
                 w["started"] = True
                 self.tasks.set_state(w["task_id"], "wip")
                 self.plog.event(w["task_id"], w["folder"], "wip")
-            if not self.probes.alive(w["pid"]):
+            if not self.runtime.alive(w["pid"]):
                 self._finish(st, user, w, note, reason)
                 continue
             age = now - w["launched"]
@@ -162,7 +159,7 @@ class Dispatcher:
             else:
                 continue
             log.warning("killing %s (task %s, pid %s): %s", user, w["task_id"], w["pid"], why)
-            self.probes.kill(w["pid"])
+            self.runtime.kill(w["pid"])
             self._fail(st, user, w, why)
 
     def _finish(self, st, user, w, note, reason):
@@ -193,7 +190,7 @@ class Dispatcher:
         try:
             self.probes.ensure_proxy()
             self.runtime.ensure_container()
-            self.probes.ensure_relay()
+            self.runtime.ensure_relay(self.relay_path)
         except rt.ContainerTimeout as e:
             raise Skip(f"container call over its time limit: {e}")
         except (rt.ContainerError, Skip) as e:
@@ -265,11 +262,11 @@ def _cmd(*args):
         return None
 
 
-def host_readings(volume, data_folder, runtime):
+def host_readings(volume, runtime):
     """3g: memory pressure level, free disk, load average, power source, container data folder size, stats."""
     lvl = _cmd("sysctl", "-n", "kern.memorystatus_vm_pressure_level")
     batt = _cmd("pmset", "-g", "batt") or ""
-    size = _cmd("du", "-sk", data_folder)
+    size = _cmd("du", "-sk", runtime.cfg.data_folder)
     return {
         "memory_pressure": {"1": "normal", "2": "warn", "4": "critical"}.get(lvl, lvl or "unknown"),
         "free_disk": f"{shutil.disk_usage(volume).free / GIB:.1f} GiB",
@@ -304,19 +301,6 @@ def read_proxy_last(path):
     except OSError:
         pass
     return last
-
-
-def pid_alive(pid):
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    try:  # a child of this process that has ended is a zombie until reaped
-        return os.waitpid(pid, os.WNOHANG) == (0, 0)
-    except ChildProcessError:
-        return True
 
 
 def commits_ahead(repo, task_id):
@@ -366,20 +350,6 @@ def ensure_proxy(sock, token_file, usage_file, image_workers):
     raise Skip("the proxy did not start listening")
 
 
-def ensure_relay(runtime, relay_path):
-    """3k: start the relay inside the container if its port does not answer."""
-    port = runtime.cfg.relay_port
-    probe = ("import socket;socket.create_connection(('127.0.0.1',%d),timeout=2).close()" % port)
-    rc, _ = runtime.call("exec", runtime.cfg.name, "python3", "-c", probe)
-    if rc == 0:
-        return
-    log.info("starting the relay in the container on port %d", port)
-    rc, out = runtime.call("exec", "-d", runtime.cfg.name, "python3", relay_path, "--port", str(port),
-                           "--socket", "/run/proxy.sock")
-    if rc:
-        raise rt.ContainerError(f"relay did not start: {out}")
-
-
 def _run(args, cwd, timeout):
     """Run a command with a time limit; its stdout, or a RuntimeError carrying the stderr."""
     p = subprocess.run(args, cwd=cwd, capture_output=True, text=True, timeout=timeout)
@@ -405,8 +375,6 @@ def main(argv=None):
     ap.add_argument("--token-file", required=True, help="the proxy's credential file")
     ap.add_argument("--usage-file", required=True, help="the proxy's JSONL usage file")
     ap.add_argument("--relay-path", default="/opt/relay.py", help="the relay script inside the image")
-    ap.add_argument("--container-data", default=os.path.expanduser("~/Library/Application Support/com.apple.container"),
-                    help="the container tool's data folder (size in the heartbeat)")
     ap.add_argument("--container-tool", default="container")
     ap.add_argument("--repo", required=True, help="the task repository, owner/name")
     ap.add_argument("--repo-dir", required=True, help="the task repository's clone on the host")
@@ -427,13 +395,11 @@ def main(argv=None):
         free_disk=lambda: shutil.disk_usage(a.area).free,
         proxy_last=lambda: read_proxy_last(a.usage_file),
         transcript_mtime=lambda user: transcript_mtime(runtime, user),
-        alive=pid_alive, kill=lambda pid: os.kill(pid, signal.SIGKILL),
         ensure_proxy=lambda: ensure_proxy(a.socket, a.token_file, a.usage_file, cfg.image_workers),
-        ensure_relay=lambda: ensure_relay(runtime, a.relay_path),
         commits_ahead=commits_ahead,
-        heartbeat_parts=lambda: host_readings(a.area, a.container_data, runtime))
+        heartbeat_parts=lambda: host_readings(a.area, runtime))
     tasks = GitHubTasks(a.repo, make_gh(a.gh, a.call_timeout), make_git(a.git, a.call_timeout), a.repo_dir)
-    Dispatcher(s, a.state, runtime, tasks, ProcessingLog(a.data_dir), probes).fire()
+    Dispatcher(s, a.state, runtime, tasks, ProcessingLog(a.data_dir), probes, relay_path=a.relay_path).fire()
 
 
 if __name__ == "__main__":

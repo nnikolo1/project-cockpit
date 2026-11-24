@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import signal
 import subprocess
 from dataclasses import dataclass
 
@@ -53,6 +54,7 @@ class Config:
     cpus: str = "2"
     image_workers: int = 6              # number of workerN users in the image (4a); keep equal to image/Containerfile
     relay_port: int = 8089              # where the relay of 4f listens inside the container
+    data_folder: str = os.path.expanduser("~/Library/Application Support/com.apple.container")  # size shown in the heartbeat
     runaway_minutes: int = 40           # 3i; the in-guest backstop is twice this (4e)
 
 
@@ -244,3 +246,32 @@ class Runtime:
         cmd += [self.cfg.name, "timeout", str(backstop), "claude", "-p", prompt]
         log.info("launching %s for task %s in %s", user, task_id, clone)
         return self._spawn(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # --- the Worker's host-side process (3i/3j): whether it has ended, and kill ---------------------------
+    def alive(self, pid):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        try:  # a child of this process that has ended is a zombie until reaped
+            return os.waitpid(pid, os.WNOHANG) == (0, 0)
+        except ChildProcessError:
+            return True
+
+    def kill(self, pid):
+        os.kill(pid, signal.SIGKILL)
+
+    def ensure_relay(self, relay_path):
+        """3k: start the relay inside the container if its port does not answer."""
+        port = self.cfg.relay_port
+        probe = ("import socket;socket.create_connection(('127.0.0.1',%d),timeout=2).close()" % port)
+        rc, _ = self.call("exec", self.cfg.name, "python3", "-c", probe)
+        if rc == 0:
+            return
+        log.info("starting the relay in the container on port %d", port)
+        rc, out = self.call("exec", "-d", self.cfg.name, "python3", relay_path, "--port", str(port),
+                            "--socket", "/run/proxy.sock")
+        if rc:
+            raise ContainerError(f"relay did not start: {out}")

@@ -66,6 +66,16 @@ class FakeRuntime:
         self.outbox = {}                 # task id -> (started, note, reason)
         self.launched, self.prepared = [], []
         self.egress, self.container_error, self.prepare_error = True, None, None
+        self.alive_pids, self.killed = set(), []
+
+    def alive(self, pid):
+        return pid in self.alive_pids
+
+    def kill(self, pid):
+        self.killed.append(pid)
+
+    def ensure_relay(self, relay_path):
+        pass
 
     def ensure_container(self):
         if self.container_error:
@@ -97,16 +107,27 @@ class FakeRuntime:
 class World:
     def __init__(self, tmp_path, tasks=(), **settings):
         self.now, self.free, self.last, self.mtime = NOW, 50 * core.GIB, {}, None
-        self.alive_pids, self.killed, self.ahead = set(), [], 1
+        self.ahead = 1
         self.runtime, self.tasks, self.plog = FakeRuntime(tmp_path), FakeTasks(tasks), FakeLog()
         self.state = str(tmp_path / "state.json")
         self.settings = dict(core.DEFAULTS, **settings)
 
+    @property
+    def killed(self):
+        return self.runtime.killed
+
+    @property
+    def alive_pids(self):
+        return self.runtime.alive_pids
+
+    @alive_pids.setter
+    def alive_pids(self, v):
+        self.runtime.alive_pids = v
+
     def dispatcher(self):
         p = core.Probes(
             now=lambda: self.now, free_disk=lambda: self.free, proxy_last=lambda: dict(self.last),
-            transcript_mtime=lambda u: self.mtime, alive=lambda pid: pid in self.alive_pids,
-            kill=self.killed.append, ensure_proxy=lambda: None, ensure_relay=lambda: None,
+            transcript_mtime=lambda u: self.mtime, ensure_proxy=lambda: None,
             commits_ahead=lambda repo, tid: self.ahead, heartbeat_parts=lambda: {"memory_pressure": "normal"})
         return core.Dispatcher(self.settings, self.state, self.runtime, self.tasks, self.plog, p)
 
@@ -401,7 +422,7 @@ def test_main_builds_tasks_and_plog_from_arguments(tmp_path, monkeypatch):
     seen = {}
 
     class FakeDispatcher:
-        def __init__(self, settings, state, runtime, tasks, plog, probes):
+        def __init__(self, settings, state, runtime, tasks, plog, probes, relay_path):
             seen.update(tasks=tasks, plog=plog)
 
         def fire(self):
@@ -429,7 +450,3 @@ def test_state_roundtrip_and_missing(tmp_path):
     assert core.load_state(str(tmp_path / "s"))["workers"]["worker1"] == {"a": 1}
 
 
-def test_pid_alive_for_self_and_dead():
-    import os
-    assert core.pid_alive(os.getpid())
-    assert not core.pid_alive(2 ** 22 + 12345)
