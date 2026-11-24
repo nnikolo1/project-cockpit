@@ -854,6 +854,19 @@ def validate_settings(form, defaults, workers_cap):
     return out
 
 
+# ---------- Module-card settings (Settings tab, section "Module cards") ----------
+CARD_SETTING_DEFAULTS = {"churn_colour": "size"}  # what the overview showed before the option moved to Settings
+CARD_CHURN_COLOURS = ("size", "absolute")  # size = changed lines / current lines; absolute = lines added + removed
+
+
+def validate_card_settings(form):
+    """The module-card options from a form -> a dict with every key of CARD_SETTING_DEFAULTS, or ValueError with a clear message."""
+    v = form.get("churn_colour")
+    if v not in CARD_CHURN_COLOURS:
+        raise ValueError("churn colour must be one of: " + ", ".join(CARD_CHURN_COLOURS))
+    return {"churn_colour": v}
+
+
 # -- Token Usage tab: the proxy's token counts (spec dispatcher-and-workers 3h, 4h) --
 USAGE_FIELDS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
 WINDOW_SECONDS = 5 * 3600

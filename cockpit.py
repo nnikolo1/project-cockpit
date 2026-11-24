@@ -443,6 +443,37 @@ def get_settings(p):
                 workers_cap=RuntimeConfig.image_workers, steering=CFG["steer"])
 
 
+def card_settings_path(p):
+    """The module-card options of the project: <data dir>/<project name>/cockpit-settings.json."""
+    return DATA_DIR / (p.get("name") or p["repo"].split("/")[-1]) / "cockpit-settings.json"
+
+
+def get_card_settings(p):
+    """Current module-card options; the defaults when the file is missing or unreadable."""
+    values = dict(L.CARD_SETTING_DEFAULTS)
+    try:
+        values = L.validate_card_settings(json.loads(card_settings_path(p).read_text()))
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError, AttributeError) as ex:
+        log.warning("card settings of %s unreadable, using defaults: %s", p.get("name", ""), ex)
+    return dict(values=values, defaults=L.CARD_SETTING_DEFAULTS, choices=dict(churn_colour=list(L.CARD_CHURN_COLOURS)), steering=CFG["steer"])
+
+
+def save_card_settings(p, form):
+    """Validate and write the module-card options atomically, mode 0600. ValueError on a refused value."""
+    values = L.validate_card_settings(form)
+    f = card_settings_path(p)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_name(f.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        json.dump(values, fh, indent=2)
+    os.replace(tmp, f)
+    log.info("card settings saved for %s: %s", p.get("name", ""), values)
+    return "card settings saved"
+
+
 # The Token Usage tab's files, under DATA_DIR/<project name>/ (the folder the Settings page uses)
 USAGE_FILE, PLOG_FILE, AREA_DIR, QUOTA_FILE = "proxy-usage.jsonl", "processing/processing.jsonl", "area", "quota-history.jsonl"
 
@@ -497,6 +528,8 @@ def do_act(form, run=run_gh, state=None, p=None):
         p = p or proj(form.get("project"))
         if form.get("action") == "settings":  # a local file, not a GitHub operation; same guard, same errors
             return 200, dict(ok=True, msg=save_settings(p, form))
+        if form.get("action") == "cardsettings":  # same: a local file, same guard
+            return 200, dict(ok=True, msg=save_card_settings(p, form))
         S = state or get_state(fresh=True, p=p)
         ops, msg = plan_action(form, S, p["repo"], CFG["simulate"])
         execute(ops, run)
@@ -666,6 +699,8 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, build_timeline(get_state(p=p), p))
             if u.path == "/api/settings":
                 return self.send(200, get_settings(p))
+            if u.path == "/api/cardsettings":
+                return self.send(200, get_card_settings(p))
             if u.path == "/api/usage":
                 return self.send(200, get_usage(p))
             if u.path == "/api/rules":

@@ -9,6 +9,13 @@
      "personal_data": false,
      "written_by": "githubclient",
      "note": "access token created with --token-file (mode 0600); a secret, not personal data; the path is the documented default, the owner may choose another"
+    },
+    {
+     "path": "~/.local/share/project-cockpit/<project>/cockpit-settings.json",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "githubclient",
+     "note": "module-card options of the Settings tab (mode 0600, written atomically); a missing file means the defaults"
     }
    ],
    "logging": [

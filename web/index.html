@@ -208,9 +208,9 @@ function sortKey(t){return STAGES.indexOf(t.stage)===2?0:(t.stage==='released'?1
 let PROJ=null,PROJS=[];  /* the selected project (name) and the configured ones; the choice is kept in localStorage `cockpit-project` */
 const NOMETA=()=>({footprint:{status:'missing'},churn:{status:'missing'},ambiguity:{status:'missing'}});
 let Q={questions:[],counts:{},projects:[]};  /* open questions of every project: /api/questions, not tied to the selected project */
-let USE=null,SET=null,D=null,CODE={wired:false,modules:{}},FEED=[],ACT=[],MODULES=[],RULES={configured:false},META=NOMETA();
+let USE=null,SET=null,CSET=null,D=null,CODE={wired:false,modules:{}},FEED=[],ACT=[],MODULES=[],RULES={configured:false},META=NOMETA();
 const SVGC={};
-const UI={churnRel:true,route:'cockpit',filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',tlType:'all',rulesGroup:'all',qProj:'all',codeMod:'unassigned',codeTab:'quality',fit:{deps:true,erd:true,js:true,flow:false},toast:'',err:'',armed:null};
+const UI={route:'cockpit',filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',tlType:'all',rulesGroup:'all',qProj:'all',codeMod:'unassigned',codeTab:'quality',fit:{deps:true,erd:true,js:true,flow:false},toast:'',err:'',armed:null};
 const ST=()=>!!(D&&D.source.steering);
 const SIM=()=>!!(D&&D.source.simulate);
 const nd=(v,f)=>v==null?'<span class="muted">no data</span>':(f?f(v):v);
@@ -242,7 +242,7 @@ async function reload(fresh){
   const mine=PROJ;
   const qp=loadQuestions(fresh);
   try{
-    const [s,f,c,r,mt,se,us]=await Promise.all([api('/api/state'+(fresh?'?fresh=1':'')),api('/api/timeline'),api('/api/code'),api('/api/rules').catch(e=>({configured:false,error:e.message})),api('/api/cardmeta').catch(e=>null),api('/api/settings').catch(e=>null),api('/api/usage').catch(e=>null)]);SET=se;USE=us;
+    const [s,f,c,r,mt,se,cs,us]=await Promise.all([api('/api/state'+(fresh?'?fresh=1':'')),api('/api/timeline'),api('/api/code'),api('/api/rules').catch(e=>({configured:false,error:e.message})),api('/api/cardmeta').catch(e=>null),api('/api/settings').catch(e=>null),api('/api/cardsettings').catch(e=>null),api('/api/usage').catch(e=>null)]);SET=se;CSET=cs;USE=us;
     if(mine!==PROJ)return;  /* the user switched project while this was loading: drop the answer */
     D=s;TODAY=D.today;MODULES=D.modules;FEED=f.entries;ACT=f.activity||[];CODE=c;RULES=r;META=mt||NOMETA();UI.err='';
     if(!CODE.modules[UI.codeMod]&&!MODULES.some(m=>m.id===UI.codeMod&&m.parent)){const k=MODULES.find(m=>!m.virtual);UI.codeMod=CODE.modules[k&&k.id]?k.id:'unassigned';}
@@ -300,14 +300,15 @@ const hb=n=>n==null?'?':n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':(n/104
 function asOf(c){
   if(c.status!=='ok')return '<span class="muted">no data'+(c.status==='invalid'?' ('+esc(c.reason)+')':'')+'</span>';
   return '<span class="muted">as of '+esc((c.generated_at||'unknown time').replace('T',' ').slice(0,16))+(c.age_h==null?'':' · '+ageTxt(c.age_h))+'</span>'+(c.stale?' <span class="chip blocks">⚠ stale: older than 48 h</span>':'');}
+const churnRel=()=>!CSET||CSET.values.churn_colour==='size';  /* Settings > Module cards; size is the default */
 function churnLine(e,w){
-  const b=e[UI.churnRel?'band_rel':'band_abs'];
+  const b=e[churnRel()?'band_rel':'band_abs'];
   const tr=e.trend_pct==null?'new activity':(e.trend_pct>0?'↑ +':e.trend_pct<0?'↓ −':'→ ')+Math.abs(e.trend_pct).toFixed(0)+'% vs before';
   return '<div class="crow"><b>'+w+' d</b>'+bandChip(b)+'<span>'+e.commits+' commits · +'+e.added+' −'+e.removed+' · net '+sgn(e.net)+' · churn '+e.churn
-    +(UI.churnRel&&e.rel!=null?' ('+(e.rel*100).toFixed(1)+'% of size)':'')+' · '+tr+'</span></div>';}
+    +(churnRel()&&e.rel!=null?' ('+(e.rel*100).toFixed(1)+'% of size)':'')+' · '+tr+'</span></div>';}
 function churnSum(id){  /* the 30-day band as a chip, for collapsed rows */
   const c=META.churn,m=c.status==='ok'&&c.view.modules[id],e=m&&m.windows['30'];
-  return e?bandChip(e[UI.churnRel?'band_rel':'band_abs'])+' <span class="muted">30 d churn '+e.churn+'</span>':'<span class="muted">churn: no data</span>';}
+  return e?bandChip(e[churnRel()?'band_rel':'band_abs'])+' <span class="muted">30 d churn '+e.churn+'</span>':'<span class="muted">churn: no data</span>';}
 function churnHtml(id){
   const c=META.churn,m=c.status==='ok'&&c.view.modules[id];
   let h='<div style="display:flex;flex-direction:column;gap:4px"><div class="row spread"><span class="label">Change (churn)</span>'+asOf(c)+'</div>';
@@ -335,14 +336,12 @@ function ambHtml(id){
   const note=m.ambiguous.length?'<div class="note"><b>Ambiguous between sub-modules ('+m.ambiguous.length+'):</b> kept in this module by the rule that a file which cannot be assigned unambiguously to a sub-module belongs to its module<ul>'+m.ambiguous.map(u=>'<li><span class="mono">'+esc(u.path)+'</span> <span class="muted">could be '+esc((u.candidates||[]).join(' or '))+' · '+esc(u.reason||'no reason given')+'</span></li>').join('')+'</ul></div>':'';
   return note+'<details'+(m.high?' open':'')+'>'+head(mark)+'<div>Module level: '+m.own+' files'+(sub?' · sub-modules: '+sub:'')+' · unsorted: '+m.unsorted.length+' of '+m.total+' files</div>'
    +(m.unsorted.length?'<ul>'+m.unsorted.filter(u=>!(u.candidates&&u.candidates.length)).slice(0,10).map(u=>'<li><span class="mono">'+esc(u.path)+'</span> <span class="muted">could be '+esc((u.candidates||[]).join(' or '))+' · '+esc(u.reason||'no reason given')+'</span></li>').join('')+(m.unsorted.length-m.ambiguous.length>10?'<li class="muted">and '+(m.unsorted.length-m.ambiguous.length-10)+' more</li>':'')+'</ul>':'')+'</details>';}
-const metaBlock=id=>'<div class="meta">'+churnHtml(id)+footHtml(id)+ambHtml(id)+'</div>';
-function metaLegend(){
+const legendHtml=()=>'<details><summary><span class="label">How to read the card figures</span></summary><div class="legend" role="note"><span>Churn rank within the project:</span>'+['hot','mid','cold','dormant'].map(b=>bandChip(b)).join('')
+   +'<span>hot = top fifth, cold = bottom fifth, dormant = no change in the window. Churn = lines added + removed. Top-level modules and sub-modules are ranked among their own level. The colour follows '+(churnRel()?'size (changed lines / current lines)':'absolute churn')+'; change it in Settings, section Module cards.</span></div></details>';
+const metaBlock=id=>'<div class="meta">'+churnHtml(id)+footHtml(id)+ambHtml(id)+legendHtml()+'</div>';
+function metaNote(){
   const some=Object.values(META).some(c=>c&&c.status==='ok');
-  return '<div class="card" style="display:flex;flex-direction:column;gap:8px"><div class="row spread"><h2>Card metadata</h2>'
-   +'<button class="btn small" data-act="churnmode" aria-pressed="'+UI.churnRel+'">Colour churn by: '+(UI.churnRel?'size (changed lines / current lines)':'absolute churn')+'</button></div>'
-   +'<div class="legend" role="note"><span>Churn rank within the project:</span>'+['hot','mid','cold','dormant'].map(b=>bandChip(b)).join('')
-   +'<span>hot = top fifth, cold = bottom fifth, dormant = no change in the window. Churn = lines added + removed. Top-level modules and sub-modules are ranked among their own level.</span></div>'
-   +(some?'':'<span class="muted" style="font-size:13px">No card metadata yet'+(META.dir?' in '+esc(META.dir):'')+'. The project side writes footprint.json, churn.json and ambiguity.json there.</span>')+'</div>';}
+  return some?'':'<span class="muted" style="font-size:13px">No card metadata yet'+(META.dir?' in '+esc(META.dir):'')+'. The project side writes footprint.json, churn.json and ambiguity.json there.</span>';}
 function moduleLevelAmb(){
   const a=META.ambiguity;
   if(a.status!=='ok')return '<div class="card" style="display:flex;flex-direction:column;gap:6px"><div class="row spread"><h2>Files claimed by several modules</h2>'+asOf(a)+'</div></div>';
@@ -377,7 +376,7 @@ function vCockpit(){
   if(RULES.configured)h+='<div class="card" style="border-color:var(--warn-ink)"><div class="row spread"><h2>Rules changed</h2><button class="btn small" data-act="go" data-r="rules">Review rule changes</button></div><div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">'
    +(ruleChanges().slice(0,3).map(r=>'<div class="row" style="gap:10px"><span class="mono muted" style="width:86px">'+r.date+'</span><span class="chip rc">rule change</span><span><b class="mono">'+esc(r.files.map(f=>f.path).slice(0,2).join(', '))+'</b> '+esc(r.subject)+'</span>'+(isUn(r)?'<span class="chip blocks">to review</span>':'<span class="muted" style="font-size:12px">reviewed</span>')+'</div>').join('')||'<span class="muted">No rule changes in the last 90 days.</span>')
    +'</div><p class="muted" style="font-size:12px;margin:10px 0 0">Instructions and decisions steer every agent, so changes to them are tracked here, not only in git.</p></div>';
-  h+=metaLegend()+moduleLevelAmb();
+  h+=metaNote()+moduleLevelAmb();
   h+='<div class="grid">';
   MODULES.filter(m=>!m.virtual&&!m.parent).forEach(m=>{
     const cnt=m.rollup,n=STAGES.reduce((a,s)=>a+cnt[s],0);const c=(CODE.modules||{})[m.id]||{};
@@ -479,16 +478,23 @@ const SETROWS=[['enabled','Dispatcher on','Starts a Worker at each firing while 
   ['retries','Retries','How many times a failed task is tried again (0 = never).'],['workers','Workers','How many run at once.'],
   ['runaway_minutes','Runaway limit (minutes)','A Worker running longer is killed.'],['idle_minutes','No-activity limit (minutes)','A Worker with no record for this long is killed.'],
   ['start_minutes','No-start limit (minutes)','A Worker that has not started within this time is killed.']];
+function cardSettingsForm(){
+  const ro=!ST(),v=CSET.values.churn_colour,o=(k,t)=>'<option value="'+k+'"'+(v===k?' selected':'')+'>'+t+'</option>';
+  return '<form class="card" data-form="cardsettings" style="display:flex;flex-direction:column;gap:12px"><h2>Module cards</h2><div class="field"><label for="s_churn_colour">Colour churn by</label>'
+   +'<select id="s_churn_colour" name="churn_colour"'+(ro?' disabled':'')+'>'+o('size','size (changed lines / current lines)')+o('absolute','absolute churn (lines added + removed)')+'</select>'
+   +'<span class="muted" style="font-size:12px">Sets the colour of the churn chips on the overview and the module cards.</span></div>'
+   +(ro?'':'<div><button class="btn primary">Save</button></div>')+'</form>';}
 function vSettings(){
   const head='<div class="page"><div><h1>Settings</h1><span class="muted">How the Dispatcher behaves. It reads the file at each firing.</span></div>';
-  if(!SET)return head+'<div class="card"><span class="muted">Settings could not be loaded.</span></div></div>';
+  const cards=CSET?cardSettingsForm():'<div class="card"><span class="muted">Module card settings could not be loaded.</span></div>';
+  if(!SET)return head+'<div class="card"><span class="muted">Settings could not be loaded.</span></div>'+cards+'</div>';
   const v=SET.values,ro=!ST(),mn=SET.minimums;
   const note=k=>k==='workers'?' Most '+SET.workers_cap+', the worker users in the image.':(mn[k]?' At least '+mn[k]+'.':'');
   return head+'<form class="card" data-form="settings" style="display:flex;flex-direction:column;gap:12px">'+SETROWS.map(r=>'<div class="field"><label for="s_'+r[0]+'">'+r[1]+'</label>'
    +(r[0]==='enabled'?'<input id="s_enabled" name="enabled" type="checkbox"'+(v.enabled?' checked':'')+(ro?' disabled':'')+'>'
      :'<input id="s_'+r[0]+'" name="'+r[0]+'" type="number" step="1" min="'+(mn[r[0]]!==undefined?mn[r[0]]:(r[0]==='retries'?0:1))+'"'+(r[0]==='workers'?' max="'+SET.workers_cap+'"':'')+' value="'+esc(String(v[r[0]]))+'"'+(ro?' disabled':'')+'>')
    +'<span class="muted" style="font-size:12px">'+r[2]+note(r[0])+'</span></div>').join('')
-   +(ro?'<span class="muted">This Cockpit was started with --read-only: the values cannot be changed here.</span>':'<div><button class="btn primary">Save</button></div>')+'</form></div>';
+   +(ro?'<span class="muted">This Cockpit was started with --read-only: the values cannot be changed here.</span>':'<div><button class="btn primary">Save</button></div>')+'</form>'+cards+'</div>';
 }
 const USEF=[['input_tokens','Input'],['output_tokens','Output'],['cache_creation_input_tokens','Cache write'],['cache_read_input_tokens','Cache read'],['total','Sum']];
 function usageTable(title,rows){
@@ -719,8 +725,7 @@ function act(a,ds){
   switch(a){
    case 'go':UI.route=ds.r;UI.drawer=null;render();window.scrollTo(0,0);break;
    case 'code':UI.route='code';UI.codeTab='quality';UI.codeMod=ds.m;render();window.scrollTo(0,0);break;
-   case 'churnmode':UI.churnRel=!UI.churnRel;render();break;
-   case 'codetab':UI.codeTab=ds.v;render();break;
+      case 'codetab':UI.codeTab=ds.v;render();break;
    case 'fit':UI.fit[ds.v]=!UI.fit[ds.v];render();break;
    case 'codem':UI.codeMod=ds.v;render();break;
    case 'mod':UI.route='backlog';UI.mod=ds.m;UI.ex=!!ds.x;UI.filter='all';render();window.scrollTo(0,0);break;
@@ -760,6 +765,7 @@ document.addEventListener('submit',async function(e){
   else if(kind==='block')fd.get('b')&&post({action:'block',n:t.number,b:num(fd.get('b'))});
   else if(kind==='settings'){const b={action:'settings',enabled:f.elements.enabled.checked};
     SETROWS.slice(1).forEach(r=>{b[r[0]]=fd.get(r[0]);});post(b);}
+  else if(kind==='cardsettings')post({action:'cardsettings',churn_colour:fd.get('churn_colour')});
   else if(kind==='moddl')post({action:'moddl',module:f.dataset.m,d:fd.get('d')||''});
   else if(kind==='new'){const title=fd.get('title');
     if(await post({action:'new',title:title,desc:fd.get('desc'),module:fd.get('module'),type:fd.get('type'),cls:fd.get('cls'),parent:fd.get('parent')||''})){
