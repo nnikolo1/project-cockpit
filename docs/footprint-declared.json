@@ -23,7 +23,7 @@
     "retention": "in-memory cache: lives with the process, entries refresh after 60 to 3600 seconds (cached() in cockpit.py); token file: kept until the owner deletes it, no rotation in the code; no database"
    }
   },
-  "web": {
+  "cockpitwebpage": {
    "files": [],
    "logging": [],
    "policy": {

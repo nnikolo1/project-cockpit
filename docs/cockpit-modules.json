@@ -2,7 +2,7 @@
  "_comment": "Module map of this repository (owner decision, 2026-11-20: four modules incl. Internal, which replaced Kit and tools; owner decision, 2026-11-24: Task Queue is a fifth, top-level module; tests are not a module, each test file follows the code it tests). Same shape as the modules file the cockpit reads (--modules): modules[{id,name,desc}], assign[{path,module,basis?,candidates?,alias?}]. Longest matching path prefix wins (a path ending in '/' is a prefix, otherwise an exact file). module=null is an explicit 'unassigned'; 'candidates' (optional, decision data) lists the modules a file could equally belong to and changes no assignment; 'alias' marks a pseudo-path that is not a tracked file. Test files follow the mirrored source path (tests/tools/test_x.py -> tools/x.py), then an entry for the test path itself. A file that cannot be placed in a sub-module goes to the parent; a file ambiguous between modules stays null and is reported. Guard: tests/tools/test_cardmeta_map.py.",
  "modules": [
   {"id": "githubclient", "name": "GitHub client", "desc": "the Cockpit app as a client of GitHub: logic.py (pure rules, parsing, ranking, card views, settings and token-usage views) and cockpit.py (HTTP server, gh calls, caching, actions)"},
-  {"id": "web", "name": "Cockpit webpage", "desc": "web/index.html: the single-page user interface"},
+  {"id": "cockpitwebpage", "name": "Cockpit webpage", "desc": "web/index.html: the single-page user interface"},
   {"id": "docs", "name": "Documentation", "desc": "docs/: constitution, ADRs, memos, contracts, deployment, screenshots, owner defaults, footprint declarations and this map"},
   {"id": "internal", "name": "Internal", "desc": "what keeps the project and its assistants running, as opposed to the product (template default for every project)"},
   {"id": "taskqueue", "name": "Task Queue", "desc": "the Dispatcher and the Workers that work the task queue, with their specification (docs/specs/dispatcher-and-workers.md)"},
@@ -15,7 +15,7 @@
  "assign": [
   {"path": "logic.py", "module": "githubclient", "basis": "decision PC-21"},
   {"path": "cockpit.py", "module": "githubclient", "basis": "decision PC-21"},
-  {"path": "web/", "module": "web", "basis": "decision PC-21"},
+  {"path": "web/", "module": "cockpitwebpage", "basis": "decision PC-21"},
   {"path": "docs/", "module": "docs", "basis": "decision PC-21"},
   {"path": "kit/", "module": "internal/devops", "basis": "owner decision 2026-11-20 (issue 28): Internal replaces Kit and tools; kit/ holds install scripts, issue-form templates and the policy check for a consuming repository (kit/test_policy.py follows kit/policy.py)"},
   {"path": "tools/", "module": "internal", "basis": "owner decision 2026-11-20 (issue 28): the parent keeps tool files that fit no sub-module"},
