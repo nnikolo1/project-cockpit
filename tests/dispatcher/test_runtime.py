@@ -248,3 +248,10 @@ def test_launch_aborts_when_clone_fails(tmp_path):
     r, _ = make(tmp_path, ("clone", (1, "bad")))
     with pytest.raises(rt.ContainerError):
         r.launch("worker1", "T-5")
+
+
+def test_alive_for_self_and_dead(tmp_path):
+    import os
+    r, _ = make(tmp_path)
+    assert r.alive(os.getpid())
+    assert not r.alive(2 ** 22 + 12345)
