@@ -39,6 +39,89 @@
     "retention": "kept until the owner deletes them (git history)"
    }
   },
+  "internal/bootfilling/dispatcher": {
+   "files": [
+    {
+     "path": "~/.local/share/project-cockpit/<project>/dispatcher-settings.json",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "the Cockpit (Settings)",
+     "note": "6a: interval, on/off switch, retries, number of Workers and the three limits; outside git; read at each firing (6b); path is the documented default"
+    },
+    {
+     "path": "~/.local/share/project-cockpit/<project>/dispatcher-state.json",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "internal/bootfilling/dispatcher",
+     "note": "the Workers a firing leaves running for the next one (3o)"
+    },
+    {
+     "path": "~/.local/share/project-cockpit/<project>/area",
+     "kind": "dir",
+     "personal_data": false,
+     "written_by": "internal/bootfilling/dispatcher (inbox/), the Workers (outbox/)",
+     "volume": true,
+     "note": "4q: one folder per task with inbox/ (main.bundle, task.md) and outbox/ (started, goodbye.json, result.bundle); task text comes from issues, so check before sharing"
+    },
+    {
+     "path": "~/.local/share/project-cockpit/<project>/proxy-usage.jsonl",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "internal/bootfilling/dispatcher (proxy)",
+     "volume": true,
+     "note": "4h: token usage per Worker, one JSON line per request; counts only"
+    },
+    {
+     "path": "~/.local/share/project-cockpit/<project>/proxy.sock",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "internal/bootfilling/dispatcher (proxy)",
+     "note": "4f: the host Unix socket the proxy listens on (path under 104 bytes); a socket, no content"
+    },
+    {
+     "path": "~/.local/share/project-cockpit/<project>/processing.jsonl",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "internal/bootfilling/dispatcher (plog)",
+     "volume": true,
+     "note": "5a-5d: the processing log, one JSON line per entry naming task and task folder; on the owner's MacBook, outside any git repository; the daily backup access details live in a configuration file outside git"
+    },
+    {
+     "path": "~/.local/share/project-cockpit/<project>/proxy-token",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "the owner",
+     "note": "SENSITIVE: the owner's subscription credential the proxy adds to requests (4g); outside git, never logged or printed; the path is the documented default"
+    }
+   ],
+   "logging": [
+    {
+     "logger": "dispatcher.*",
+     "file": "processing.jsonl (entries of 5a, 5b); the loggers themselves write to standard error",
+     "rotation": "none in the code; the processing log is backed up once a day"
+    }
+   ],
+   "policy": {
+    "backup": "code: the git repository and its remote; the processing log: once a day to GDrive (5e); settings, state, proxy usage and socket are not backed up on purpose; the token file is a secret and is not backed up",
+    "retention": "processing log: kept, no rotation in the code; task folders: not torn down by the Dispatcher, old ones are mopped up later (3m); settings, state and token: kept until the owner changes or deletes them; no database tables"
+   }
+  },
+  "internal/bootfilling/worker": {
+   "files": [
+    {
+     "path": "dispatcher/image",
+     "kind": "dir",
+     "personal_data": false,
+     "written_by": "internal/bootfilling/worker",
+     "note": "the Workers' image sources (Containerfile, Stop hook, skill); the built image and the container's own disk are held by the container tool, where the clones of the tasks live (4l)"
+    }
+   ],
+   "logging": [],
+   "policy": {
+    "backup": "the image sources: the git repository and its remote; the built image and the clones on the container's own disk are rebuildable or fetched back as bundles and are not backed up on purpose",
+    "retention": "the image is kept until rebuilt; clones live on the container's own disk until the container is removed (the Dispatcher does not tear them down, 3m)"
+   }
+  },
   "docs": {
    "files": [
     {
