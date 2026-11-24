@@ -210,11 +210,11 @@ const NOMETA=()=>({footprint:{status:'missing'},churn:{status:'missing'},ambigui
 let Q={questions:[],counts:{},projects:[]};  /* open questions of every project: /api/questions, not tied to the selected project */
 let USE=null,SET=null,CSET=null,D=null,CODE={wired:false,modules:{}},FEED=[],ACT=[],MODULES=[],RULES={configured:false},META=NOMETA();
 const SVGC={};
-const UI={route:'cockpit',filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',tlType:'all',rulesGroup:'all',qProj:'all',codeMod:'unassigned',codeTab:'quality',fit:{deps:true,erd:true,js:true,flow:false},toast:'',err:'',armed:null};
+const UI={route:'cockpit',filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',tlType:'all',setSec:'dispatcher',rulesGroup:'all',qProj:'all',codeMod:'unassigned',codeTab:'quality',fit:{deps:true,erd:true,js:true,flow:false},toast:'',err:'',armed:null};
 const ST=()=>!!(D&&D.source.steering);
 const SIM=()=>!!(D&&D.source.simulate);
 const nd=(v,f)=>v==null?'<span class="muted">no data</span>':(f?f(v):v);
-const modShort=id=>{const m=MODULES.find(x=>x.id===id);return m?(m.parent?modShort(m.parent)+' / ':'')+m.short:(id==='all'?'All':id==='rules'?'Rules':'Unassigned');};
+const modShort=id=>{const m=MODULES.find(x=>x.id===id);return m?(m.parent?modShort(m.parent)+' / ':'')+m.short:(id==='all'?'All':id==='rules'?'Policies':'Unassigned');};
 const inMod=(id,n)=>id===n||id.startsWith(n+'/');
 const modCell=id=>{const m=MODULES.find(x=>x.id===id);return m&&m.parent?esc(modShort(m.parent))+' <span class="crumb">/ '+esc(m.short)+'</span>':esc(modShort(id));};
 function stageBar(r){const n=STAGES.reduce((a,s)=>a+r[s],0);if(!n)return '';
@@ -371,10 +371,10 @@ function vCockpit(){
   const blocked=D.tasks.filter(t=>isBlocked(D,t)).length;
   let h='<div class="page"><div class="card strip"><span class="label" style="color:var(--accent)">Needs you</span>'
    +'<span><b>'+emb+'</b> embryos waiting for release</span><span><b>'+open.length+'</b> change proposals</span>'
-   +'<span><b>'+od+'</b> overdue</span>'+(RULES.configured?'<span><b>'+(unreviewed().length+pendingPrs().length)+'</b> rule changes to review</span>':'')+'<span><button class="linkbtn" data-act="go" data-r="questions"><b>'+Q.questions.length+'</b> open questions</button></span><span><b>'+blocked+'</b> blocked</span><span class="'+(D.unauthorised?'warnline':'muted')+'"><b>'+D.unauthorised+'</b> unauthorised changes</span>'
+   +'<span><b>'+od+'</b> overdue</span>'+(RULES.configured?'<span><b>'+(unreviewed().length+pendingPrs().length)+'</b> policy changes to review</span>':'')+'<span><button class="linkbtn" data-act="go" data-r="questions"><b>'+Q.questions.length+'</b> open questions</button></span><span><b>'+blocked+'</b> blocked</span><span class="'+(D.unauthorised?'warnline':'muted')+'"><b>'+D.unauthorised+'</b> unauthorised changes</span>'
    +'<button class="btn primary" data-act="go" data-r="backlog" style="margin-left:auto">Open task queue</button></div>';
-  if(RULES.configured)h+='<div class="card" style="border-color:var(--warn-ink)"><div class="row spread"><h2>Rules changed</h2><button class="btn small" data-act="go" data-r="rules">Review rule changes</button></div><div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">'
-   +(ruleChanges().slice(0,3).map(r=>'<div class="row" style="gap:10px"><span class="mono muted" style="width:86px">'+r.date+'</span><span class="chip rc">rule change</span><span><b class="mono">'+esc(r.files.map(f=>f.path).slice(0,2).join(', '))+'</b> '+esc(r.subject)+'</span>'+(isUn(r)?'<span class="chip blocks">to review</span>':'<span class="muted" style="font-size:12px">reviewed</span>')+'</div>').join('')||'<span class="muted">No rule changes in the last 90 days.</span>')
+  if(RULES.configured)h+='<div class="card" style="border-color:var(--warn-ink)"><div class="row spread"><h2>Policies changed</h2><button class="btn small" data-act="go" data-r="rules">Review policy changes</button></div><div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">'
+   +(ruleChanges().slice(0,3).map(r=>'<div class="row" style="gap:10px"><span class="mono muted" style="width:86px">'+r.date+'</span><span class="chip rc">policy change</span><span><b class="mono">'+esc(r.files.map(f=>f.path).slice(0,2).join(', '))+'</b> '+esc(r.subject)+'</span>'+(isUn(r)?'<span class="chip blocks">to review</span>':'<span class="muted" style="font-size:12px">reviewed</span>')+'</div>').join('')||'<span class="muted">No rule changes in the last 90 days.</span>')
    +'</div><p class="muted" style="font-size:12px;margin:10px 0 0">Instructions and decisions steer every agent, so changes to them are tracked here, not only in git.</p></div>';
   h+=metaNote()+moduleLevelAmb();
   h+='<div class="grid">';
@@ -485,16 +485,19 @@ function cardSettingsForm(){
    +'<span class="muted" style="font-size:12px">Sets the colour of the churn chips on the overview and the module cards.</span></div>'
    +(ro?'':'<div><button class="btn primary">Save</button></div>')+'</form>';}
 function vSettings(){
-  const head='<div class="page"><div><h1>Settings</h1><span class="muted">How the Dispatcher behaves. It reads the file at each firing.</span></div>';
+  const sec=UI.setSec,head='<div class="page"><div><h1>Settings</h1></div><div class="filters" role="group" aria-label="Section">'+[['dispatcher','Dispatcher settings'],['cards','Module cards'],['policies','Policies']].map(x=>'<button class="f" data-act="setsec" data-v="'+x[0]+'" aria-pressed="'+(sec===x[0])+'">'+x[1]+'</button>').join('')+'</div>';
+  if(sec==='policies')return head+vRules()+'</div>';
+  const dh='<span class="muted">How the Dispatcher behaves. It reads the file at each firing.</span>';
   const cards=CSET?cardSettingsForm():'<div class="card"><span class="muted">Module card settings could not be loaded.</span></div>';
-  if(!SET)return head+'<div class="card"><span class="muted">Settings could not be loaded.</span></div>'+cards+'</div>';
+  if(sec==='cards')return head+cards+'</div>';
+  if(!SET)return head+dh+'<div class="card"><span class="muted">Settings could not be loaded.</span></div></div>';
   const v=SET.values,ro=!ST(),mn=SET.minimums;
   const note=k=>k==='workers'?' Most '+SET.workers_cap+', the worker users in the image.':(mn[k]?' At least '+mn[k]+'.':'');
-  return head+'<form class="card" data-form="settings" style="display:flex;flex-direction:column;gap:12px">'+SETROWS.map(r=>'<div class="field"><label for="s_'+r[0]+'">'+r[1]+'</label>'
+  return head+dh+'<form class="card" data-form="settings" style="display:flex;flex-direction:column;gap:12px">'+SETROWS.map(r=>'<div class="field"><label for="s_'+r[0]+'">'+r[1]+'</label>'
    +(r[0]==='enabled'?'<input id="s_enabled" name="enabled" type="checkbox"'+(v.enabled?' checked':'')+(ro?' disabled':'')+'>'
      :'<input id="s_'+r[0]+'" name="'+r[0]+'" type="number" step="1" min="'+(mn[r[0]]!==undefined?mn[r[0]]:(r[0]==='retries'?0:1))+'"'+(r[0]==='workers'?' max="'+SET.workers_cap+'"':'')+' value="'+esc(String(v[r[0]]))+'"'+(ro?' disabled':'')+'>')
    +'<span class="muted" style="font-size:12px">'+r[2]+note(r[0])+'</span></div>').join('')
-   +(ro?'<span class="muted">This Cockpit was started with --read-only: the values cannot be changed here.</span>':'<div><button class="btn primary">Save</button></div>')+'</form>'+cards+'</div>';
+   +(ro?'<span class="muted">This Cockpit was started with --read-only: the values cannot be changed here.</span>':'<div><button class="btn primary">Save</button></div>')+'</form></div>';
 }
 const USEF=[['input_tokens','Input'],['output_tokens','Output'],['cache_creation_input_tokens','Cache write'],['cache_read_input_tokens','Cache read'],['total','Sum']];
 function usageTable(title,rows){
@@ -536,18 +539,18 @@ function vUsage(){
    +(tk&&tk.length?'':'<tr><td class="muted" colspan="6">no data</td></tr>')+'</tbody></table></div><p class="muted" style="font-size:13px;margin:8px 0 0">The proxy sum counts the requests of the task’s Worker between the task’s launch and its last log entry. Older tasks, launched before the log named the Worker, count all Workers’ requests in that span (marked overlap when another task ran then).</p></div></div>';
 }
 function vRules(){
-  const head='<div class="page"><div><h1>Rules</h1><span class="muted">Files that steer the agents and the project. They have long reach, so every change is tracked here and waits for your review.</span></div>';
-  if(!RULES.configured)return head+'<div class="card tile nw"><span class="label">Rules</span><span class="v muted" style="font-size:18px">not configured</span><span class="muted" style="font-size:13px">add a "rules" key to the --modules JSON'+(RULES.error?' ('+esc(RULES.error)+')':'')+'</span></div></div>';
+  const head='<div><h2>Policies</h2><span class="muted">Files that steer the agents and the project. They have long reach, so every change is tracked here and waits for your review.</span></div>';
+  if(!RULES.configured)return head+'<div class="card tile nw"><span class="label">Policies</span><span class="v muted" style="font-size:18px">not configured</span><span class="muted" style="font-size:13px">add a "rules" key to the --modules JSON'+(RULES.error?' ('+esc(RULES.error)+')':'')+'</span></div>';
   const g=UI.rulesGroup,un=unreviewed(),base='https://github.com/'+RULES.repo+'/commit/';
   const cl=(sha)=>'<a class="mono" target="_blank" rel="noopener" href="'+base+sha+'">'+sha+'</a>';
-  let h=head+'<div class="card strip"><span class="label" style="color:var(--accent)">To review</span><span><b>'+un.length+'</b> rule changes since you last looked</span><button class="btn small" data-act="revall" style="margin-left:auto"'+(un.length?'':' disabled')+'>Mark all reviewed</button></div>';
-  if(pendingPrs().length)h+='<div class="card" style="border-color:var(--warn-ink)"><span class="label" style="color:var(--accent)">Needs you</span><h2 style="margin-top:4px">Pending pull requests that would change rules</h2><div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">'
+  let h=head+'<div class="card strip"><span class="label" style="color:var(--accent)">To review</span><span><b>'+un.length+'</b> policy changes since you last looked</span><button class="btn small" data-act="revall" style="margin-left:auto"'+(un.length?'':' disabled')+'>Mark all reviewed</button></div>';
+  if(pendingPrs().length)h+='<div class="card" style="border-color:var(--warn-ink)"><span class="label" style="color:var(--accent)">Needs you</span><h2 style="margin-top:4px">Pending pull requests that would change policies</h2><div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">'
     +pendingPrs().map(p=>'<div><a target="_blank" rel="noopener" href="'+esc(p.url)+'"><b>#'+p.number+'</b></a> '+esc(p.title)+' <span class="muted">by '+esc(p.author)+', '+p.created+'</span> <span class="mono muted">'+esc(p.files.map(f=>f.path).join(', '))+'</span></div>').join('')+'</div></div>';
   h+='<div class="filters" role="group" aria-label="Group">'+['all'].concat(RULES.groups).map(x=>'<button class="f" data-act="rg" data-v="'+esc(x)+'" aria-pressed="'+(g===x)+'">'+(x==='all'?'All':esc(x))+'</button>').join('')+'</div>';
   h+='<div class="tblbox"><table style="min-width:640px"><thead><tr><th>File</th><th>Group</th><th>Last change</th><th>By</th></tr></thead><tbody>'
    +RULES.files.filter(f=>g==='all'||f.group===g).map(f=>'<tr><td class="mono">'+esc(f.path)+'</td><td>'+esc(f.group)+'</td><td>'+(f.last?f.last.date+' '+cl(f.last.sha):'<span class="muted">\u2014</span>')+'</td><td class="muted">'+esc(f.last?f.last.author:'')+'</td></tr>').join('')+'</tbody></table></div>';
   h+='<h2>Changes <span class="muted" style="font-weight:400">last 90 days</span></h2>'+ruleChanges().filter(r=>g==='all'||r.files.some(f=>f.group===g)).map(r=>{const u=isUn(r);
-   return '<div class="rch'+(u?' un':'')+'"><div class="row spread"><div class="chips"><span class="chip rc">rule change</span>'+[...new Set(r.files.map(f=>f.group))].map(x=>'<span class="chip">'+esc(x)+'</span>').join('')
+   return '<div class="rch'+(u?' un':'')+'"><div class="row spread"><div class="chips"><span class="chip rc">policy change</span>'+[...new Set(r.files.map(f=>f.group))].map(x=>'<span class="chip">'+esc(x)+'</span>').join('')
     +(r.agent_assisted?'<span class="chip blocks">agent-assisted</span>':'')+(r.by_manager?'':'<span class="chip blk">not by the Manager</span>')+'</div><span class="mono muted">'+r.date+' \u00B7 '+cl(r.sha)+'</span></div>'
     +'<div>'+esc(r.subject)+'</div><div class="mono muted" style="font-size:12px">'+r.files.map(f=>esc(f.path)+' +'+f.add+' \u2212'+f.del).join(' \u00B7 ')+'</div>'
     +'<div class="muted" style="font-size:13px">Committed as '+esc(r.author)+(r.co_authors.length?' \u00B7 co-authored by '+esc(r.co_authors.join(', ')):'')+'</div>'
@@ -605,11 +608,11 @@ async function hydrate(){
   const again=document.getElementById('dgbox');if(again&&again.dataset.k===k)again.innerHTML=SVGC[k];
 }
 function vCode(){
-  const tabs=[['quality','Quality'],['deps','Dependencies'],['flow','Data flow'],['erd','ERD'],['js','Extension']];
+  const tabs=[['quality','Quality'],['deps','Dependencies'],['flow','Data flow'],['erd','ERD'],['js','Extension'],['flowchart','Flowchart']];
   const T=UI.codeTab;
   return '<div class="page"><div><h1>Code</h1><span class="muted">Metrics and documentation drawn from the code itself, one snapshot of the repository.</span></div>'
    +'<div class="tabs" role="tablist">'+tabs.map(t=>'<button role="tab" data-act="codetab" data-v="'+t[0]+'" aria-selected="'+(T===t[0])+'">'+t[1]+'</button>').join('')+'</div>'
-   +(T==='quality'?vQuality():vDiagram(T))+'</div>';
+   +(T==='quality'?vQuality():T==='flowchart'?vHow():vDiagram(T))+'</div>';
 }
 function wfSvg(){
   const L=(cx,cy,ls,c)=>'<text'+(c?' class="'+c+'"':'')+' x="'+cx+'" y="'+(cy-(ls.length-1)*8+4)+'" text-anchor="middle">'+ls.map((l,i)=>'<tspan x="'+cx+'" dy="'+(i?16:0)+'">'+esc(l)+'</tspan>').join('')+'</text>';
@@ -640,10 +643,10 @@ function wfSvg(){
   return s+'</svg>';
 }
 function vHow(){
-  return '<div class="page"><div><h1>How it works</h1><span class="muted">The life of a task, who does each step, and where the decisions are.</span></div>'
+  return '<div><h2>Flowchart</h2><span class="muted">The life of a task, who does each step, and where the decisions are.</span></div>'
    +'<div class="legend"><span><b>Rounded box</b> a step</span><span><b>Diamond</b> a decision</span><span><b>Pill</b> a state of the task</span><span><b>Arrow</b> what happens next</span></div>'
    +'<div class="dg">'+wfSvg()+'</div>'
-   +'<div class="card" style="max-width:75ch"><h2>What to call these diagrams</h2><p style="margin:8px 0 0">This one is a <b>flowchart</b> (steps, decisions, arrows) with lanes for who acts. Because the pills are the task\u2019s states, it also works as a <b>state diagram</b>. A <b>data-flow diagram</b> is a different picture: it shows data moving between parts of the system. That is the Data flow tab under Code, which shows which code reads and writes which database tables.</p></div></div>';
+   +'<div class="card" style="max-width:75ch"><h2>What to call these diagrams</h2><p style="margin:8px 0 0">This one is a <b>flowchart</b> (steps, decisions, arrows) with lanes for who acts. Because the pills are the task\u2019s states, it also works as a <b>state diagram</b>. A <b>data-flow diagram</b> is a different picture: it shows data moving between parts of the system. That is the Data flow tab under Code, which shows which code reads and writes which database tables.</p></div>';
 }
 /* ---------- drawer ---------- */
 function seg(name,sel){return '<fieldset class="seg" aria-label="Priority">'+[1,2,3].map(n=>'<input type="radio" id="'+name+n+'" name="p" value="'+n+'"'+(sel===n?' checked':'')+'><label class="l'+n+'" for="'+name+n+'">P'+n+'</label>').join('')+'</fieldset>';}
@@ -697,8 +700,10 @@ function drawerNew(p){
 
 /* ---------- render and actions ---------- */
 function render(){
+  if(UI.route==='how'){UI.route='code';UI.codeTab='flowchart';}
+  if(UI.route==='rules'){UI.route='settings';UI.setSec='policies';}  /* old route */
   const R=UI.route;
-  const nav=[['cockpit','Cockpit'],['backlog','Task Queue'],['questions','Open questions'],['timeline','Timeline'],['rules','Rules'],['settings','Settings'],['usage','Token Usage'],['code','Code'],['how','How it works']];
+  const nav=[['cockpit','Cockpit'],['backlog','Task Queue'],['questions','Open questions'],['timeline','Timeline'],['settings','Settings'],['usage','Token Usage'],['code','Code']];
   let h='<div class="top"><span class="brand">Project cockpit</span><nav class="nav" aria-label="Main">'+nav.map(n=>'<button data-act="go" data-r="'+n[0]+'"'+(R===n[0]?' aria-current="page"':'')+'>'+n[1]+(n[0]==='questions'?' <span class="chip" aria-label="'+Q.questions.length+' open">'+Q.questions.length+'</span>':n[0]==='backlog'&&runCount()?' <span class="chip" aria-label="'+runCount()+' running">'+runCount()+'</span>':'')+'</button>').join('')+'</nav>';
   if(PROJS.length>1)h=h.replace('</span><nav','</span><select class="psel" id="psel" aria-label="Project">'+PROJS.map(p=>'<option value="'+esc(p.name)+'"'+(p.name===PROJ?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select><nav');
   if(D){const s=D.source;
@@ -709,7 +714,7 @@ function render(){
   if(UI.err)h+='<div class="page"><div class="card" style="border-color:var(--danger)"><b class="warnline">Could not load from GitHub.</b> <span class="muted">'+esc(UI.err)+'</span> <button class="btn small" data-act="refresh">Retry</button></div></div>';
   else if(!D)h+='<div class="page"><span class="muted">Loading…</span></div>';
   else{
-  h+=R==='cockpit'?vCockpit():R==='backlog'?vBacklog():R==='questions'?vQuestions():R==='timeline'?vTimeline():R==='how'?vHow():R==='rules'?vRules():R==='settings'?vSettings():R==='usage'?vUsage():vCode();
+  h+=R==='cockpit'?vCockpit():R==='backlog'?vBacklog():R==='questions'?vQuestions():R==='timeline'?vTimeline():R==='settings'?vSettings():R==='usage'?vUsage():vCode();
   if(UI.drawer){const t=UI.drawer.key&&byKey(D,UI.drawer.key);h+='<div class="drawer-bg" data-act="close"></div><div class="drawer" role="dialog" aria-modal="true" aria-label="Task">'+(UI.drawer.mode==='new'&&ST()?drawerNew(UI.drawer.prefill):(t?drawerTask(t):''))+'</div>';}
   }
   if(UI.toast)h+='<div class="toast" role="status">'+esc(UI.toast)+'</div>';
@@ -723,7 +728,8 @@ function act(a,ds){
   const t=ds.k&&byKey(D,ds.k);
   if(a!=='arm'&&UI.armed){UI.armed=null;clearTimeout(armTimer);}  /* any other click disarms */
   switch(a){
-   case 'go':UI.route=ds.r;UI.drawer=null;render();window.scrollTo(0,0);break;
+   case 'setsec':UI.setSec=ds.v;render();break;
+   case 'go':UI.route=ds.r;if(ds.r==='how'){UI.route='code';UI.codeTab='flowchart';}if(ds.r==='rules'){UI.route='settings';UI.setSec='policies';}UI.drawer=null;render();window.scrollTo(0,0);break;
    case 'code':UI.route='code';UI.codeTab='quality';UI.codeMod=ds.m;render();window.scrollTo(0,0);break;
       case 'codetab':UI.codeTab=ds.v;render();break;
    case 'fit':UI.fit[ds.v]=!UI.fit[ds.v];render();break;
