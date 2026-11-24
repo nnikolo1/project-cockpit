@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Reports the gaps in a project's metadata, as the Cockpit would show them. Read-only: files nothing, changes nothing.
 
-    python3 tools/metadata_gaps.py [--project NAME] [--projects-file FILE] [--data-dir DIR] [--max-age-hours 24] [--timing URL] [--timing-limit 3] [--json]
+    python3 tools/metadata_gaps.py [--project NAME] [--projects-file FILE] [--data-dir DIR] [--max-age-hours 24] [--timing URL] [--timing-limit 3]
+                                   [--tool-settings FILE] [--min-retention-days 3650] [--json]
 
 Reads what the Cockpit reads for the project: its entry in the projects file, the module map, the card files (footprint, churn, ambiguity),
-the code snapshot (`code`), the token-usage files under DATA_DIR/<project>/ and, with a local clone, `git ls-files` for the Policies.
+the code snapshot (`code`), the token-usage files under DATA_DIR/<project>/, with a local clone, `git ls-files` for the Policies, and the coding
+tool's settings file for the transcript retention (checked only for a project whose transcripts are collected).
 Prints one line per gap (project | module | what | age) or, with --json, the report documented in docs/contracts/metadata-gaps.md.
 Exit code: 0 no gap, 1 at least one gap, 2 the project or a file argument cannot be used. The detection itself is logic.metadata_gaps.
 """
@@ -26,6 +28,9 @@ import logic as L  # noqa: E402
 
 log = logging.getLogger("metadata_gaps")
 DEFAULT_PROJECTS = "~/.config/project-cockpit/projects.json"  # the example path of docs/deployment.md
+# The coding tool's specifics (Claude Code): its user settings file and the key that sets how many days session transcripts are kept.
+TOOL_SETTINGS = "~/.claude/settings.json"
+RETENTION_KEY = "cleanupPeriodDays"
 
 
 def _read(path):
@@ -118,6 +123,8 @@ def main(argv=None, now=None):
     ap.add_argument("--max-age-hours", type=float, default=L.GAPS_MAX_AGE_H, help="generated data older than this is a gap (default: %(default)s)")
     ap.add_argument("--timing", metavar="URL", help="off by default: also time the /api/ calls of the running Cockpit at URL (with its ?t=TOKEN)")
     ap.add_argument("--timing-limit", type=float, default=3.0, help="seconds a request may take (default: %(default)s)")
+    ap.add_argument("--tool-settings", default=TOOL_SETTINGS, help="the coding tool's user settings file (default: %(default)s)")
+    ap.add_argument("--min-retention-days", type=int, default=L.RETENTION_MIN_DAYS, help="shortest acceptable transcript retention (default: %(default)s)")
     ap.add_argument("--json", action="store_true", help="print the JSON report instead of text lines")
     a = ap.parse_args(argv)
     now = now or dt.datetime.now(dt.timezone.utc)
@@ -131,7 +138,9 @@ def main(argv=None, now=None):
         print(f"error: {ex}", file=sys.stderr)
         return 2
     timings = time_requests(a.timing, p["name"], a.timing_limit) if a.timing else None
-    gaps = L.metadata_gaps(p["name"], now, max_age_h=a.max_age_hours, timings=timings, timing_limit=a.timing_limit,
+    settings = pathlib.Path(a.tool_settings).expanduser()
+    retention = dict(path=str(settings), text=_read(settings), key=RETENTION_KEY, min_days=a.min_retention_days)
+    gaps = L.metadata_gaps(p["name"], now, max_age_h=a.max_age_hours, timings=timings, timing_limit=a.timing_limit, retention=retention,
                            **collect(p, pathlib.Path(a.data_dir).expanduser(), now))
     rep = report(p["name"], gaps, a.max_age_hours, now)
     log.info("project %s: %d gap(s)", p["name"], len(gaps))

@@ -1489,7 +1489,8 @@ def _stale(project, kind, label, age, max_h, module=None):
 
 
 def metadata_gaps(project, now, modules, cards, metrics, usage, policies, max_age_h=GAPS_MAX_AGE_H, descs=None,
-                  tracked=None, assign=None, docs_heads=None, content=None, data_root=None, data_entries=None, timings=None, timing_limit=3.0, quality=None):
+                  tracked=None, assign=None, docs_heads=None, content=None, data_root=None, data_entries=None, timings=None, timing_limit=3.0, quality=None,
+                  retention=None):
     """Pure detection of what the Cockpit shows as no data / not wired / not measured / stale / missing. Every fact comes from the project's own
     data, already read; -> list of gap dicts {project, module|None, kind, what, age_h|None}; an empty list means clean. A check whose input is
     None is not run (e.g. no clone: no `tracked`).
@@ -1501,7 +1502,8 @@ def metadata_gaps(project, now, modules, cards, metrics, usage, policies, max_ag
       tracked / assign: the clone's files and the map's `assign`
       docs_heads    {path: first text} of the tracked docs/*.md; content {id: {txt: bool, svg: bool}} of docs/modules/
       quality       dict(modules={id: the `/api/code` module payload}, thresholds=`quality_thresholds` of the card settings or None for the defaults)
-      data_root     the project's data folder, data_entries the names in it; timings [(request, seconds|None)] of a live check"""
+      data_root     the project's data folder, data_entries the names in it; timings [(request, seconds|None)] of a live check
+      retention     dict(path, text|None, key, min_days) of the coding tool's settings file (transcript_retention_gaps)"""
     g = []
     add = lambda kind, what, mod=None, age=None: g.append(_gap(project, kind, what, mod, age))
     mods = modules or []
@@ -1560,10 +1562,35 @@ def metadata_gaps(project, now, modules, cards, metrics, usage, policies, max_ag
                 add("documents", f"document has no Modules: line: {path}")
     if quality is not None:
         _quality_gaps(add, quality, mods)
+    if retention is not None and usage.get("transcript") is not None:  # a project without collected transcripts does not use the tool
+        for what in transcript_retention_gaps(**retention):
+            add("transcript_retention", what)
     for name, secs in timings or []:
         if secs is None or secs > timing_limit:
             add("slow", f"request {name} " + ("failed" if secs is None else f"took {secs:.1f} s (limit {timing_limit:g} s)"))
     return g
+
+
+RETENTION_MIN_DAYS = 3650  # owner, 2026-11-24: keep the session transcripts (the source of the token statistics) as long as possible
+
+
+def transcript_retention_gaps(path, text, key, min_days=RETENTION_MIN_DAYS):
+    """The coding tool's settings file (its text, None when missing) -> [what] when its transcript retention `key` is not a whole number of
+    days at least `min_days`: unset means the tool's short default applies and old transcripts are deleted."""
+    if text is None:
+        return [f"transcript retention not set: no settings file {path} (the tool's default applies); set {key} to at least {min_days}"]
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return [f"transcript retention unknown: settings file {path} is not valid JSON; set {key} to at least {min_days}"]
+    v = data.get(key) if isinstance(data, dict) else None
+    if v is None:
+        return [f"transcript retention not set: no {key} in {path} (the tool's default applies); set it to at least {min_days}"]
+    if isinstance(v, bool) or not isinstance(v, int):
+        return [f"transcript retention unusable: {key} is {v!r} in {path}; set it to a whole number of at least {min_days} days"]
+    if v < min_days:
+        return [f"transcript retention {v} days in {path} is shorter than {min_days}; set {key} to at least {min_days}"]
+    return []
 
 
 def _quality_gaps(add, q, mods):

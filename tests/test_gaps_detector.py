@@ -224,3 +224,28 @@ def test_quality_metric_without_threshold_or_band_and_module_without_any_bar():
     none = {k: {"band": "none", "word": "no figure"} for k in L.QUALITY_METRICS}
     g = gaps(quality=dict(modules={"a": mod(none), "a/one": mod(none, 0)}, thresholds=None))
     assert [(x["kind"], x["module"]) for x in g] == [("quality_bands", "a")]
+
+
+def ret(text, min_days=3650):
+    return dict(path="/home/u/.tool/settings.json", text=text, key="keepDays", min_days=min_days)
+
+
+def test_transcript_retention_missing_or_short_is_a_gap_naming_the_settings_file():
+    for text in (None, "{}", '{"keepDays": 30}', '{"keepDays": "long"}', '{"keepDays": true}', "not json", "[]"):
+        g = gaps(retention=ret(text))
+        assert kinds(g) == [("transcript_retention", None)], text
+        assert "/home/u/.tool/settings.json" in g[0]["what"] and g[0]["age_h"] is None
+
+
+def test_transcript_retention_at_or_above_the_minimum_is_clean():
+    assert gaps(retention=ret('{"keepDays": 3650}')) == []
+    assert gaps(retention=ret('{"keepDays": 99999, "other": 1}')) == []
+    assert gaps(retention=ret('{"keepDays": 400}', min_days=365)) == []
+    assert kinds(gaps(retention=ret('{"keepDays": 400}', min_days=500))) == [("transcript_retention", None)]
+
+
+def test_transcript_retention_is_not_checked_for_a_project_without_the_tool():
+    """No transcript usage file: the project does not use the tool, so the tool's settings are not its gap."""
+    g = gaps(usage=dict(quota=LINE, transcript=None, proxy=LINE), retention=ret(None))
+    assert "transcript_retention" not in {x["kind"] for x in g}
+    assert gaps(retention=None) == []
