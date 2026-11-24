@@ -239,8 +239,8 @@ def test_containerfile_settings_allowlist():
     raw = re.search(r"^ARG WORKER_SETTINGS='(.*)'$", text, re.M).group(1)
     s = json.loads(raw)
     assert s["skipWebFetchPreflight"] is True
-    assert s["permissions"]["allow"] == ["Edit", "Write", "Bash(git:*)", "Bash(python3:*)", "Bash(pytest:*)"]
-    assert s["permissions"]["deny"] == ["WebFetch", "WebSearch"]
+    assert s["permissions"]["allow"] == ["Edit", "Write", "Bash(git:*)", "Bash(python3:*)", "Bash(pytest:*)", "WebSearch"]
+    assert s["permissions"]["deny"] == ["WebFetch"]
     assert '"$WORKER_SETTINGS"' in text
 
 
