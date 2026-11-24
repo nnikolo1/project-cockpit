@@ -549,7 +549,7 @@ function vBacklog(){
   if(!mp)h+=modFilter(UI.mod,'modf','all modules','all of {}',true);
   h+='<div class="row muted" style="font-size:13px;gap:8px">Priority <span class="chip p1">P1</span><span class="chip p2">P2</span><span class="chip p3">P3</span><span class="chip p0">none yet</span> &nbsp; Blockers <span class="chip blk">blocked by</span><span class="chip blocks">blocks n</span> &nbsp; <span class="inh">↳ italic = inherited deadline</span></div>';
   h+='<div class="tblbox"><table><thead><tr><th title="Rank in the Orchestrator queue">#</th><th>ID</th><th>Title</th><th>Module</th><th>Priority</th><th>Class</th><th>Deadline</th><th>Blockers</th><th>Stage</th>'+(ST()?'<th class="act-col">Submit</th><th class="act-col">Cancel</th>':'')+'</tr></thead><tbody>';
-  ts.forEach(t=>{h+='<tr class="'+(isBlocked(D,t)?'blocked':'')+'"><td class="muted">'+(rq.indexOf(t)>=0?rq.indexOf(t)+1:'')+'</td><td class="mono">'+esc(t.key)+'</td><td><button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button> '+findingChip(t)+'</td><td>'+modCell(t.module)+'</td><td>'+prioChip(t)+'</td><td class="muted">'+t.cls+'</td><td>'+dlHtml(t)+'</td><td>'+blockHtml(t)+'</td><td>'+stageHtml(t)+'</td>'+(ST()?'<td class="act-col">'+(t.stage==='embryo'?armBtn('submit',t):'<span class="muted">—</span>')+'</td><td class="act-col">'+(isOpen(t)?armBtn('cancel',t):'<span class="muted">—</span>')+'</td>':'')+'</tr>';});
+  ts.forEach(t=>{h+='<tr class="'+(isBlocked(D,t)?'blocked':'')+'"><td class="muted">'+(rq.indexOf(t)>=0?rq.indexOf(t)+1:'')+'</td><td class="mono">'+esc(t.key)+'</td><td><button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button> '+findingChip(t)+editedChip(t)+'</td><td>'+modCell(t.module)+'</td><td>'+prioChip(t)+'</td><td class="muted">'+t.cls+'</td><td>'+dlHtml(t)+'</td><td>'+blockHtml(t)+'</td><td>'+stageHtml(t)+'</td>'+(ST()?'<td class="act-col">'+(t.stage==='embryo'?armBtn('submit',t):'<span class="muted">—</span>')+'</td><td class="act-col">'+(isOpen(t)?armBtn('cancel',t):'<span class="muted">—</span>')+'</td>':'')+'</tr>';});
   if(!ts.length)h+='<tr><td colspan="'+(ST()?11:9)+'" class="muted">Nothing matches this filter.</td></tr>';
   return h+'</tbody></table></div><p class="muted" style="font-size:13px;margin:0">'+(ST()?'Submit releases an embryo as P2 without a deadline (use the task view for another priority or a deadline). Both buttons ask once more before they act. ':'')+'Only you set or move a deadline. A task without one inherits its parent’s, then its sub-module’s or module’s.</p></div>';
 }
@@ -871,7 +871,7 @@ function drawerTask(t){
   const kids=D.tasks.filter(x=>x.parent===t.key);const blocks=D.tasks.filter(x=>isOpen(x)&&x.blockedBy.includes(t.key));
   const others=D.tasks.filter(x=>x.key!==t.key&&!t.blockedBy.includes(x.key));
   let h='<div class="row spread"><a class="mono" target="_blank" rel="noopener" href="'+esc(t.url)+'">'+esc(t.key)+'</a><button class="btn small" data-act="close">Close</button></div>'
-   +'<h1 style="font-size:19px;line-height:1.3">'+esc(t.title)+'</h1><div class="chips"><span class="chip" style="background:var(--accent-tint)">'+esc(modShort(t.module))+'</span><span class="chip">'+esc(t.type)+'</span><span class="chip">'+t.cls+'</span><span class="chip">'+STAGE_LABEL[t.stage]+'</span>'+prioChip(t)+findingChip(t)+'</div>';
+   +'<h1 style="font-size:19px;line-height:1.3">'+esc(t.title)+'</h1><div class="chips"><span class="chip" style="background:var(--accent-tint)">'+esc(modShort(t.module))+'</span><span class="chip">'+esc(t.type)+'</span><span class="chip">'+t.cls+'</span><span class="chip">'+STAGE_LABEL[t.stage]+'</span>'+prioChip(t)+findingChip(t)+editedChip(t)+'</div>';
   h+='<dl class="facts"><dt>Deadline</dt><dd>'+dlHtml(t)+'</dd><dt>Blocked by</dt><dd>'+(u.length?u.map(b=>'<span class="chip blk">'+esc(b.key)+'</span>').join(' '):'<span class="muted">none</span>')+'</dd><dt>Blocks</dt><dd>'+(blocks.length?blocks.map(b=>'<span class="chip blocks">'+esc(b.key)+'</span>').join(' '):'<span class="muted">none</span>')+'</dd>'
    +''+(t.filed_by?'<dt>Filed by</dt><dd class="mono">'+esc(t.filed_by)+'</dd>':'')+'<dt>Assignee</dt><dd>'+(t.assignee?esc(t.assignee):'<span class="muted">not assigned</span>')+'</dd><dt>Token estimate</dt><dd>'+(t.est?tok(t.est)+(t.used?' · used '+tok(t.used):''):'<span class="muted">not estimated yet</span>')+'</dd><dt>Parent</dt><dd>'+(t.parent?esc(t.parent):'module')+'</dd>'
    +(t.hint?'<dt>Architect’s hint</dt><dd>'+esc(t.hint)+' <span class="muted">(not your priority)</span></dd>':'')+(t.status?'<dt>Project status</dt><dd>'+esc(t.status)+'</dd>':'')+'</dl>';
@@ -880,7 +880,8 @@ function drawerTask(t){
   h+=(t.desc?'<p style="margin:0;white-space:pre-wrap;overflow-wrap:anywhere">'+esc(t.desc)+'</p>':'')+(t.evidence.length?'<div style="display:flex;flex-direction:column;gap:3px">'+t.evidence.map(x=>'<a target="_blank" rel="noopener" href="'+esc(x.url)+'">'+esc(x.text)+'</a>').join('')+'</div>':'');
   props.forEach(p=>{h+='<div class="proposal"><b>The Orchestrator proposes a change</b><span>'+(p.field==='deadline'?'Move the deadline to <b>'+esc(p.value)+'</b>.':'Set the priority to <b>P'+esc(p.value)+'</b>.')+' '+esc(p.reason)+'</span>'
     +(ST()?'<div class="row"><button class="btn primary small" data-act="accept" data-n="'+t.number+'" data-id="'+esc(p.id)+'">Accept</button><button class="btn small" data-act="dismiss" data-n="'+t.number+'" data-id="'+esc(p.id)+'">Dismiss</button></div><span style="font-size:12px">Accepting applies it as you. Only you can change priority or a deadline.</span>':'')+'</div>';});
-  if(ST()){
+  if(ST())h+=UI.drawer.edit?editForm(t):'<div class="row"><button class="btn small" data-act="edit" data-k="'+t.key+'">Edit text</button></div>';
+  if(ST()&&!UI.drawer.edit){
   if(t.stage==='embryo'){
     h+='<form class="card" data-form="release" data-k="'+t.key+'" style="display:flex;flex-direction:column;gap:12px"><h2>Release this task</h2><div class="field"><span>Priority</span>'+seg('rp',2)+'<span class="muted" style="font-size:12px">1 is first. The Orchestrator ranks by priority, then deadline.</span></div>'
      +'<div class="field"><label for="rd">Deadline (optional)</label><input id="rd" type="date" name="d"><span class="muted" style="font-size:12px">Complete by the end of this day. Leave empty to inherit from the parent or module.</span></div><button class="btn primary">Release</button></form>';
@@ -900,6 +901,20 @@ function drawerTask(t){
   const ev=D.events.filter(x=>x.key===t.key);
   h+='<div class="card"><h2>History</h2><div style="display:flex;flex-direction:column;gap:5px;margin-top:8px;font-size:13px">'+(ev.length?ev.map(x=>'<span><span class="mono muted">'+x.t.slice(5)+'</span> <b>'+esc(x.actor)+'</b> '+esc(x.text)+'</span>').join(''):'<span class="muted">No events yet.</span>')+'</div></div>';
   return h;
+}
+/* "edited <time>" (GitHub's lastEditedAt; GitHub keeps the history) and a stale authority analysis, on the row and in the task view. */
+const editedChip=t=>(t.edited?' <span class="muted" style="font-size:12px" title="'+esc(t.edited)+'">edited '+ageTxt((Date.now()-Date.parse(t.edited))/36e5)+'</span>':'')+(t.analysis==='stale'?' <span class="chip" title="The text changed since the authority analysis; it is analysed again before release">analysis stale</span>':'');
+/* The text editor: title and body go to the issue; the provenance block and the filed-by marker are shown read-only and kept by the server. */
+function editForm(t){
+  const d=UI.drawer.draft||{title:t.title,body:t.text||''},on=UI.armed==='edit:'+t.key;
+  return '<form class="card" data-form="edit" data-k="'+t.key+'" style="display:flex;flex-direction:column;gap:12px"><h2>Edit the text</h2>'
+   +(t.stage==='wip'?'<div class="proposal" style="background:var(--danger-tint);color:var(--danger)"><b>A Worker is working on this task.</b> It works from the text it got at launch; this edit does not reach that run and applies to the next attempt.</div>':'')
+   +(t.closed?'<div class="proposal">This task is closed. The edit is saved, but nothing reopens it.</div>':'')
+   +'<div class="field"><label for="et">Title</label><input id="et" type="text" name="title" required value="'+esc(d.title)+'"></div>'
+   +'<div class="field"><label for="eb">Text</label><textarea id="eb" name="body" rows="14">'+esc(d.body)+'</textarea></div>'
+   +((t.kept||[]).length?'<div class="field"><span>Kept as it is (re-attached on save)</span><pre class="muted" style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;margin:0">'+esc(t.kept.join('\n\n'))+'</pre></div>':'')
+   +'<span class="muted" style="font-size:12px">Labels keep their own controls. A saved edit makes the task’s authority analysis stale; it is analysed again before it can be released. GitHub keeps the edit history.</span>'
+   +'<div class="row"><button class="btn primary '+(on?'armed':'')+'" aria-label="'+(on?'Confirm: save the text':'Save the text')+'">'+(on?'Confirm?':'Save')+'</button><button type="button" class="btn" data-act="noedit" data-k="'+t.key+'">Cancel</button></div></form>';
 }
 function drawerNew(p){
   p=p||{};
@@ -970,6 +985,8 @@ function act(a,ds){
    case 'revall':ruleChanges().forEach(r=>revSet(r.sha,true));render();break;
    case 'open':UI.drawer={mode:'task',key:ds.k};render();break;
    case 'close':UI.drawer=null;render();break;
+   case 'edit':UI.drawer={mode:'task',key:ds.k,edit:true};render();break;
+   case 'noedit':UI.drawer={mode:'task',key:ds.k};render();break;
    case 'refresh':reload(ds.pane||UI.route);break;
    case 'new':UI.drawer={mode:'new'};render();break;
    case 'subtask':UI.drawer={mode:'new',prefill:{parent:t.number,module:t.module,title:'',type:'feature'}};render();break;
@@ -985,12 +1002,18 @@ function act(a,ds){
   }
 }
 document.addEventListener('click',function(e){const b=e.target.closest('[data-act]');if(!b)return;if(b.classList.contains('drawer-bg')&&e.target!==b)return;act(b.dataset.act,b.dataset);});
+document.addEventListener('input',function(e){const f=e.target.closest('[data-form=edit]');if(f&&UI.drawer)UI.drawer.draft={title:f.elements.title.value,body:f.elements.body.value};});
 document.addEventListener('change',function(e){if(e.target.id==='psel')pickProject(e.target.value);});
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&UI.drawer){UI.drawer=null;render();}});
 document.addEventListener('submit',async function(e){
   const f=e.target.closest('[data-form]');if(!f)return;e.preventDefault();
   const fd=new FormData(f);const k=f.dataset.k;const t=k&&byKey(D,k);const kind=f.dataset.form;
-  if(kind==='release')post({action:'release',n:t.number,p:fd.get('p'),d:fd.get('d')||''});
+  if(kind==='edit'){
+    UI.drawer.draft={title:fd.get('title'),body:fd.get('body')};
+    if(UI.armed!=='edit:'+k){UI.armed='edit:'+k;clearTimeout(armTimer);armTimer=setTimeout(()=>{UI.armed=null;render();},6000);render();return;}
+    UI.armed=null;clearTimeout(armTimer);
+    if(await post({action:'edit',n:t.number,title:fd.get('title'),body:fd.get('body')}))UI.drawer={mode:'task',key:k};render();}
+  else if(kind==='release')post({action:'release',n:t.number,p:fd.get('p'),d:fd.get('d')||''});
   else if(kind==='change')post({action:'change',n:t.number,p:fd.get('p')||'',d:fd.get('d')||''});
   else if(kind==='block')fd.get('b')&&post({action:'block',n:t.number,b:num(fd.get('b'))});
   else if(kind==='settings'){const b={action:'settings',enabled:f.elements.enabled.checked};

@@ -179,7 +179,7 @@ TIMELINE = """timelineItems(last:100,itemTypes:[LABELED_EVENT,UNLABELED_EVENT,AS
   ... on LabeledEvent{createdAt actor{login} label{name}} ... on UnlabeledEvent{createdAt actor{login} label{name}}
   ... on AssignedEvent{createdAt actor{login} assignee{... on User{login}}} ... on ClosedEvent{createdAt actor{login}}}}"""
 GQL = """query($o:String!,$r:String!,$after:String,$n:Int!){repository(owner:$o,name:$r){issues(first:$n,after:$after,orderBy:{field:CREATED_AT,direction:ASC}){
- pageInfo{hasNextPage endCursor} nodes{number databaseId title url body state stateReason createdAt updatedAt closedAt author{login}
+ pageInfo{hasNextPage endCursor} nodes{number databaseId title url body state stateReason createdAt updatedAt lastEditedAt closedAt author{login}
  labels(first:50){nodes{name}} assignees(first:5){nodes{login}} parent{number} blockedBy(first:50){nodes{number}}
  comments(last:10){nodes{body createdAt author{login}}}
  """ + TIMELINE + "}}}}"
@@ -506,6 +506,26 @@ def _prio_due(t, prio, due, set_due):
     return add, remove
 
 
+WIP_NOTE = "; a Worker is working from the old text, the edit applies to the next attempt"
+STALE_NOTE = "<!-- analysis: stale -->\nThe task text was edited in the Cockpit; its authority analysis is stale until the task is analysed again."
+
+
+def _edit_text(form, t, repo):
+    """Title and body of the issue from the editor. The provenance block and the filed-by marker are taken from the issue, never from the
+    form (read-only there), and re-attached; labels are untouched. A saved edit records the authority analysis as stale (a comment)."""
+    title, text = (form.get("title") or "").strip(), L.split_text(form.get("body"))[0]
+    if not title:
+        raise ValueError("a title is required")
+    if title == t["title"] and text == t["text"]:
+        return [], f"{t['key']}: nothing changed"
+    n = str(t["number"])
+    full = title if t["key"].startswith("#") else f"[{t['key']}] {title}"
+    ops = [["api", "-X", "PATCH", f"repos/{repo}/issues/{n}", "-f", f"title={full}", "-f", f"body={L.join_text(text, t['kept'])}"],
+           ["issue", "comment", n, "-R", repo, "--body", STALE_NOTE]]
+    note = WIP_NOTE if t["stage"] == "wip" else "; the task is closed" if t.get("closed") else ""
+    return ops, f"{t['key']} text saved{note}; its authority analysis is now stale"
+
+
 def plan_action(form, S, repo, simulate=False):
     ops, msg = _plan(form, S, repo, simulate)
     # new due:<date> labels must exist before they can be added
@@ -542,9 +562,13 @@ def _plan(form, S, repo, simulate):
         return [["variable", "set", "MODULE_DEADLINES", "--body", json.dumps(new, sort_keys=True), "-R", repo]], f"module deadline of {m} {'set to ' + d if d else 'cleared'}"
     t = _task(S, form.get("n"))
     n = str(t["number"])
+    if a == "edit":
+        return _edit_text(form, t, repo)
     if a == "release":
         if t["stage"] != "embryo":
             raise ValueError(f"{t['key']} is {t['stage']}; only embryos can be released")
+        if t.get("analysis") == "stale":
+            raise ValueError(f"{t['key']} was edited; its authority analysis is stale and must be redone before release")
         p, d = _prio(form.get("p")), form.get("d") or ""
         add, remove = _prio_due(t, p, d and _date(d), bool(d))
         return _edit(repo, t, ["released"] + add, remove), f"{t['key']} released as {p}" + (f", deadline {d}" if d else "")
