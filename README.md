@@ -67,6 +67,9 @@ An agent that finds a file contradicting a standing policy files a task with `to
 Only `name` and `repo` are required (optional: `project`, `manager`, `modules`, `git`, `code`, `phases`, `meta`). With more than one project the header shows a selector (remembered in the browser); every `/api/*` call takes `?project=NAME` (default: the `default`), `/api/projects` lists `[{name, repo}]`, and only the visible project is polled.
 Rationale and limits: [ADR 0012](docs/adr/0012-several-projects-in-one-instance.md).
 
+## Offline copy from a backup
+`python3 cockpit.py --offline BACKUP [--port N] [--token-file F]` runs a copy of one project from its backup (an archive or a folder). It makes no GitHub call and serves every pane from the restored data, whatever its age. The page shows the banner "offline copy, data from <time>", Settings are read-only and every action is refused. `python3 tools/backup_restore.py --gaps BACKUP` lists the panes whose data is not in the backup. `python3 tools/backup_restore.py BACKUP` is the restore test: it unpacks the backup into a temporary folder, starts the Cockpit offline on it and requests every pane's data. It fails when a pane has no data or when anything tries to reach GitHub. Layout and checks: [docs/contracts/backup.md](docs/contracts/backup.md).
+
 GitHub setup: `kit/` holds labels (`kit/setup.sh OWNER/REPO`), issue forms and the policy Action. Copy `kit/.github` to `.github` and `kit/policy.py` to `kit/policy.py` in the target repo, then `gh variable set MANAGER --body LOGIN`.
 
 ## Policies (Settings tab)
