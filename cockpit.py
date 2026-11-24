@@ -18,6 +18,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import logic as L
+from dispatcher.core import DEFAULTS as SETTING_DEFAULTS, load_settings
+from dispatcher.runtime import Config as RuntimeConfig
 
 log = logging.getLogger("cockpit")
 HERE = pathlib.Path(__file__).parent
@@ -429,6 +431,32 @@ def execute(ops, run=run_gh):
             last = {}
 
 
+def settings_path(p):
+    """The Dispatcher's settings file of the project: <data dir>/<project name>/dispatcher-settings.json (spec 6a)."""
+    return DATA_DIR / (p.get("name") or p["repo"].split("/")[-1]) / "dispatcher-settings.json"
+
+
+def get_settings(p):
+    """Current values (the defaults when the file is missing) with the cap on workers and the page's minimums."""
+    f = settings_path(p)
+    return dict(values=load_settings(f) if f.exists() else dict(SETTING_DEFAULTS), defaults=SETTING_DEFAULTS, minimums=L.SETTING_MINIMUMS,
+                workers_cap=RuntimeConfig.image_workers, steering=CFG["steer"])
+
+
+def save_settings(p, form):
+    """Validate and write the settings file atomically, mode 0600. ValueError on a refused value."""
+    values = L.validate_settings(form, SETTING_DEFAULTS, RuntimeConfig.image_workers)
+    f = settings_path(p)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_name(f.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        json.dump(values, fh, indent=2)
+    os.replace(tmp, f)
+    log.info("dispatcher settings saved for %s: %s", p.get("name", ""), values)
+    return "settings saved"
+
+
 def do_act(form, run=run_gh, state=None, p=None):
     """-> (http status, body). 403 when the app is read-only; acts on the project named in form["project"] (default project otherwise)."""
     if not CFG["steer"]:
@@ -436,6 +464,8 @@ def do_act(form, run=run_gh, state=None, p=None):
         return 403, dict(error="read-only: this instance was started with --read-only")
     try:
         p = p or proj(form.get("project"))
+        if form.get("action") == "settings":  # a local file, not a GitHub operation; same guard, same errors
+            return 200, dict(ok=True, msg=save_settings(p, form))
         S = state or get_state(fresh=True, p=p)
         ops, msg = plan_action(form, S, p["repo"], CFG["simulate"])
         execute(ops, run)
@@ -603,6 +633,8 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, build_questions(fresh=bool(q.get("fresh"))))
             if u.path == "/api/timeline":
                 return self.send(200, build_timeline(get_state(p=p), p))
+            if u.path == "/api/settings":
+                return self.send(200, get_settings(p))
             if u.path == "/api/rules":
                 return self.send(200, get_rules(p))
             if u.path == "/api/code":

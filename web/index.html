@@ -200,7 +200,7 @@ function sortKey(t){return STAGES.indexOf(t.stage)===2?0:(t.stage==='released'?1
 let PROJ=null,PROJS=[];  /* the selected project (name) and the configured ones; the choice is kept in localStorage `cockpit-project` */
 const NOMETA=()=>({footprint:{status:'missing'},churn:{status:'missing'},ambiguity:{status:'missing'}});
 let Q={questions:[],counts:{},projects:[]};  /* open questions of every project: /api/questions, not tied to the selected project */
-let D=null,CODE={wired:false,modules:{}},FEED=[],MODULES=[],RULES={configured:false},META=NOMETA();
+let SET=null,D=null,CODE={wired:false,modules:{}},FEED=[],MODULES=[],RULES={configured:false},META=NOMETA();
 const SVGC={};
 const UI={churnRel:true,route:'cockpit',filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',tlType:'all',rulesGroup:'all',qProj:'all',codeMod:'unassigned',codeTab:'quality',fit:{deps:true,erd:true,js:true,flow:false},toast:'',err:'',armed:null};
 const ST=()=>!!(D&&D.source.steering);
@@ -234,7 +234,7 @@ async function reload(fresh){
   const mine=PROJ;
   const qp=loadQuestions(fresh);
   try{
-    const [s,f,c,r,mt]=await Promise.all([api('/api/state'+(fresh?'?fresh=1':'')),api('/api/timeline'),api('/api/code'),api('/api/rules').catch(e=>({configured:false,error:e.message})),api('/api/cardmeta').catch(e=>null)]);
+    const [s,f,c,r,mt,se]=await Promise.all([api('/api/state'+(fresh?'?fresh=1':'')),api('/api/timeline'),api('/api/code'),api('/api/rules').catch(e=>({configured:false,error:e.message})),api('/api/cardmeta').catch(e=>null),api('/api/settings').catch(e=>null)]);SET=se;
     if(mine!==PROJ)return;  /* the user switched project while this was loading: drop the answer */
     D=s;TODAY=D.today;MODULES=D.modules;FEED=f.entries;CODE=c;RULES=r;META=mt||NOMETA();UI.err='';
     if(!CODE.modules[UI.codeMod]&&!MODULES.some(m=>m.id===UI.codeMod&&m.parent)){const k=MODULES.find(m=>!m.virtual);UI.codeMod=CODE.modules[k&&k.id]?k.id:'unassigned';}
@@ -450,6 +450,21 @@ function vTimeline(){
   return h+'<p class="muted" style="font-size:13px;margin:0">Commits come from git, issues and task events from GitHub, the rest from the project files. Newest 200 of '+total+'.</p></div>';
 }
 
+const SETROWS=[['enabled','Dispatcher on','Starts a Worker at each firing while on.'],['interval_minutes','Interval (minutes)','How often launchd starts a firing.'],
+  ['retries','Retries','How many times a failed task is tried again (0 = never).'],['workers','Workers','How many run at once.'],
+  ['runaway_minutes','Runaway limit (minutes)','A Worker running longer is killed.'],['idle_minutes','No-activity limit (minutes)','A Worker with no record for this long is killed.'],
+  ['start_minutes','No-start limit (minutes)','A Worker that has not started within this time is killed.']];
+function vSettings(){
+  const head='<div class="page"><div><h1>Settings</h1><span class="muted">How the Dispatcher behaves. It reads the file at each firing.</span></div>';
+  if(!SET)return head+'<div class="card"><span class="muted">Settings could not be loaded.</span></div></div>';
+  const v=SET.values,ro=!ST(),mn=SET.minimums;
+  const note=k=>k==='workers'?' Most '+SET.workers_cap+', the worker users in the image.':(mn[k]?' At least '+mn[k]+'.':'');
+  return head+'<form class="card" data-form="settings" style="display:flex;flex-direction:column;gap:12px">'+SETROWS.map(r=>'<div class="field"><label for="s_'+r[0]+'">'+r[1]+'</label>'
+   +(r[0]==='enabled'?'<input id="s_enabled" name="enabled" type="checkbox"'+(v.enabled?' checked':'')+(ro?' disabled':'')+'>'
+     :'<input id="s_'+r[0]+'" name="'+r[0]+'" type="number" step="1" min="'+(mn[r[0]]!==undefined?mn[r[0]]:(r[0]==='retries'?0:1))+'"'+(r[0]==='workers'?' max="'+SET.workers_cap+'"':'')+' value="'+esc(String(v[r[0]]))+'"'+(ro?' disabled':'')+'>')
+   +'<span class="muted" style="font-size:12px">'+r[2]+note(r[0])+'</span></div>').join('')
+   +(ro?'<span class="muted">This Cockpit was started with --read-only: the values cannot be changed here.</span>':'<div><button class="btn primary">Save</button></div>')+'</form></div>';
+}
 function vRules(){
   const head='<div class="page"><div><h1>Rules</h1><span class="muted">Files that steer the agents and the project. They have long reach, so every change is tracked here and waits for your review.</span></div>';
   if(!RULES.configured)return head+'<div class="card tile nw"><span class="label">Rules</span><span class="v muted" style="font-size:18px">not configured</span><span class="muted" style="font-size:13px">add a "rules" key to the --modules JSON'+(RULES.error?' ('+esc(RULES.error)+')':'')+'</span></div></div>';
@@ -613,7 +628,7 @@ function drawerNew(p){
 /* ---------- render and actions ---------- */
 function render(){
   const R=UI.route;
-  const nav=[['cockpit','Cockpit'],['backlog','Backlog'],['questions','Open questions'],['timeline','Timeline'],['rules','Rules'],['code','Code'],['how','How it works']];
+  const nav=[['cockpit','Cockpit'],['backlog','Backlog'],['questions','Open questions'],['timeline','Timeline'],['rules','Rules'],['settings','Settings'],['code','Code'],['how','How it works']];
   let h='<div class="top"><span class="brand">Project cockpit</span><nav class="nav" aria-label="Main">'+nav.map(n=>'<button data-act="go" data-r="'+n[0]+'"'+(R===n[0]?' aria-current="page"':'')+'>'+n[1]+(n[0]==='questions'?' <span class="chip" aria-label="'+Q.questions.length+' open">'+Q.questions.length+'</span>':'')+'</button>').join('')+'</nav>';
   if(PROJS.length>1)h=h.replace('</span><nav','</span><select class="psel" id="psel" aria-label="Project">'+PROJS.map(p=>'<option value="'+esc(p.name)+'"'+(p.name===PROJ?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select><nav');
   if(D){const s=D.source;
@@ -624,7 +639,7 @@ function render(){
   if(UI.err)h+='<div class="page"><div class="card" style="border-color:var(--danger)"><b class="warnline">Could not load from GitHub.</b> <span class="muted">'+esc(UI.err)+'</span> <button class="btn small" data-act="refresh">Retry</button></div></div>';
   else if(!D)h+='<div class="page"><span class="muted">Loading…</span></div>';
   else{
-  h+=R==='cockpit'?vCockpit():R==='backlog'?vBacklog():R==='questions'?vQuestions():R==='timeline'?vTimeline():R==='how'?vHow():R==='rules'?vRules():vCode();
+  h+=R==='cockpit'?vCockpit():R==='backlog'?vBacklog():R==='questions'?vQuestions():R==='timeline'?vTimeline():R==='how'?vHow():R==='rules'?vRules():R==='settings'?vSettings():vCode();
   if(UI.drawer){const t=UI.drawer.key&&byKey(D,UI.drawer.key);h+='<div class="drawer-bg" data-act="close"></div><div class="drawer" role="dialog" aria-modal="true" aria-label="Task">'+(UI.drawer.mode==='new'&&ST()?drawerNew(UI.drawer.prefill):(t?drawerTask(t):''))+'</div>';}
   }
   if(UI.toast)h+='<div class="toast" role="status">'+esc(UI.toast)+'</div>';
@@ -679,6 +694,8 @@ document.addEventListener('submit',async function(e){
   if(kind==='release')post({action:'release',n:t.number,p:fd.get('p'),d:fd.get('d')||''});
   else if(kind==='change')post({action:'change',n:t.number,p:fd.get('p')||'',d:fd.get('d')||''});
   else if(kind==='block')fd.get('b')&&post({action:'block',n:t.number,b:num(fd.get('b'))});
+  else if(kind==='settings'){const b={action:'settings',enabled:f.elements.enabled.checked};
+    SETROWS.slice(1).forEach(r=>{b[r[0]]=fd.get(r[0]);});post(b);}
   else if(kind==='moddl')post({action:'moddl',module:f.dataset.m,d:fd.get('d')||''});
   else if(kind==='new'){const title=fd.get('title');
     if(await post({action:'new',title:title,desc:fd.get('desc'),module:fd.get('module'),type:fd.get('type'),cls:fd.get('cls'),parent:fd.get('parent')||''})){
