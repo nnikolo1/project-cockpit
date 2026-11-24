@@ -235,7 +235,7 @@ class Runtime:
         base = f"/area/{task_id}"
         env = dict(SWITCHES, ANTHROPIC_BASE_URL=f"http://127.0.0.1:{self.cfg.relay_port}",
                    ANTHROPIC_AUTH_TOKEN=dummy_token(user), CLAUDE_CONFIG_DIR=f"/home/{user}/.claude",
-                   HOME=f"/home/{user}")
+                   HOME=f"/home/{user}", WORKER_TASK_ID=task_id, WORKER_OUTBOX=f"{base}/outbox")  # 4t: for the Stop hook
         prompt = INSTRUCTION.format(inbox=f"{base}/inbox", outbox=f"{base}/outbox", clone=clone)
         backstop = 2 * self.cfg.runaway_minutes * 60
         cmd = [self.cfg.container, "exec", "--user", user, "--workdir", clone]
