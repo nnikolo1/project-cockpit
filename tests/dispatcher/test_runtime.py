@@ -1,5 +1,6 @@
 import json
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -230,7 +231,17 @@ def test_launch_command(tmp_path):
     assert "/area/T-5/inbox/task.md" in line and "/area/T-5/outbox/started" in line
     assert "goodbye.json" in line and "result.bundle" in line
     assert f.calls and f.calls[0][0][1] == "exec"  # the clone ran first
-    assert "sudo" not in line
+    assert "sudo" not in line and "--dangerously-skip-permissions" not in line
+
+
+def test_containerfile_settings_allowlist():
+    text = (pathlib.Path(rt.__file__).parent / "image" / "Containerfile").read_text()
+    raw = re.search(r"^ARG WORKER_SETTINGS='(.*)'$", text, re.M).group(1)
+    s = json.loads(raw)
+    assert s["skipWebFetchPreflight"] is True
+    assert s["permissions"]["allow"] == ["Edit", "Write", "Bash(git:*)", "Bash(python3:*)", "Bash(pytest:*)"]
+    assert s["permissions"]["deny"] == ["WebFetch", "WebSearch"]
+    assert '"$WORKER_SETTINGS"' in text
 
 
 def test_launch_aborts_when_clone_fails(tmp_path):

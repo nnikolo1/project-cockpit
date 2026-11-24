@@ -241,6 +241,6 @@ class Runtime:
         cmd = [self.cfg.container, "exec", "--user", user, "--workdir", clone]
         for k, v in env.items():
             cmd += ["--env", f"{k}={v}"]
-        cmd += [self.cfg.name, "timeout", str(backstop), "claude", "-p", prompt, "--dangerously-skip-permissions"]
+        cmd += [self.cfg.name, "timeout", str(backstop), "claude", "-p", prompt]
         log.info("launching %s for task %s in %s", user, task_id, clone)
         return self._spawn(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
