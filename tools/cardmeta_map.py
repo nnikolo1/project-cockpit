@@ -20,7 +20,12 @@ UNASSIGNED = "unassigned"
 
 
 def load_map(path: Path) -> dict:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    return load_map_text(Path(path).read_text(encoding="utf-8"))
+
+
+def load_map_text(text: str) -> dict:
+    """Parse and validate a module map given as JSON text."""
+    data = json.loads(text)
     ids = [m["id"] for m in data["modules"]]
     if len(set(ids)) != len(ids):
         raise ValueError("duplicate module ids in the module map")
