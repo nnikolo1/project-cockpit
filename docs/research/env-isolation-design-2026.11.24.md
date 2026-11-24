@@ -11,10 +11,10 @@ Marks: **[V]** verified on 2026-11-24 by reading the code, a commit, a live `lau
 ## Short answer
 
 - An environment is not a folder or a container: it is a **named set of everything a running system touches**: code, data, configuration and secrets, external accounts, scheduler jobs and ports, containers, browsers, and who may act there. Isolation means no two environments share any of these by accident, and a guard refuses to start when they would.
-- **Production gets its own clean checkout at a release tag**; the working clone becomes development only; **test is created on demand and torn down**, on the same laptop, with its own names for everything (container, image tag, socket, data root, labels, ports, repository) and a stub of the model.
+- **Production runs from immutable release folders, one per tag, behind a `current` link switched atomically** (revised in section 14; first draft: a clean checkout at a release tag); the working clone becomes development only; **test is created on demand and torn down**, on the same laptop, with its own names for everything (container, image tag, socket, data root, labels, ports, repository) and a stub of the model.
 - **On this MacBook, production and test must take turns, not run side by side**: one container VM at a time, three Workers at most while the owner works, the test run only when production has no Worker running.
-- **Deploy is one command** (tests, tag, update the production checkout, reload the jobs, health check, deploy log; rollback is the same command with the previous tag). It reuses the pattern of the earlier, never-merged scripts.
-- **Borrow** git (tags, a second clone), launchd or systemd, Chrome for Testing for projects that drive a browser, and the existing stub of the model; **build** one environment record with its collision guard, the deploy script and the test-run wrapper. About three days for the cockpit, a day for the first step.
+- **Deploy is one command** (tests, tag, export the release folder, switch `current`, reload the jobs, health check with automatic rollback on failure, deploy log; rollback switches `current` back). It reuses the pattern of the earlier, never-merged scripts.
+- **Borrow** git (tags, `git archive`), launchd or systemd, Chrome for Testing for projects that drive a browser, the existing stub of the model and, optionally, a free external heartbeat monitor; **build** one environment record with its collision guard, the deploy script and the test-run wrapper. About three to three and a half days for the cockpit, a day for the first step, no recurring cost (section 14).
 
 ## 0. What the earlier work established, its scope and limits
 
@@ -147,12 +147,12 @@ The deploy command, one script per project (dry run by default):
 1. **Check**: the commit is on main; the working tree is clean; unit tests green; the integration run green when the Task Queue changed.
 2. **Tag**: `prod-YYYYMMDD-N`, annotated (the earlier naming).
 3. **Wait for production to be idle** for the parts that need it: no Worker running (read from the Dispatcher's state file); switch the Dispatcher off through its own setting for the duration.
-4. **Update** the production checkout: `git fetch --tags`, `git checkout --detach <tag>` in the separate clone.
-5. **Check after checkout**: imports and a quick self-test; on failure, check out the previous tag again and stop.
+4. **Export** the release (revised, section 14): `git archive <tag>` into `releases/<tag>/`, made read-only; the running release is untouched.
+5. **Check the new release folder**: imports and a quick self-test run from it; on failure, stop (nothing was switched). Then switch `current` to it atomically.
 6. **Reload**: bootout and bootstrap every job of the project (service, Dispatcher, quota), as the cockpit's restart rule says; rebuild and re-tag the Worker image only when its recipe changed.
 7. **Health check**: the service answers on its port (the `curl` check in `deployment.md`); the next Dispatcher heartbeat appears in the processing log; switch the Dispatcher on again.
-8. **Record**: one line in a deploy log in the production data root (time, tag, previous tag, gates, who), and the manual-interventions row where the owner's rule asks for one.
-9. **Rollback**: the same command with the previous tag.
+8. **Record**: one JSON line in a deploy log in the production data root (time, tag, commit, previous tag, gates, result, who), and the manual-interventions row where the owner's rule asks for one. A failed health check switches `current` back, reloads and records the rollback.
+9. **Rollback**: switch `current` to the previous release folder and reload (the previous folders are kept; the newest five, for example).
 
 ## 8. The hypothesis on PC-84, judged
 
@@ -171,8 +171,8 @@ PC-84 proposes: production = a separate clean clone updated by one command; deve
 
 | # | Step | Effort [I] |
 |---|---|---|
-| 1 | **Production checkout for the cockpit**: a separate clone at the first tag; repoint the service, Dispatcher and quota jobs to it (their data paths stay); a deploy script with the steps of section 7 and rollback; deploy log. From then on a merge no longer changes production. | 0.5-1 day |
-| 2 | **Test names for the Task Queue**: container name, image tag, socket, area, data root and labels read from the environment record; the test driver uses the test record and stops only its own container; a test root outside production's root; the driver refuses to run while production has a Worker running. | 0.5-1 day |
+| 1 | **Production release folders for the cockpit** (revised, section 14): `releases/<tag>/` exported with `git archive` and made read-only, a `current` link switched atomically; the service, Dispatcher and quota job plists generated to point at `current` (their data paths stay); a deploy script with the steps of section 7 and section 14.3, automatic rollback on a failed health check; a JSON-lines deploy log. From then on a merge no longer changes production. | 1 day |
+| 2 | **Test names for the Task Queue** (the container name part was done on main in commit `da5dc918`): image tag, socket, area, data root and labels read from the environment record; the test driver uses the test record and stops only its own container; a test root outside production's root; the driver refuses to run while production has a Worker running. | 0.5-1 day |
 | 3 | **The environment record and guard**, generic: the common keys, the collision refusal, a guard test that fails on a hard-coded production path; written so another project adds its own keys. | 1 day |
 | 4 | **Promotion criteria in the deploy script**: which test layers must be green for which modules. | 2-4 hours |
 | 5 | **For a project with an extension, a database or a browser**: port the earlier patterns (locks by construction, handshake, test build identity, Chrome for Testing profile, additive migrations, scrubbed or synthetic data) into that project's record and deploy script; the earlier branch is a source of ideas, not something to merge as is. | per project; the earlier estimate for its first slice was 4.5 agent-days |
@@ -199,7 +199,7 @@ Steps 1 and 2 are about the Task Queue itself, so under the cockpit's standing r
 
 ## 11. The first small step (one day)
 
-Step 1 for the cockpit alone: clone the repository into a production folder at a first tag; write the deploy script in dry-run form and run it; then, with the owner's yes, repoint the three jobs to the production clone (bootout, bootstrap), check the service and the next heartbeat, and write the first deploy-log line. Success test: a commit in the working clone no longer changes what the service and the Dispatcher run, and `deploy <previous tag>` brings back the old version.
+Step 1 for the cockpit alone (revised, section 14): export the first tag into `releases/<tag>/` and point `current` at it; write the deploy script in dry-run form and run it; then, with the owner's yes, regenerate the three jobs to run from `current` (bootout, bootstrap), check the service and the next heartbeat, and write the first deploy-log line. Success test: a commit in the working clone no longer changes what the service and the Dispatcher run, and `deploy --rollback` brings back the previous release in seconds.
 
 ## 12. What the owner has to decide
 
@@ -207,7 +207,8 @@ Step 1 for the cockpit alone: clone the repository into a production folder at a
 2. **Where does the test environment run?** Recommendation: on this MacBook, taking turns with production Workers (section 4); a second host only when a combination that does not fit is needed.
 3. **Which model does the test use?** Recommendation: the stub for every automated layer; the real model only in a live canary the owner asks for, with a cap.
 4. **What happens to the earlier, never-merged environment work of the first project?** Recommendation: do not merge it as is; use it as the pattern for step 5 when that project's turn comes.
-5. **Are test runs limited to an allow-list of throwaway repositories?** Recommendation: yes, the guard refuses any other repository in test.
+5. **Are test runs limited to an allow-list of throwaway repositories?** Recommendation: yes, the guard refuses any other repository in test; and (added in section 14) the test runs with a fine-grained GitHub token limited to the throwaway repository, so that GitHub, not only the guard, enforces it (a manual step of the owner).
+7. **(New, section 14) May the daily backup and the Dispatcher ping a free external heartbeat monitor** (healthchecks.io, free plan; only a ping, no payload)? Recommendation: yes; it is the one way to learn that a job stopped while the Cockpit is not open.
 6. **How many Workers in production during the day?** Recommendation: keep 3 while the owner works; more only when the host is otherwise idle.
 
 ## 13. The three facts I am least sure of
@@ -215,3 +216,91 @@ Step 1 for the cockpit alone: clone the repository into a production folder at a
 1. **That the memory warning is mostly the host's baseline and not the Workers'**: the heartbeats show "warn" with no Worker running, but they do not say which processes cause it; the interactive session's and the browser's share was not measured.
 2. **That a second container VM costs about 0.7 GB idle**: inferred from the production container's idle figure; not measured for a second, concurrent container on macOS 15 with this unsupported tool version.
 3. **That the service, the Dispatcher and the quota job run unchanged from a clean clone**: they take all their data paths as arguments [V for the Dispatcher], but whether any of them reads a file that exists only in the working clone (a code snapshot, `--git`) was not checked for the service and the quota job.
+
+## 14. Fit to the bar: light yet state of the art
+
+Owner briefs: F-813 ("as light as possible but it still needs to qualify as a SOTA solution for projects of this size"), F-814 (recent DevOps practice and tools; open source or free to modestly paid, a budget of 20 euros a month). Sources read on 2026-11-24; repository figures from the public GitHub API (stars; last push, used as a proxy for the last commit). Trust rules: at least 10 stars, a commit within 30 days (on or after 2026-10-25), a licence, reputation.
+
+### 14.1 What current good practice includes, at this size
+
+| # | Practice | Source (read 2026-11-24) | Simplest tool at this size |
+|---|---|---|---|
+| P1 | Configuration out of the code, per environment | Twelve-factor: "strict separation of config from code"; the code "could be made open source at any moment, without compromising any credentials" [V, [12factor.net/config](https://12factor.net/config)] | a 0600 file per environment outside the repository |
+| P2 | Environment parity | "resists the urge to use different backing services between development and production"; "the same type and version of each of the backing services" [V, [12factor.net/dev-prod-parity](https://12factor.net/dev-prod-parity)] | the same image tag and the same Python in test and production |
+| P3 | Trunk-based work | merge to trunk "at least once ... a day"; branches "typically last no more than a few hours"; "three or fewer active branches" [V, [DORA, trunk-based development](https://dora.dev/capabilities/trunk-based-development/)] | git; short `worker/` branches merged by the interactive session |
+| P4 | Tagged, immutable, reproducible releases | "Every release should always have a unique release ID"; "a release cannot be mutated once it is created" [V, [12factor.net/build-release-run](https://12factor.net/build-release-run)]; builds "depend on known versions of build tools ... and dependencies" [V, [Google SRE book, Release engineering](https://sre.google/sre-book/release-engineering/)] | annotated git tags; the image's base pinned by digest; the agent's version pinned |
+| P5 | Immutable release folders, atomic switch, instant rollback | "`releases` holds all deployments in a timestamped folder"; `current` points at the latest and still at the old one if a deploy fails; a log of "every deploy or rollback" [V, [Capistrano, structure](https://capistranorb.com/documentation/getting-started/structure/)]; a rename "will be an atomic operation (this is a POSIX requirement)" [V, Python `os.replace` documentation source] | `git archive` into `releases/<tag>/`, a `current` link replaced with `os.replace` |
+| P6 | Infrastructure and jobs defined as files | infrastructure defined "through source code that can then be treated just like any software system" [V, [Fowler, 2016-03-01](https://martinfowler.com/bliki/InfrastructureAsCode.html)] | the plists generated from the environment record (`dispatcher/launchd.py` already generates them) |
+| P7 | Health check and smoke test after deploy, rollback on failure | Capistrano switches only after a successful deploy [V, above]; automatic rollback on a failed check [I, common practice] | the existing `curl` check and the next heartbeat |
+| P8 | Separate credentials per environment | fine-grained tokens "can be further limited to only access specific repositories", with expiry [V, [GitHub docs](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)]; model keys "tied to the Workspace" [V, section 10] | a fine-grained token for the test repository; the stub for the model |
+| P9 | Ephemeral test environments | "throwaway, lightweight instances", started for the tests and removed afterwards [V, [Testcontainers](https://testcontainers.com/)] | a temporary test root and a test-named container, torn down by the test command |
+| P10 | A record of what runs where; deploy observability | the four keys: deployment frequency, change lead time, change fail rate, failed deployment recovery time [V, [DORA, updated 2026-01-05](https://dora.dev/guides/dora-metrics-four-keys/)] | a JSON-lines deploy log from which the four keys can be computed; a `status` subcommand |
+| P11 | Heartbeat monitoring of scheduled jobs | a job pings after each run; silence raises an alert [V, healthchecks.io: "Monitor 20 jobs" on the free plan, [pricing](https://healthchecks.io/pricing/)] | a ping from the daily backup and the Dispatcher |
+| P12 | Backup and a tested restore | — [I, common practice] | the existing daily archive and `tools/backup_restore.py`; release folders are rebuilt from tags |
+
+### 14.2 The design against the bar
+
+| # | In the design? | How, or why not |
+|---|---|---|
+| P1 | Yes | the environment record and 0600 files outside the repository (section 3) |
+| P2 | **Was missing, added** | the Worker image is built once per release, tagged with the release tag, tested, then the same tag runs in production; the Python version is recorded in the deploy log. Full parity of host and tools (macOS laptop versus a Linux box later) is not reachable on one laptop and is left out |
+| P3 | Yes | the Task Queue's branches live for one task; the interactive session merges to main |
+| P4 | Partly; **added** | tags existed; added: base image pinned by digest, agent version pinned (fit-gap item 1). Hermetic builds (Nix, Devbox) are left out as too heavy for a stdlib project |
+| P5 | **Was weaker, changed** | the first draft checked out a tag in place in one clone; now immutable release folders and an atomic `current` switch: rollback is a link switch plus a reload, and a failed export never touches the running release |
+| P6 | Partly; **made explicit** | production plists are generated from the record and point at `current`; nothing is edited by hand |
+| P7 | Partly; **added** | the health check existed; added: automatic rollback when it fails |
+| P8 | Partly; **added** | the stub covered the model; added: a fine-grained token limited to the throwaway repository for test (question 5). Separate identities for roles stay as in ADR 0011, phase 2 |
+| P9 | Yes | section 4; the container-name collision was fixed on main (`da5dc918`) |
+| P10 | Partly; **added** | the deploy log becomes JSON lines (time, tag, commit, previous tag, result, rollback) and `deploy status` prints the running tag per project and how many commits main is ahead. No dashboard: the four keys can be computed from the log when wanted |
+| P11 | **Was missing, added (optional, question 7)** | the Cockpit shows heartbeats only when open; an external dead-man's switch reports a stopped job |
+| P12 | Yes | existing backup and restore check; nothing added |
+
+### 14.3 Tools surveyed (F-814)
+
+Prices are list prices on the cited pages; "free" means no charge at the plan named.
+
+| Area | Candidate | Licence | Price | Stars; last push | Trust | Verdict, what it replaces, effort |
+|---|---|---|---|---|---|---|
+| Release folders | Capistrano | MIT | free | 13,011; 2026-11-02 | passes | **pattern only**: Ruby and SSH for one laptop is more than a 100-line script |
+| | Deployer | MIT | free | 11,127; 2026-08-26 | fails (30 days) | pattern only |
+| Deploy to servers | Kamal | MIT | free | 14,754; 2026-11-18 | passes | not now: needs Docker and SSH hosts; reconsider with a Linux box |
+| Task runner | just | CC0-1.0 | free | 36,826; 2026-11-15 | passes | **optional**: one `just test / deploy / rollback` surface across all projects, many community skills for Claude Code (skill directories, not verified for quality); adds one binary; ~1 hour per project |
+| | Task (go-task) | MIT | free | 16,384; 2026-11-24 | passes | alternative to just; not needed |
+| | make | GPL | free, preinstalled | — | — | works, poorer ergonomics |
+| Tool versions and per-folder env | mise | MIT | free | 36,465; 2026-11-24 | passes | optional: pins the Python version (P2) and replaces direnv and a task runner in one; not now, a recorded version is enough |
+| | direnv | MIT | free | 15,561; 2026-11-23 | passes | not needed: launchd sets the environment of jobs |
+| Reproducible environments | Nix | LGPL-2.1 | free | 18,067; 2026-11-24 | passes | too heavy for this size |
+| | Devbox | Apache-2.0 | free | 12,477; 2026-11-23 | passes | too heavy (built on Nix) |
+| Images | Apple `container build` | Apache-2.0 | free | 52,061; 2026-11-13 | passes | **keep** (already used); tag per release, base by digest; no registry on one host |
+| | Podman | — | free | not fetched (the API answered "moved") | unverified | only for a Linux box |
+| Secrets | macOS Keychain, 0600 files | — | free, built in | — | — | **keep** |
+| | sops | MPL-2.0 | free | 23,840; 2026-11-23 | passes | optional: only when secrets must be versioned in a repository; not now |
+| | age | BSD-3 | free | 24,452; 2026-08-29 | fails (30 days) | not proposed |
+| | Infisical | licence not stated by the API | free tier [I] | 30,730; 2026-11-24 | licence unclear | not proposed |
+| | 1Password CLI | proprietary | not verified whether the owner holds a plan | — | — | not proposed |
+| Supervision | launchd, systemd | — | free, built in | — | — | **keep** |
+| | Supervisor | licence not stated by the API | free | 9,179; 2025-12-21 | fails (stars, 30 days) | not proposed |
+| Heartbeat monitoring | healthchecks.io (hosted) | BSD-3 (code) | **free plan: 20 jobs, 100 log entries per job**; Supporter 5 USD a month, same limits | 10,544; 2026-11-23 | passes | **recommended, optional on the owner's yes (question 7)**: a `curl` after the backup and after each Dispatcher firing; ~1 hour |
+| | Uptime Kuma (self-hosted) | MIT | free | 94,829; 2026-11-24 | passes | later, on an always-on box; a monitor on the monitored laptop sees nothing when it sleeps |
+| | Gatus (self-hosted) | Apache-2.0 | free | 12,887; 2026-11-23 | passes | as Uptime Kuma |
+| CI | GitHub Actions, hosted | — | public repositories: free on standard runners; private: included usage of 12 USD a month on Free, 18 USD on Pro [V, [GitHub billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions)] | — | — | **keep** for the public cockpit repository; for private projects the deploy command's local test gate is the gate of record and hosted CI stays small (the owner once exhausted the allowance) |
+| | Self-hosted runner | — | listed as free; usage does not reduce the included amount [V, same page] | — | — | not now: a runner on the laptop adds a service and, on a public repository, runs code from pull requests [I] |
+| | act (workflows locally) | MIT | free | 72,779; 2026-11-19 | passes | not now: it needs Docker, which this host does not run [I] |
+| Ephemeral test environments | Testcontainers for Python | Apache-2.0 | free | 2,322; 2026-10-09 | fails (30 days) | not proposed; the test command already does this |
+| Logs and deploy markers | files with rotation (`newsyslog` on macOS, `logrotate` on Linux) [I] | — | free, built in | — | — | **keep**; the deploy log is the marker |
+| Backup | the existing daily archive to Drive | — | the owner's existing Drive storage | — | — | **keep** |
+| | restic | BSD-2 | free | 37,425; 2026-11-22 | passes | optional: versioned, encrypted backups if Drive archives are not enough; not now |
+
+**Cost of the recommended set: 0 euros a month.** Optional with a price: healthchecks.io Supporter (5 USD a month, same limits, only to support the project); a GitHub Pro plan (more included Actions usage) only if private CI is wanted again. Both stay within the 20-euro budget.
+
+### 14.4 What changed in the design
+
+1. **Release folders instead of an in-place checkout** (sections 7, 9, 11, short answer): `releases/<tag>/` from `git archive`, read-only, and a `current` link switched with an atomic rename; keep the newest five. Same effort, instant rollback, no half-updated state.
+2. **Automatic rollback** when the health check after a deploy fails (section 7).
+3. **Deploy log as JSON lines** and a `status` subcommand (what runs where, how far main is ahead); the DORA four keys can be computed from it later.
+4. **Parity**: the Worker image is tagged per release and tested before production uses the same tag; base image by digest; the Python version recorded.
+5. **Per-environment credential for test**: a fine-grained token limited to the throwaway repository (question 5, a manual step of the owner).
+6. **Optional external heartbeat** for the backup and the Dispatcher (new question 7).
+7. **Nothing heavier added**: no deploy tool, no secrets manager, no self-hosted CI, no monitoring stack. `just` is the one optional addition, for a uniform command surface across projects.
+
+The owner's questions 1 to 6 were re-checked: 1, 2, 3, 4 and 6 stand as written; 5 gains the scoped token; 7 is new.
