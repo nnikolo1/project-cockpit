@@ -215,7 +215,7 @@ Step 1 for the cockpit alone (revised, section 14): export the first tag into `r
 
 1. **That the memory warning is mostly the host's baseline and not the Workers'**: the heartbeats show "warn" with no Worker running, but they do not say which processes cause it; the interactive session's and the browser's share was not measured.
 2. **That a second container VM costs about 0.7 GB idle**: inferred from the production container's idle figure; not measured for a second, concurrent container on macOS 15 with this unsupported tool version.
-3. **That the service, the Dispatcher and the quota job run unchanged from a clean clone**: they take all their data paths as arguments [V for the Dispatcher], but whether any of them reads a file that exists only in the working clone (a code snapshot, `--git`) was not checked for the service and the quota job.
+3. **That the service, the Dispatcher and the quota job run unchanged from a read-only release folder without `.git`** (revised with section 14): they take all their data paths as arguments [V for the Dispatcher], but whether any of them reads a file that exists only in the working clone (a code snapshot, `--git`, git metadata) or writes beside its code (Python's `__pycache__`) was not checked for the service and the quota job.
 
 ## 14. Fit to the bar: light yet state of the art
 
