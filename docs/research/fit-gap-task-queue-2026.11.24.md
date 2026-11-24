@@ -249,6 +249,50 @@ Open issues about using a Claude Code subscription with these tools were not sea
 
 Each of these lacks one of: deterministic choice (constitution "The Dispatcher"), no push (3e), or a local log (5c). These are owner rules, not conveniences. **Keep the Dispatcher's queue and ranking.**
 
+### Prior art: Claude Code under Slurm, SGE and other cluster managers (F-769)
+
+**Searches tried (2026-11-24):**
+- `"claude code" slurm sbatch headless "claude -p" HPC cluster`
+- `Claude Code agents Slurm job submission orchestrator github repository`
+- `"claude" "grid engine" OR "qsub" OR "HTCondor" OR "LSF" claude code agent batch jobs`
+- `hpc-agent pypi SGE SLURM array batch Claude Code orchestrator github`
+- `anthropic "long-running" Claude Code Slurm tmux compute node`
+- `github issues to slurm jobs claude code agent "sbatch" ...`
+
+**Found:** a fair amount for Slurm, two projects naming SGE, and nothing for LSF or HTCondor beyond generic scheduler pages.
+
+| Item | What it shows | Mark |
+|---|---|---|
+| [Kempner Institute handbook](https://handbook.eng.kempnerinstitute.harvard.edu/s5b_agentic_ai_workflows/using_agentic_ai_on_the_cluster.html) (updated 2026-10-11) | Long tasks run "in print mode (`claude -p`) in a batch job". The login (institutional SSO) "is saved in your home directory, so it works on every node and in batch jobs"; keep `ANTHROPIC_API_KEY` unset. Compute nodes have outbound access, so bypass mode is discouraged. Sessions are resumed from `~/.claude/projects/` on any node; `--continue` does not pick up a `-p` session. | [V] |
+| [ResearchLoop](https://researchloop.github.io/researchloop/) ([PyPI](https://pypi.org/project/researchloop/) 0.3.4, 2026-05-22, MIT) | **The closest hybrid.** An orchestrator "submits jobs to the cluster over SSH" for "your SLURM or SGE cluster". A runner inside each job chains `claude -p` steps; "All steps share a single Claude session (via `--resume`)". Global, cluster and study context files carry context; completion arrives by webhook. Authentication on nodes, token accounting and sandboxing are not stated on the pages read. | [V] |
+| [hpc-agent](https://pypi.org/project/hpc-agent/) (releases 0.3.0 and 0.4.0, 2026-05-21/22 per its release feed) | The reverse direction: Claude Code drives array-batch experiments on SGE or SLURM. It installs slash commands, skills and Stop hooks, and chains waves with scheduler dependencies. Claude itself is not run as the job. | [V via search summary of the PyPI page and release feed; the PyPI page itself did not load] |
+| Purdue RCAC ([on cluster](https://docs.rcac.purdue.edu/agentic-ai/running_agents/on_cluster/)) | The agent runs on a login node and submits real work with `sbatch`. Claude Code's sandbox "uses Linux namespaces", which "are often unavailable or disabled on shared login nodes". | [V] |
+| [NERSC](https://docs.nersc.gov/development/coding-agents/claude-code/) | Claude Code on login nodes. Authentication by subscription login, `claude setup-token` (`CLAUDE_CODE_OAUTH_TOKEN`) or an API key. Compute-node batch use is not covered. | [V] |
+| [JHPCE](https://jhpce.jhu.edu/sw/claude-example/) (2026-10-05) | Interactive `srun` session on a compute node; an API key in `~/.claude/settings.json`. | [V] |
+| MCP servers for Slurm ([slurm-mcp](https://glama.ai/mcp/servers/dongwookim-ml/slurm-mcp), [srunx](https://ksterx.github.io/srunx/how-to/mcp-usage/)) | Claude Code submits and watches jobs as tools: the agent drives the scheduler. | [V via search summaries; not opened] |
+| Anthropic's write-up on long-running Claude with Slurm (a job script that starts Claude Code in tmux on a compute node, a progress file, a test oracle) | Found in search results only. Both fetched URLs returned 404, so it is not verified. | [I] |
+
+**What an SGE or Slurm plus Claude Code set-up looks like in these examples** [I, synthesised from the [V] items]:
+- a job script runs `claude -p` with a prompt;
+- the login or token sits in the user's home on a shared file system, or in an environment variable;
+- compute nodes have open outbound network;
+- context passes between jobs through files (progress files, context files) or `--resume` of one session;
+- the scheduler gives wall time, memory and queueing.
+
+None of the examples found:
+- takes its tasks from GitHub issues;
+- isolates jobs from each other beyond the scheduler's users and cgroups;
+- cuts the network to the model only;
+- counts tokens per job.
+
+**What it would take for our case** [I]:
+- Slurm or SGE on one Linux node (section 5).
+- A job script equal to today's launch (bundle in, `claude -p`, note and bundle out), wrapped in a container to get our network policy and per-task isolation. The examples run with open network.
+- Our thin layer to compute release from GitHub and submit, hold or release jobs.
+- Our token accounting.
+
+**Does it change the recommendation? No.** The prior art confirms the pattern (headless `claude -p` in a batch job, context through files or `--resume`). It adds nothing to the three spine items that the borrowed parts in sections 2 to 4 do not already give. ResearchLoop's file-based context hierarchy and single-session `--resume` chaining are a useful example for context management, and are consistent with the piggy-back route in section 4.
+
 ### Summary fit-gap, needs 1 to 10
 
 | Candidate | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
