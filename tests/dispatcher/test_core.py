@@ -148,7 +148,15 @@ def test_settings_keys_override_and_bad_values_fall_back(tmp_path):
     p.write_text(json.dumps({"enabled": False, "workers": 2, "runaway_minutes": "x", "retries": 0, "idle_minutes": 0}))
     s = core.load_settings(str(p))
     assert s["enabled"] is False and s["workers"] == 2
-    assert s["runaway_minutes"] == 40 and s["idle_minutes"] == 10
+    assert s["runaway_minutes"] == 40 and s["idle_minutes"] == 20
+
+
+def test_settings_below_minimum_raised(tmp_path, caplog):
+    p = tmp_path / "s.json"
+    p.write_text(json.dumps({"runaway_minutes": 5, "idle_minutes": 3, "start_minutes": 1}))
+    s = core.load_settings(str(p))
+    assert (s["runaway_minutes"], s["idle_minutes"], s["start_minutes"]) == (30, 10, 1)
+    assert "below its minimum" in caplog.text
 
 
 def test_settings_garbage_file(tmp_path):
@@ -308,7 +316,7 @@ def test_over_limit_kills(tmp_path):
 def test_no_activity_kills_by_proxy_time(tmp_path):
     w = start_one(tmp_path)
     started(w)
-    w.now += 10 * 60
+    w.now += 20 * 60
     w.fire()
     assert w.killed == []                      # exactly at the limit
     w.now += 1
@@ -321,11 +329,11 @@ def test_transcript_mtime_is_the_fallback_record(tmp_path):
     w.runtime.outbox["x-1"] = (True, None, "no note")
     w.now += 30
     w.fire()                                   # the proxy has no request time
-    w.now += 15 * 60
+    w.now += 25 * 60
     w.mtime = w.now - 60                       # transcript touched a minute ago
     w.fire()
     assert w.killed == []
-    w.mtime = w.now - 11 * 60
+    w.mtime = w.now - 21 * 60
     w.fire()
     assert w.killed == [4242]
 
@@ -356,7 +364,7 @@ def test_done_with_commit_is_unmerged_and_branch_fetched(tmp_path):
 def test_done_without_commit_fails(tmp_path):
     w = start_one(tmp_path)
     finish(w, {"outcome": "done", "branch": "b", "summary": "s", "tokens": 5}, ahead=0)
-    assert w.plog.failures == [("x-1", "no commit")]
+    assert w.plog.failures == [("x-1", "no commit in the bundle")]
 
 
 def test_gave_up_fails(tmp_path):
