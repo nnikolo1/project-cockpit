@@ -60,3 +60,16 @@ def test_render_writes_files_and_installs_nothing(tmp_path, capsys):
 def test_main_requires_render():
     with pytest.raises(SystemExit):
         L.main([])
+
+
+def test_render_writes_an_absolute_python(tmp_path):
+    out = tmp_path / "o"
+    L.render(["--project", "demo", "--repo", "o/n", "--repo-dir", str(tmp_path), "--token-file", str(tmp_path / "tok"),
+              "--out", str(out), "--python", "/opt/x/bin/python3"])
+    for f in out.glob("*.plist"):
+        assert plistlib.loads(f.read_bytes())["ProgramArguments"][0] == "/opt/x/bin/python3"
+    L.render(["--project", "demo", "--repo", "o/n", "--repo-dir", str(tmp_path), "--token-file", str(tmp_path / "tok"), "--out", str(out)])
+    assert all(plistlib.loads(f.read_bytes())["ProgramArguments"][0].startswith("/") for f in out.glob("*.plist"))
+    with pytest.raises(SystemExit):
+        L.render(["--project", "demo", "--repo", "o/n", "--repo-dir", str(tmp_path), "--token-file", str(tmp_path / "tok"), "--python", "python3"])
+

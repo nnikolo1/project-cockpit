@@ -5,8 +5,10 @@ Pure rendering (plistlib); the command line only writes the files and prints the
     python3 -m dispatcher.launchd render --project NAME --repo OWNER/NAME --repo-dir DIR --token-file F [--out DIR]
 """
 import argparse
+import os
 import pathlib
 import plistlib
+import shutil
 import sys
 
 from dispatcher import runtime as rt
@@ -70,17 +72,21 @@ def render(argv=None):
     ap.add_argument("--token-file", required=True)
     ap.add_argument("--out", help="default: <data dir>/<project>/launchd")
     ap.add_argument("--image")
+    ap.add_argument("--python", default=shutil.which("python3") or sys.executable,
+                    help="absolute path of the python program the jobs run (launchd does not search PATH for it; a bare python3 is the Xcode shim); default: the python3 on PATH now")
     a = ap.parse_args(argv)
+    if not os.path.isabs(a.python):
+        sys.exit("--python must be an absolute path")
     out = pathlib.Path(a.out or paths(a.project)["launchd"]).expanduser().resolve()
     absolute = lambda s: str(pathlib.Path(s).expanduser().resolve())
     token, repo_dir = absolute(a.token_file), absolute(a.repo_dir)
     out.mkdir(parents=True, exist_ok=True)
-    for plist in (dispatcher_plist(a.project, a.repo, repo_dir, token, a.image), quota_plist(a.project)):
+    for plist in (dispatcher_plist(a.project, a.repo, repo_dir, token, a.image, python=a.python), quota_plist(a.project, python=a.python)):
         f = out / f"{plist['Label']}.plist"
         f.write_bytes(plistlib.dumps(plist))
         print(f)
     print("To install (by hand):")
-    for plist in (quota_plist(a.project), dispatcher_plist(a.project, a.repo, repo_dir, token)):
+    for plist in (quota_plist(a.project, python=a.python), dispatcher_plist(a.project, a.repo, repo_dir, token, python=a.python)):
         print(f"  launchctl bootstrap gui/$(id -u) {out / (plist['Label'] + '.plist')}")
 
 
