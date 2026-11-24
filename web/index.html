@@ -395,7 +395,9 @@ function vCockpit(){
      +'</div><button class="btn small" data-act="code" data-m="'+m.id+'" style="align-self:flex-start">Code quality</button></div>';
   });
   const u=(CODE.modules||{}).unassigned;const un=D.tasks.filter(t=>t.module==='unassigned').length;
-  h+='<div class="card" style="border-style:dashed;display:flex;flex-direction:column;gap:10px"><h2>Not mapped to a module</h2><p class="muted" style="margin:0">'
+  const cu=META.churn.status==='ok'&&META.churn.view.unassigned&&META.churn.view.unassigned['30'];
+  const showUn=!!((u&&((u.code||0)>0||(u.churn||0)>0))||un||(cu&&(cu.commits||cu.churn)));
+  if(showUn)h+='<div class="card" style="border-style:dashed;display:flex;flex-direction:column;gap:10px"><h2>Not mapped to a module</h2><p class="muted" style="margin:0">'
    +(u?u.code.toLocaleString('en-US')+' code lines, '+(u.churn==null?'some':u.churn)+' recent commits touch files that no module claims. Mapping them is your decision.':'No code snapshot wired.')
    +(un?' '+un+' tasks have no module.':'')+'</p>'
    +(META.churn.status==='ok'&&META.churn.view.unassigned&&META.churn.view.unassigned['30']?'<p class="muted" style="margin:0">Last 30 days: '+META.churn.view.unassigned['30'].commits+' commits, churn '+META.churn.view.unassigned['30'].churn+' in unmapped files. '+asOf(META.churn)+'</p>':'')
