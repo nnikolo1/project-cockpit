@@ -17,7 +17,7 @@ log = logging.getLogger("dispatcher.tasks")
 
 STATES = ("wip", "unmerged", "failed", "merged")
 FINAL = ("merged", "failed")              # 2c: only the owner or an interactive agent moves a task out of these
-NOT_RELEASABLE = ("question", "type:decision")   # 2b: embryos apart from questions and decisions count as released
+NOT_RELEASABLE = ("question", "type:decision", "interactive-only")   # 2b: embryos apart from questions, decisions and the Task Queue's own tasks count as released
 TASK_ID = re.compile(r"^(?P<short>[A-Za-z0-9][A-Za-z0-9._-]*)-(?P<number>\d+)$")
 INTERACTIVE_DAYS = 10                     # 2b: an interactive agent's embryo counts as released after this many days
 BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
