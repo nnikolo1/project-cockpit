@@ -1,11 +1,12 @@
-# The Workers' image (4m, 4e). Build with a context folder that holds this file and the Claude Code binary
-# for Alpine arm64, named `claude` (copied here by hand; not committed). Nothing is fetched at run time.
+# The Workers' image (4m, 4e). Build with a context folder that holds the Claude Code binary for Alpine arm64,
+# named `claude` (copied there by hand; not committed), and `dispatcher/relay.py` (copied to /opt/relay.py, 4f). Nothing is fetched at run time.
 #   container build -t cockpit-worker:latest -f dispatcher/image/Containerfile <context>
 FROM docker.io/library/python:3.12-alpine
 
 # git; libgcc/libstdc++/ripgrep are what the Alpine build of the CLI needs
 RUN apk add --no-cache git libgcc libstdc++ ripgrep && pip install --no-cache-dir pytest
 COPY claude /usr/local/bin/claude
+COPY dispatcher/relay.py /opt/relay.py
 RUN chmod 755 /usr/local/bin/claude
 ENV USE_BUILTIN_RIPGREP=0
 

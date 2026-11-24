@@ -1,3 +1,4 @@
+import datetime as dt
 import json
 import pathlib
 import sys
@@ -95,7 +96,7 @@ class FakeRuntime:
 
 class World:
     def __init__(self, tmp_path, tasks=(), **settings):
-        self.now, self.free, self.counts, self.mtime = NOW, 50 * core.GIB, {}, None
+        self.now, self.free, self.last, self.mtime = NOW, 50 * core.GIB, {}, None
         self.alive_pids, self.killed, self.ahead = set(), [], 1
         self.runtime, self.tasks, self.plog = FakeRuntime(tmp_path), FakeTasks(tasks), FakeLog()
         self.state = str(tmp_path / "state.json")
@@ -103,7 +104,7 @@ class World:
 
     def dispatcher(self):
         p = core.Probes(
-            now=lambda: self.now, free_disk=lambda: self.free, proxy_counts=lambda: dict(self.counts),
+            now=lambda: self.now, free_disk=lambda: self.free, proxy_last=lambda: dict(self.last),
             transcript_mtime=lambda u: self.mtime, alive=lambda pid: pid in self.alive_pids,
             kill=self.killed.append, ensure_proxy=lambda: None, ensure_relay=lambda: None,
             commits_ahead=lambda repo, tid: self.ahead, heartbeat_parts=lambda: {"memory_pressure": "normal"})
@@ -248,7 +249,6 @@ def test_started_file_sets_wip(tmp_path):
     w = start_one(tmp_path)
     w.runtime.outbox["x-1"] = (True, None, "no note")
     w.now += 120
-    w.counts = {"worker1": 1}
     w.fire()
     assert ("x-1", "wip") in w.tasks.states and w.worker()["started"]
     w.fire()
@@ -270,7 +270,7 @@ def test_no_start_within_a_minute_kills(tmp_path):
 def started(w):
     w.runtime.outbox["x-1"] = (True, None, "no note")
     w.now += 30
-    w.counts = {"worker1": 1}
+    w.last = {"worker1": w.now}
     w.fire()                                   # WIP, the proxy saw a request at NOW+30
 
 
@@ -279,7 +279,7 @@ def test_over_limit_kills(tmp_path):
     started(w)
     for _ in range(40):                        # keep it busy with requests
         w.now += 60
-        w.counts["worker1"] += 1
+        w.last["worker1"] = w.now
         w.fire()
     assert w.killed == [4242] and ("x-1", "over 40 minutes") in w.plog.failures
 
@@ -299,7 +299,7 @@ def test_transcript_mtime_is_the_fallback_record(tmp_path):
     w = start_one(tmp_path)
     w.runtime.outbox["x-1"] = (True, None, "no note")
     w.now += 30
-    w.fire()                                   # no proxy counts at all
+    w.fire()                                   # the proxy has no request time
     w.now += 15 * 60
     w.mtime = w.now - 60                       # transcript touched a minute ago
     w.fire()
@@ -387,11 +387,40 @@ def test_heartbeat_without_container_report(tmp_path):
 
 
 # --- default probes ---
-def test_read_proxy_counts(tmp_path):
+def test_read_proxy_last(tmp_path):
     f = tmp_path / "u.jsonl"
-    f.write_text('{"worker":"worker1"}\nbad\n{"worker":"worker1"}\n{"worker":"worker2"}\n')
-    assert core.read_proxy_counts(str(f)) == {"worker1": 2, "worker2": 1}
-    assert core.read_proxy_counts(str(tmp_path / "none")) == {}
+    f.write_text('{"ts":"2026-11-24T10:00:00+00:00","worker":"worker1"}\nbad\n{"worker":"worker1"}\n'
+                 '{"ts":"2026-11-24T10:05:00+00:00","worker":"worker1"}\n{"ts":"2026-11-24T10:01:00+00:00","worker":"worker2"}\n'
+                 '{"ts":"not a time","worker":"worker2"}\n')
+    t = dt.datetime(2026, 11, 24, 10, 0, tzinfo=dt.timezone.utc).timestamp()
+    assert core.read_proxy_last(str(f)) == {"worker1": t + 300, "worker2": t + 60}
+    assert core.read_proxy_last(str(tmp_path / "none")) == {}
+
+
+def test_main_builds_tasks_and_plog_from_arguments(tmp_path, monkeypatch):
+    seen = {}
+
+    class FakeDispatcher:
+        def __init__(self, settings, state, runtime, tasks, plog, probes):
+            seen.update(tasks=tasks, plog=plog)
+
+        def fire(self):
+            return "ok"
+
+    monkeypatch.setattr(core, "Dispatcher", FakeDispatcher)
+    data = tmp_path / "data"
+    core.main(["--settings", "s.json", "--state", str(tmp_path / "st"), "--area", str(tmp_path), "--socket", "/tmp/s",
+               "--token-file", "t", "--usage-file", "u", "--repo", "me/repo", "--repo-dir", str(tmp_path),
+               "--data-dir", str(data)])
+    assert seen["tasks"].repo == "me/repo" and seen["tasks"].repo_dir == str(tmp_path) and seen["tasks"].short == "repo"
+    assert seen["plog"].dir == data
+
+
+def test_gh_and_git_callables_run_with_a_time_limit(tmp_path):
+    assert core.make_gh("echo", 5)(["hi"]).strip() == "hi"
+    assert core.make_git("pwd", 5)([], str(tmp_path)).strip() == str(tmp_path.resolve())
+    with pytest.raises(RuntimeError):
+        core.make_gh("false", 5)([])
 
 
 def test_state_roundtrip_and_missing(tmp_path):

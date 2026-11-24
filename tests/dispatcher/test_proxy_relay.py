@@ -1,5 +1,6 @@
 import asyncio
 import http.client
+import datetime
 import json
 import os
 import socket
@@ -164,3 +165,11 @@ def test_relay_unreachable_socket_closes_client():
         task.cancel()
         return data
     assert asyncio.run(run()) == b""
+
+
+def test_usage_line_carries_a_utc_timestamp(stack):
+    sock, _, _, _, d = stack
+    post(sock, "/v1/messages", {"Authorization": "Bearer dummy-a"})
+    rec = json.loads(open(os.path.join(d, "u.jsonl")).readline())
+    ts = datetime.datetime.fromisoformat(rec["ts"])
+    assert rec["worker"] == "a" and ts.utcoffset().total_seconds() == 0
