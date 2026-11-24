@@ -452,7 +452,7 @@ def get_card_settings(p):
     """Current module-card options; the defaults when the file is missing or unreadable."""
     values = dict(L.CARD_SETTING_DEFAULTS)
     try:
-        values = L.validate_card_settings(json.loads(card_settings_path(p).read_text()))
+        values = L.validate_card_settings(json.loads(card_settings_path(p).read_text()), strict=False)
     except FileNotFoundError:
         pass
     except (OSError, ValueError, AttributeError) as ex:
@@ -653,7 +653,7 @@ def code_snapshot(p=None):
     try:
         p = p or proj()
         d = pathlib.Path(p["code"]).expanduser()
-        view = L.code_view(json.load(open(d / "metrics.json")))
+        view = L.code_view(json.load(open(d / "metrics.json")), get_card_settings(p)["values"]["quality_thresholds"])
         big = cached(pk(p, "biggest"), lambda: biggest_by_module(p, list(view["modules"])), 120)
         for mid, m in view["modules"].items():
             m["biggest"] = big.get(mid, [])

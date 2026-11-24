@@ -29,7 +29,7 @@
      "kind": "file",
      "personal_data": false,
      "written_by": "githubclient",
-     "note": "module-card options of the Settings tab (mode 0600, written atomically); an owner decision; a missing file means the defaults"
+     "note": "module-card options of the Settings tab (churn colour and the quality-band thresholds; mode 0600, written atomically); an owner decision; a missing file means the defaults"
     },
     {
      "path": "~/.local/share/project-cockpit/<project>/projects.json",
