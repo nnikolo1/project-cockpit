@@ -23,7 +23,7 @@ def test_a_day_with_zero_in_every_count_has_no_row():
     r = rep(u("2026-03-02T10:00:00Z", 0), u("2026-03-03T10:00:00Z", 2))
     assert [d["key"] for d in r["days"]] == ["2026-03-03"]
     assert [w["key"] for w in r["windows"]] == ["2026-03-03 10:00"]
-    assert [w["key"] for w in r["workers"]] == ["w"]            # the per-Worker table stays as it is
+    assert "workers" not in r                                   # the per-Worker part is gone (PC-83)
 
 
 def test_no_usage_at_all_gives_empty_lists_and_the_empty_line():

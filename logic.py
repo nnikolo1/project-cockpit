@@ -1483,7 +1483,7 @@ def usage_report(usage_text, plog_text, goodbye_tokens, quota_text=None):
         else:
             key = dict(key=dt.datetime.fromtimestamp(t - t % WINDOW_SECONDS, dt.timezone.utc).strftime("%Y-%m-%d %H:%M"), kind="fixed")
         _add(groups["windows"].setdefault((key["key"], key["kind"]), {}), c)
-    rep["days"] = None if usage_text is None else [dict(key=key, **v) for key, v in sorted(groups["days"].items(), reverse=True) if v["total"]]
+    rep = {"days": None if usage_text is None else [dict(key=key, **v) for key, v in sorted(groups["days"].items(), reverse=True) if v["total"]]}
     rep["windows"] = None if usage_text is None else [dict(key=k[0], kind=k[1], **v) for k, v in sorted(groups["windows"].items(), reverse=True)
                                                       if v["total"]]
     rep["quota"] = quota

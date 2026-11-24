@@ -69,6 +69,7 @@
   {"path": "tests/test_module_cards.py", "module": "cockpitwebpage", "basis": "tests that no module card shows the removed lines (checks web/index.html)"},
   {"path": "tests/test_offline.py", "module": "githubclient", "basis": "tests the offline mode and the backup gap check of cockpit.py and logic.py"},
   {"path": "tests/test_readings_page.py", "module": "githubclient", "basis": "tests the Today's readings and Earlier readings cards of the Token Usage page"},
+  {"path": "tests/test_usage_rows.py", "module": "githubclient", "basis": "tests that the Token Usage period tables list only periods with usage"},
   {"path": "tests/test_projects.py", "module": "githubclient", "basis": "tests the --projects handling in cockpit.py"},
   {"path": "tests/test_workflow.py", "module": "cockpitwebpage", "basis": "guards the Workflow page (web/index.html) against going stale; tests follow the code"},
   {"path": "tests/test_usage.py", "module": "githubclient", "basis": "tests usage_report in logic.py and the usage endpoint in cockpit.py; tests follow the code"},
