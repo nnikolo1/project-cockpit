@@ -1399,3 +1399,194 @@ def usage_report(usage_text, plog_text, goodbye_tokens, quota_text=None):
                                                               for o in spans.values())))
     rep["tasks"] = None if plog_text is None else tasks
     return rep
+
+
+# ---------- gaps in the project metadata (checker: tools/metadata_gaps.py, contract: docs/contracts/metadata-gaps.md) ----------
+QUALITY_METRICS = ("complexity", "maintainability", "lint", "dead", "cycles", "duplication", "docstrings", "coverage", "tests")  # docs/contracts/quality-bands.md
+GAPS_MAX_AGE_H = 24    # standing policy: the components of the project metadata are refreshed within 24 hours
+
+
+def _gap(project, kind, what, module=None, age_h=None):
+    return dict(project=project, module=module, kind=kind, what=what, age_h=None if age_h is None else round(age_h, 1))
+
+
+def _age_h(iso, now):
+    """Hours since an ISO time (a time without a zone is UTC), or None when unreadable."""
+    try:
+        t = dt.datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return max((now - (t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc))).total_seconds() / 3600, 0)
+
+
+def _latest_ts(text):
+    """Newest `ts` of a JSON-lines text -> ISO string, or None (no text, no readable record)."""
+    ts = [r["ts"] for r in _json_lines(text) or [] if _epoch(r.get("ts")) is not None]
+    return max(ts, key=_epoch) if ts else None
+
+
+def _stale(project, kind, label, age, max_h, module=None):
+    return [_gap(project, kind, f"{label} is older than {max_h:g} hours", module, age)] if age is not None and age > max_h else []
+
+
+def metadata_gaps(project, now, modules, cards, metrics, usage, policies, max_age_h=GAPS_MAX_AGE_H, descs=None, module_facts=None,
+                  tracked=None, assign=None, docs_heads=None, content=None, data_root=None, data_entries=None, timings=None, timing_limit=3.0, quality=None):
+    """Pure detection of what the Cockpit shows as no data / not wired / not measured / stale / missing. Every fact comes from the project's own
+    data, already read; -> list of gap dicts {project, module|None, kind, what, age_h|None}; an empty list means clean. A check whose input is
+    None is not run (e.g. no clone: no `tracked`).
+      modules       list of module ids of the module map (None: no map, no per-module checks); descs {id: map desc}
+      cards         {kind: parse_card(...) result} for footprint, churn, ambiguity
+      metrics       parsed metrics.json of the code snapshot, or None (not configured or unreadable)
+      usage         {quota, transcript, proxy: file text or None}
+      policies      dict(config=rules_config(...) or None, files=tracked paths or None when there is no clone)
+      module_facts  {id: (open gaps, documents)} as module_facts(); tracked / assign: the clone's files and the map's `assign`
+      docs_heads    {path: first text} of the tracked docs/*.md; content {id: {txt: bool, svg: bool}} of docs/modules/
+      quality       dict(modules={id: the `/api/code` module payload}, thresholds=`quality_thresholds` of the card settings or None for the defaults)
+      data_root     the project's data folder, data_entries the names in it; timings [(request, seconds|None)] of a live check"""
+    g = []
+    add = lambda kind, what, mod=None, age=None: g.append(_gap(project, kind, what, mod, age))
+    mods = modules or []
+    for kind in CARD_KINDS:
+        c = cards.get(kind) or parse_card(None, kind)
+        if c["status"] != "ok":
+            add("card_data", f"{kind} card data: no data ({c['reason']})")
+            continue
+        g += _stale(project, "stale", f"{kind} card data", c["age_h"], max_age_h)
+        have = c["data"].get("modules") if isinstance(c["data"].get("modules"), dict) else {}
+        for mid in mods:
+            if mid not in have:
+                add("card_data", f"{kind} card: no data for this module", mid, c["age_h"])
+        if kind == "footprint":
+            _footprint_gaps(add, mods, have, c["age_h"], data_root, data_entries)
+        if kind == "ambiguity":
+            for mid, v in ambiguity_view(c["data"])["modules"].items():
+                if v["high"]:
+                    add("ambiguity", f"{len(v['unsorted'])} of {v['total']} files unsorted ({v['share']:.0%}, above {UNSORTED_WARN:.0%})", mid, c["age_h"])
+        if kind == "churn" and tracked is not None and assign is not None:
+            actual = sum(1 for f in tracked if map_path(f, assign) == "unassigned")
+            shown = max((_num(w.get("files")) or 0 for w in (c["data"].get("unassigned") or {}).values() if isinstance(w, dict)), default=0)
+            if shown > actual:
+                add("churn", f"churn data counts {shown} unassigned files, the repository has {actual}: files that no longer exist", None, c["age_h"])
+    _snapshot_gaps(add, g, project, now, mods, metrics, max_age_h)
+    for mid in mods:
+        gaps_n, docs_n = (module_facts or {}).get(mid, (None, None)) if module_facts is not None else (0, 0)
+        if gaps_n is None:
+            add("no_data", "module card: open gaps: no data", mid)
+        if docs_n is None:
+            add("no_data", "module card: documents: no data", mid)
+        if content is not None:
+            c = content.get(mid) or {}
+            if not (c.get("txt") or (descs or {}).get(mid)):
+                add("module_page", "module has no description text (no docs/modules file, no desc in the map)", mid)
+            if not c.get("svg"):
+                add("module_page", "module page has no diagram", mid)
+    for key, label in (("quota", "quota history"), ("transcript", "transcript usage file"), ("proxy", "proxy usage file")):
+        text = usage.get(key)
+        last = _latest_ts(text)
+        if last is None:
+            add("token_usage", f"Token Usage: no {label}" if text is None else f"Token Usage: {label} has no readable record")
+        elif key != "proxy":  # the proxy runs only while tasks run: idle is not stale
+            g += _stale(project, "stale", label, _age_h(last, now), max_age_h)
+    cfg, files = policies.get("config"), policies.get("files")
+    if not cfg:
+        add("policies", "Policies not configured (no usable `rules` in the module map)")
+    elif files is None:
+        add("policies", "Policies not configured (no local clone, so no files can be listed)")
+    else:
+        empty = [x["name"] for x in cfg["groups"] if not rule_files(files, {}, [x])]
+        if len(empty) == len(cfg["groups"]):
+            add("policies", "Policies list no files (no tracked file matches a rule group)")
+        elif empty:
+            add("policies", f"Policies: group(s) list no files: {', '.join(empty)}")
+    for f in sorted(x for x in (tracked or []) if assign is not None and not map_entry(x, assign)):
+        add("map", f"tracked file has no entry in the module map: {f}")
+    if docs_heads is not None:
+        for path, text in sorted(docs_heads.items()):
+            if not doc_modules(text) and pathlib.PurePath(path).name != "README.md":
+                add("documents", f"document has no Modules: line: {path}")
+    if quality is not None:
+        _quality_gaps(add, quality, mods)
+    for name, secs in timings or []:
+        if secs is None or secs > timing_limit:
+            add("slow", f"request {name} " + ("failed" if secs is None else f"took {secs:.1f} s (limit {timing_limit:g} s)"))
+    return g
+
+
+def _quality_gaps(add, q, mods):
+    """(l) a displayed metric without a band (no threshold, or the payload carries no band for it) and a measured module whose Quality view has no bar."""
+    th, payload = q.get("thresholds"), q.get("modules") or {}
+    measured = {mid: m for mid, m in payload.items() if isinstance(m, dict) and m.get("filesN") and (not mods or mid in mods)}
+    for key in QUALITY_METRICS:
+        t = (th or {}).get(key) if th is not None else True
+        ok = isinstance(t, dict) and t.get("direction") in ("low", "high") and _num(t.get("ok")) is not None and _num(t.get("warn")) is not None
+        if th is not None and not ok:
+            add("quality_bands", f"quality metric {key} has no band: no usable threshold in quality_thresholds")
+        elif any(key not in (m.get("bands") or {}) for m in measured.values()):
+            add("quality_bands", f"quality metric {key} has no band in the code payload")
+    for mid, m in sorted(measured.items()):
+        if not any(isinstance(b, dict) and b.get("band") in ("ok", "warn", "bad") for b in (m.get("bands") or {}).values()):
+            add("quality_bands", "Quality view shows a bar for no metric at all", mid)
+
+
+def map_entry(path, assign):
+    """True when some entry of the module map (an explicit `module: null` included) covers the path, or the file a test file tests."""
+    mirrored = path
+    if path.startswith("tests/"):
+        parts = path[6:].split("/")
+        parts[-1] = parts[-1].removeprefix("test_")
+        mirrored = "/".join(parts)
+    return any(p == a["path"] or p.startswith(a["path"] if a["path"].endswith("/") else a["path"] + "/") for a in assign for p in (path, mirrored))
+
+
+def _footprint_gaps(add, mods, have, age, data_root, data_entries):
+    declared = []
+    for mid in mods:
+        m = have.get(mid)
+        if not isinstance(m, dict):
+            continue
+        pol = m.get("policy") if isinstance(m.get("policy"), dict) else {}
+        for key in ("backup", "retention"):
+            if policy_text(pol.get(key))[1]:
+                add("footprint", f"persistence footprint: no {key} statement", mid, age)
+        for f in m.get("files") or []:
+            if isinstance(f, dict):
+                declared.append(str(f.get("path", "")))
+                if f.get("exists") is False:
+                    add("footprint", f"declared file does not exist: {f.get('path')}", mid, age)
+        for lg in m.get("logging") or []:
+            if isinstance(lg, dict):
+                if lg.get("file"):
+                    declared.append(str(lg["file"]))
+                elif str(lg.get("rotation") or "").strip().lower() in GAP_WORDS:
+                    add("footprint", f"logger {lg.get('logger')}: no file and no stated destination", mid, age)
+    if data_root and data_entries is not None:
+        root = pathlib.Path(data_root).expanduser()
+        ds = [pathlib.Path(x).expanduser() for x in declared if x.startswith(("/", "~"))]
+        for name in sorted(data_entries):
+            e = root / name
+            if not any(d == e or e in d.parents or d in e.parents for d in ds):
+                add("footprint", f"file in the project's data folder not declared by any footprint: {name}", None, age)
+
+
+def _snapshot_gaps(add, g, project, now, mods, metrics, max_age_h):
+    if metrics is None:
+        add("snapshot", "code snapshot not wired (not configured or metrics.json unreadable)")
+        return
+    view = code_view(metrics)
+    age = _age_h(view["generated_at"], now)
+    g += _stale(project, "stale", "code snapshot", age, max_age_h)
+    for mid in mods:
+        m = view["modules"].get(mid)
+        if m is None:
+            add("snapshot", "code snapshot: not wired (no metrics for this module)", mid, age)
+        elif not m["filesN"]:
+            add("snapshot", "quality metrics not measured (no analysed files)", mid, age)
+        elif m["pyN"]:
+            if m["cov"] is None:
+                add("snapshot", "no coverage figure for a module with Python files", mid, age)
+            for key, label in (("cc", "worst complexity"), ("cyc", "import cycles")):
+                if m[key] is None:
+                    add("no_data", f"module card: {label}: no data", mid, age)
+    cov = [_age_h(((m.get("metrics") or {}).get("test_coverage") or {}).get("data_file_modified"), now) for m in (metrics.get("modules") or {}).values()]
+    cov = [a for a in cov if a is not None]
+    g += _stale(project, "stale", "coverage file", max(cov) if cov else None, max_age_h)
