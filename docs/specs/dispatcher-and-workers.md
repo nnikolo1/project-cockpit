@@ -36,8 +36,8 @@ Every requirement below is the owner's own statement or was approved by the owne
 - 3f. As of now, no retries of failed jobs are foreseen; this can be changed via "Settings" in the Cockpit UI.
 - 3g. At each Dispatcher firing a heartbeat line records: the time; the Workers running and what the firing did (started a Worker, nothing to do, or skipped, with the reason); the host's memory pressure level, free disk on the data volume, CPU load average and power source (AC or battery); the size of the container tool's data folder, and the container's memory and CPU use against its limits, if the container tool can report them. The line is written to the processing log.
 - 3h. The Dispatcher also monitors the quota. Ideally, this shall be from the proxy counts for each Worker. If, for whatever reason, this is not feasible, it maintains running estimates which start from the last interactive session and are incremented with the tokens reported in the good-bye notes. The quota utilisation is just statistics visualised in the UI. At this stage, no decisions are to be based on it.
-- 3i. A Worker is a "runaway" and is killed by the Dispatcher if it has run more than 40 minutes since its launch or has made no record for more than 10 minutes. The task is marked "failed" (reasons: over 40 minutes, no activity). Both limits can be changed in the Cockpit UI.
-- 3j. If a Worker has not written "started" within 1 minute of launch, the Dispatcher kills it and marks the task "failed" (reason: no start).
+- 3i. A Worker is a "runaway" and is killed by the Dispatcher if it has run more than 40 minutes since its launch or has made no record for more than 20 minutes. The task is marked "failed" (reasons: over 40 minutes, no activity). Both limits can be changed in the Cockpit UI; the minimum allowed there is 30 minutes for the first and 10 minutes for the second.
+- 3j. If a Worker has not written "started" within 1 minute of launch, the Dispatcher kills it and marks the task "failed" (reason: no start). This limit can be changed in the Cockpit UI; the minimum allowed there is 1 minute.
 - 3k. At each firing the Dispatcher starts the proxy on its host socket if it is not listening, then starts the container if it is not running and starts the relay inside it if it is not running. If any of them cannot be started, it skips the firing and records the reason.
 - 3l. The start check (3j) is made at each firing, so a Worker that has not written "started" is killed within one firing interval after the 1-minute limit.
 - 3m. The Dispatcher does not tear down the Workers' workspaces. Old task folders are mopped up later.
@@ -70,14 +70,14 @@ Every requirement below is the owner's own statement or was approved by the owne
 **5. Processing log**
 
 - 5a. Each significant change of state related to Workers and the Dispatcher is recorded in the processing log; each entry names the task and its task folder.
-- 5b. Every failed task records its reason in the processing log: no start, over 40 minutes, no activity, no note, or an unusable note.
+- 5b. Every failed task records its reason in the processing log: no start, over 40 minutes, no activity, no note, an unusable note, or no commit in the bundle.
 - 5c. The processing log is stored where the processing occurs, on the owner's MacBook.
 - 5d. The processing log is not part of any git repository.
 - 5e. The processing log is backed up on GDrive once a day. The access details are stored in a configuration file which is not part of the git repository.
 
 **6. Settings**
 
-- 6a. Settings (the Dispatcher's interval and on/off switch, retries, the number of Workers and the two runaway limits) are stored in a configuration file in the Cockpit's local data folder, outside git.
+- 6a. Settings (the Dispatcher's interval and on/off switch, retries, the number of Workers and the three limits of 3i and 3j) are stored in a configuration file in the Cockpit's local data folder, outside git.
 - 6b. The Dispatcher reads the file at each firing.
 
 ## Approach
