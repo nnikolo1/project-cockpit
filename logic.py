@@ -317,6 +317,37 @@ def group_commits(commits, assign, repo):
     return out
 
 
+HEAT_LEVELS = 4  # shades 1..4 above the empty shade 0
+
+
+def shade_level(n, mx):
+    """Heatmap shade 0..4 of a day's value n against the largest day mx (0 = none; mirrored by `shade` in web/index.html)."""
+    if not n or n <= 0 or not mx or mx <= 0:
+        return 0
+    return min(HEAT_LEVELS, -(-HEAT_LEVELS * n // mx))
+
+
+def activity_days(tasks, events, mod_of):
+    """Task activity per day and module for the Timeline heatmap: one count per task created or closed (from the tasks) and per
+    label/assign event (closed events are the tasks' `closed`). -> [{d, mod, n}]; an unreadable timestamp is skipped."""
+    g = {}
+
+    def add(ts, mod):
+        try:
+            d = dt.date.fromisoformat(str(ts)[:10]).isoformat()
+        except ValueError:
+            return
+        g[(d, mod)] = g.get((d, mod), 0) + 1
+    for t in tasks:
+        add(t.get("created"), t["module"])
+        if t.get("closed"):
+            add(t["closed"], t["module"])
+    for e in events:
+        if e["kind"] != "closed":
+            add(e["t"], mod_of.get(e["key"], "unassigned"))
+    return [dict(d=d, mod=m, n=n) for (d, m), n in sorted(g.items())]
+
+
 def issue_entries(tasks):
     """Issues opened/closed; same day+module+kind collapse to one entry listing the first few."""
     g = {}

@@ -222,3 +222,25 @@ def test_graphql_normalisers():
     i = L.norm_issue(node)
     assert (i["state"], i["state_reason"], i["labels"], i["parent"], i["blocked_by"], i["id"], i["author"]) == ("closed", "not_planned", ["P1"], 1, [2], 9, None)
     assert [(e["kind"], e["name"], e["actor"]) for e in L.norm_events(node)] == [("labeled", "P1", "m"), ("unlabeled", "P2", None), ("assigned", "w", "m"), ("closed", "not_planned", "m")]
+
+
+def test_shade_level_scales_to_the_largest_day():
+    assert [L.shade_level(n, 8) for n in (0, 1, 2, 3, 4, 6, 8)] == [0, 1, 1, 2, 2, 3, 4]
+    assert L.shade_level(5, 0) == 0 and L.shade_level(None, 5) == 0
+
+
+def test_activity_days_counts_events_per_day_and_module_and_skips_bad_timestamps():
+    tasks = [dict(key="T-1", module="a", created="2026-11-20T10:00:00Z", closed="2026-11-22T09:00:00Z"),
+             dict(key="T-2", module="b", created="garbage", closed=None)]
+    events = [dict(key="T-1", t="2026-11-20T11:00:00Z", kind="labeled"), dict(key="T-1", t="2026-11-22T09:00:00Z", kind="closed"),
+              dict(key="T-9", t="2026-11-21T01:00:00Z", kind="assigned"), dict(key="T-2", t="", kind="labeled")]
+    got = L.activity_days(tasks, events, {"T-1": "a", "T-2": "b"})
+    assert got == [dict(d="2026-11-20", mod="a", n=2), dict(d="2026-11-21", mod="unassigned", n=1), dict(d="2026-11-22", mod="a", n=1)]
+
+
+def test_usage_days_feed_the_heatmap_with_their_totals():
+    import json
+    line = json.dumps(dict(ts="2026-11-20T01:00:00+00:00", worker="w", input_tokens=1, output_tokens=2, cache_creation_input_tokens=3, cache_read_input_tokens=4))
+    r = L.usage_report(line, None, lambda f: None)
+    vals = {d["key"]: d["total"] for d in r["days"]}
+    assert vals["2026-11-20"] == 10 and L.shade_level(vals["2026-11-20"], max(vals.values())) == 4 and L.shade_level(vals["2026-11-19"], 10) == 0
