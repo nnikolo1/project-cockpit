@@ -4,7 +4,7 @@ A light-weight, opinionated viewer over GitHub for agent-assisted projects. **No
 
 ![cockpit](docs/screens/cockpit.png)
 
-More: [backlog](docs/screens/backlog.png), [timeline](docs/screens/timeline.png).
+More: [task queue](docs/screens/backlog.png), [timeline](docs/screens/timeline.png).
 
 ## The opinion
 - Stages: embryo, released, in progress, completed, cancelled.
@@ -24,7 +24,7 @@ Open the printed `http://127.0.0.1:PORT/?t=TOKEN` URL. Optional: `--token-file P
 
 Modules come from the Project field `Module` or `module:<name>` labels.
 Sub-modules: a slash id, `alpha/one` (parent = prefix; list the parent too; optional `desc`). Label `module:alpha/one` assigns a task; the Project field stays the top level and a sub-label wins only under that top (else the field wins).
-`assign` paths match by longest prefix, so a sub-module entry beats its parent; files matching only the parent stay in it. Deadlines inherit: task, parent task, sub-module, module (`MODULE_DEADLINES` keys are full ids); the Backlog names the source.
+`assign` paths match by longest prefix, so a sub-module entry beats its parent; files matching only the parent stay in it. Deadlines inherit: task, parent task, sub-module, module (`MODULE_DEADLINES` keys are full ids); the Task Queue names the source.
 The metrics snapshot may carry `alpha/one` entries under `modules`; the parent's entry is the producer's roll-up, a sub-module without one shows "not wired". The Code tab reads `DIR/metrics.json` plus optional `erd|dataflow|deps|js.svg`; without them it shows "not wired". Contract: see `code_view` in `logic.py`.
 
 ## Card metadata
@@ -34,7 +34,7 @@ Module and sub-module cards show three blocks read from files a producer writes:
 The Timeline and Token Usage tabs show a GitHub-style calendar heatmap (52 weeks ending today, five shades scaled to the busiest day, date and value on hover). Timeline counts one per task created, closed, labelled or assigned on its day (a choice to review) and follows the module filter; Token Usage shows the day's token total from the proxy file (which keeps 90 days) and the day's highest 5-hour quota reading when there is one.
 
 ## Submit, Cancel and the budget panel
-Unless started with `--read-only`, the Backlog table has a **Submit** column (embryos: releases the task as P2 without a deadline, the same as the Release form with its defaults) and a **Cancel** column (open tasks). Each button needs two clicks: the first turns it into "Confirm?" (it disarms after 6 seconds or on any other click), the second acts. No bulk selection. The **Budget** page shows the quota windows (used share, time to reset, age and stale marker), token numbers with the cap marked as an estimate, a table of tasks released by the boot-filling job and a table of its latest polls, all read from files a producer writes (`--quota-feed`, `--usage-report`, `--decision-log`). Contract: [docs/contracts/budget-panel.md](docs/contracts/budget-panel.md).
+Unless started with `--read-only`, the Task Queue table has a **Submit** column (embryos: releases the task as P2 without a deadline, the same as the Release form with its defaults) and a **Cancel** column (open tasks). Each button needs two clicks: the first turns it into "Confirm?" (it disarms after 6 seconds or on any other click), the second acts. No bulk selection. The **Budget** page shows the quota windows (used share, time to reset, age and stale marker), token numbers with the cap marked as an estimate, a table of tasks released by the boot-filling job and a table of its latest polls, all read from files a producer writes (`--quota-feed`, `--usage-report`, `--decision-log`). Contract: [docs/contracts/budget-panel.md](docs/contracts/budget-panel.md).
 
 The **Token Usage** page (read-only) shows the Dispatcher proxy's token counts per day (the last 90 days, a day without use as zero, counted back from the latest day), per 5-hour window and per Worker, and per task the proxy's sum next to the `tokens` of the task's good-bye note and their difference. A task launched with a Worker name in the processing log counts only that Worker's requests between its launch and its last log entry; older tasks keep the estimate marked "overlap". An **All projects** table sums the last 90 days of every project the Cockpit serves (a row per project: the four counts, the sum, the number of tasks, the last day with use; "no data" without a usage file). It also shows the vendor's quota history (the 5-hour and weekly percentages: highest reading per day, and the latest readings) and uses the vendor's `resets_at` times as the 5-hour windows where readings exist (otherwise fixed blocks, labelled). It reads `proxy-usage.jsonl`, `quota-history.jsonl`, `processing/processing.jsonl` and `area/` from the project's data folder (`GET /api/usage`); a missing file shows as "no data". The proxy's usage file keeps everything.
 
