@@ -1704,3 +1704,57 @@ def local_modules(mods):
         mods.append(dict(id="unassigned", name="Not mapped to a module", short="Unassigned", virtual=True))
     add_tree(mods, [])
     return mods
+
+
+# ---------- offline copy from a backup (PC-63) ----------
+# What each pane reads, as groups of alternatives: a pane has its data when every group has at least one present item. Items: "cache:<what>"
+# (the Cockpit's cache file of the project), "data:<path>" (a file under the project's data folder), "code" (the snapshot's metrics.json),
+# "git" (a local clone), "norules" (no rules configured: the Policies parts have nothing to show). Settings fall back to the defaults, as online.
+OFFLINE_PANES = (
+    ("tasks and states", "/api/state", (("cache:state",),)),
+    ("ranking", "/api/state", (("cache:state",),)),
+    ("open questions", "/api/questions", (("cache:state",),)),
+    ("timeline", "/api/timeline", (("cache:state",), ("cache:timeline", "cache:commits", "git"))),
+    ("rules", "/api/rules", (("cache:rules", "git", "norules"),)),
+    ("rules' open pull requests", "/api/rulesprs", (("cache:rulesprs", "norules"),)),
+    ("task queue (local part)", "/api/queue", (("data:dispatcher-state.json", "data:processing/processing.jsonl"),)),
+    ("token usage", "/api/usage", (("data:proxy-usage.jsonl", "data:quota-history.jsonl", "data:transcript-usage.jsonl", "data:processing/processing.jsonl"),)),
+    ("settings", "/api/settings", ()),
+    ("module card settings", "/api/cardsettings", ()),
+    ("code", "/api/code", (("code",),)),
+    ("module cards", "/api/cardmeta", (("cache:cardmeta",) + tuple(f"data:cardmeta/{k}.json" for k in CARD_KINDS),)),
+)
+
+
+def backup_gaps(present):
+    """Set of present items -> [{pane, api, missing: [alternatives of each unmet group]}]: the panes whose data is not in the backup."""
+    out = []
+    for pane, api, groups in OFFLINE_PANES:
+        missing = [" or ".join(g) for g in groups if not any(x in present for x in g)]
+        if missing:
+            out.append(dict(pane=pane, api=api, missing=missing))
+    return out
+
+
+def pane_problem(api, body):
+    """None, or why the answer to a pane's request in an offline copy carries no data or would allow steering."""
+    if not isinstance(body, dict):
+        return "not a JSON object"
+    if api == "/api/state":
+        if not isinstance(body.get("tasks"), list) or not isinstance(body.get("source"), dict):
+            return "no task state"
+        return "steering is on" if body["source"].get("steering") else None
+    if api == "/api/questions":
+        bad = [p for p in body.get("projects", []) if p.get("error")]
+        return f"project unreadable: {bad[0]['error']}" if bad else None
+    if api == "/api/timeline":
+        return None if isinstance(body.get("entries"), list) else "no timeline"
+    if api == "/api/rules":
+        return f"rules unavailable: {body['error']}" if body.get("error") else None
+    if api == "/api/rulesprs":
+        return None if body.get("available") or not body.get("configured") else f"open pull requests unavailable: {body.get('error')}"
+    if api in ("/api/settings", "/api/cardsettings"):
+        return "steering is on" if body.get("steering") else None
+    if api == "/api/code":
+        return None if body.get("wired") else "code snapshot not wired"
+    return None

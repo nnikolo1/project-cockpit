@@ -8,6 +8,9 @@ import os
 import pathlib
 import re
 import secrets
+import shutil
+import tarfile
+import tempfile
 import collections
 import subprocess
 import threading
@@ -110,6 +113,7 @@ class GitHubUnavailable(RuntimeError):
 
 
 _gh_calls, _gh_lock, _gh_pause = collections.deque(), threading.Lock(), dict(until=0.0, rate_limited=False)
+OFFLINE = {}  # set by --offline: dict(root, created, gh_attempts). An offline copy makes no GitHub call and serves every cached copy as is.
 
 
 def _clock(t):
@@ -120,6 +124,10 @@ def _gh_gate(now=None):
     """Count one gh call, or raise GitHubUnavailable when the Cockpit is paused after a rate-limit error or over its hourly cap."""
     now = time.time() if now is None else now
     with _gh_lock:
+        if OFFLINE:
+            OFFLINE["gh_attempts"] = OFFLINE.get("gh_attempts", 0) + 1
+            log.warning("offline copy: a GitHub call was refused (the backup lacks the data that needed it)")
+            raise GitHubUnavailable("offline copy: the Cockpit makes no GitHub call; this data is not in the backup", 0)
         if now < _gh_pause["until"]:
             raise GitHubUnavailable(f"GitHub rate limit reached; the Cockpit makes no GitHub call until {_clock(_gh_pause['until'])}", _gh_pause["until"])
         while _gh_calls and _gh_calls[0] <= now - 3600:
@@ -264,7 +272,7 @@ def _disk_load(key):
 
 def _disk_save(key, v):
     f = _disk_path(key)
-    if not f:
+    if not f or OFFLINE:  # the restored backup is never written to
         return
     try:
         f.parent.mkdir(parents=True, exist_ok=True)
@@ -298,7 +306,7 @@ def cached(key, fn, ttl, swr=False, persist=False, disk_fresh=0, queue=False):
         if v is not None:
             t = _disk_time(key, disk_fresh)
             _cache.setdefault(key, (t, v))
-    if v is not None and time.time() - t <= ttl:
+    if v is not None and (OFFLINE or time.time() - t <= ttl):
         return v
     if v is not None and swr:
         with _lock:
@@ -700,7 +708,7 @@ def do_act(form, run=run_gh, state=None, p=None):
     """-> (http status, body). 403 when the app is read-only; acts on the project named in form["project"] (default project otherwise)."""
     if not CFG["steer"]:
         log.warning("refused action %s: read-only", form.get("action"))
-        return 403, dict(error="read-only: this instance was started with --read-only")
+        return 403, dict(error="read-only: this is an offline copy from a backup" if OFFLINE else "read-only: this instance was started with --read-only")
     try:
         p = p or proj(form.get("project"))
         if form.get("action") == "settings":  # a local file, not a GitHub operation; same guard, same errors
@@ -754,7 +762,7 @@ def get_rule_prs(p, fresh=False):
     """The open pull requests that touch rule files: the one GitHub-sourced part of Policies, served separately so that it can never block or fail
     the rest. Hourly cache; fresh (the owner's Refresh click on the pane) bypasses it. -> dict(configured, available, pending, at, error)."""
     rc = L.rules_config(load_modules(p))
-    if not rc or not p.get("git"):
+    if not rc or not (p.get("git") or OFFLINE):  # an offline copy may hold the pull requests without the clone
         return dict(configured=False, available=False, pending=[])
     k = pk(p, "rulesprs")
     if fresh:
@@ -838,6 +846,8 @@ def get_state_served(p, fresh=False):
     """The state for the page: `stale` is true while a newer copy is being fetched in the background, so the page asks again shortly;
     `staleNote` is set when the last refresh failed and an older copy is shown (its age, the reason and when GitHub is tried again)."""
     S = get_state(fresh=fresh, p=p)
+    if OFFLINE:  # the copy was taken from a steering instance: steering is off here whatever the cached state says
+        S = dict(S, source=dict(S.get("source", {}), steering=False, simulate=False))
     return dict(S, stale=refreshing(pk(p, "state")), staleNote=stale_note(p), refreshAfter=S.get("source", {}).get("fetchedAt", 0) + GH_REFRESH_S)
 
 
@@ -990,6 +1000,94 @@ def build_moduledoc(p, mid):
     return dict(id=mid, paragraphs=L.module_paragraphs(txt, desc), svg=svg, hl=L.hl_ids(hl), files=files, docs=docs, relations=rel)
 
 
+# ---------- offline copy from a backup (PC-63; layout: docs/contracts/backup.md) ----------
+MANIFEST = "backup.json"
+BACKUP_PATHS = ("modules", "git", "code", "phases")  # project settings that name a file or folder inside the backup
+
+
+def unpack_backup(src, dest):
+    """Unpack the backup archive `src` (tar, any compression) into the folder `dest`, or copy it when `src` is a folder -> the backup root
+    (the folder holding backup.json: dest itself or its one subfolder). Members outside dest, links and devices are refused (ValueError)."""
+    src, dest = pathlib.Path(src).expanduser(), pathlib.Path(dest)
+    if src.is_dir():
+        shutil.copytree(src, dest, dirs_exist_ok=True)
+    else:
+        with tarfile.open(src) as tf:
+            for m in tf.getmembers():
+                if not (m.isfile() or m.isdir()) or m.name.startswith("/") or ".." in pathlib.PurePosixPath(m.name).parts:
+                    raise ValueError(f"{src}: refused archive member {m.name!r}")
+            tf.extractall(dest, filter="data")
+    if (dest / MANIFEST).is_file():
+        return dest
+    subs = [d for d in dest.iterdir() if (d / MANIFEST).is_file()]
+    if len(subs) != 1:
+        raise ValueError(f"{src}: no {MANIFEST} at the top of the backup")
+    return subs[0]
+
+
+def open_backup(root):
+    """The backup folder -> (project dict with its paths inside the backup, created epoch). ValueError when the manifest is unusable."""
+    root = pathlib.Path(root).resolve()
+    try:
+        m = json.loads((root / MANIFEST).read_text())
+        e = dict(m["project"])
+    except (OSError, ValueError, KeyError, TypeError) as ex:
+        raise ValueError(f"{root / MANIFEST}: unusable manifest: {ex}")
+    (p,), _ = projects_from_file(dict(projects=[{k: v for k, v in e.items() if k not in BACKUP_PATHS + ("meta",)}]))
+    for k in BACKUP_PATHS:
+        if e.get(k):
+            f = (root / e[k]).resolve()
+            if not f.is_relative_to(root):
+                raise ValueError(f"{MANIFEST}: {k} {e[k]!r} lies outside the backup")
+            p[k] = str(f) if f.exists() else None
+    created = m.get("created")
+    return p, created if isinstance(created, (int, float)) else (root / MANIFEST).stat().st_mtime
+
+
+def backup_inventory(p):
+    """The items logic.OFFLINE_PANES asks for that are present for project p (cache folder, data folder, snapshot, clone, module map)."""
+    have = set()
+    pre = re.sub(r"[^A-Za-z0-9_.-]", "_", pk(p, ""))
+    if CACHE_DIR and CACHE_DIR.is_dir():
+        have |= {"cache:" + f.stem[len(pre):] for f in CACHE_DIR.glob(pre + "*.json")}
+    d = DATA_DIR / p["name"]
+    if d.is_dir():
+        have |= {"data:" + f.relative_to(d).as_posix() for f in d.rglob("*") if f.is_file()}
+    if p.get("code") and (pathlib.Path(p["code"]) / "metrics.json").is_file():
+        have.add("code")
+    if p.get("git") and pathlib.Path(p["git"]).is_dir():
+        have.add("git")
+    try:
+        if not L.rules_config(load_modules(p)) and "cache:rules" not in have:
+            have.add("norules")
+    except (OSError, ValueError):
+        pass
+    return have
+
+
+def offline_info():
+    """What the page's banner and the restore test need in an offline copy: the time of the data, the refused GitHub calls and the gaps."""
+    return dict(created=OFFLINE["created"], ghAttempts=OFFLINE.get("gh_attempts", 0), gaps=L.backup_gaps(backup_inventory(proj())))
+
+
+def start_offline(src):
+    """--offline: unpack the backup (an archive into a temporary folder; a folder is used in place, never written to) and point the data and cache
+    folders into it -> the project. No GitHub call is made from here on."""
+    global DATA_DIR, CACHE_DIR
+    root = pathlib.Path(src).expanduser()
+    if not root.is_dir():
+        root = unpack_backup(root, tempfile.mkdtemp(prefix="cockpit-offline-"))
+    elif not (root / MANIFEST).is_file():
+        raise ValueError(f"{root}: no {MANIFEST} in this folder")
+    p, created = open_backup(root)
+    DATA_DIR, CACHE_DIR = root.resolve() / "data", root.resolve() / "cache"
+    OFFLINE.update(root=str(root), created=created, gh_attempts=0)
+    gaps = L.backup_gaps(backup_inventory(p))
+    log.info("offline copy of %s from %s (data from %s); %s", p["name"], root, time.strftime("%Y-%m-%d %H:%M", time.localtime(created)),
+             "every pane has its data" if not gaps else "gaps: " + "; ".join(f"{g['pane']} lacks {', '.join(g['missing'])}" for g in gaps))
+    return p
+
+
 # ---------- server ----------
 def redact(line):
     """Keep the access token out of the request log."""
@@ -1035,7 +1133,7 @@ class H(BaseHTTPRequestHandler):
             if u.path in ("/", "/index.html"):
                 return self.send(200, (HERE / "web" / "index.html").read_bytes(), "text/html; charset=utf-8")
             if u.path == "/api/projects":
-                return self.send(200, dict(default=DEFAULT, projects=[dict(name=n, repo=p["repo"]) for n, p in PROJECTS.items()]))
+                return self.send(200, dict(default=DEFAULT, projects=[dict(name=n, repo=p["repo"]) for n, p in PROJECTS.items()], **({"offline": offline_info()} if OFFLINE else {})))
             name_q = q.get("project", [""])[0]
             if u.path.startswith("/report/") and not name_q:  # files a report page loads carry no query: take the page's own
                 name_q = parse_qs(urlparse(self.headers.get("Referer", "")).query).get("project", [""])[0]
@@ -1143,21 +1241,30 @@ def main():
     ap.add_argument("--read-only", action="store_true", help="refuse every action (default: actions are enabled)")
     ap.add_argument("--steer", action="store_true", help=argparse.SUPPRESS)  # actions are the default now; kept so that existing service files still start
     ap.add_argument("--simulate-orchestrator", action="store_true", help="demo buttons: 'takes it' and 'completes it'")
+    ap.add_argument("--offline", metavar="BACKUP", help="run a read-only copy of one project from its backup (archive or folder, see docs/contracts/backup.md): no GitHub call at all")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:
-        projects, default = resolve(vars(a))
+        if a.offline:
+            mixed = [k for k in ("projects", "cache_dir", "simulate_orchestrator", *PROJECT_KEYS) if getattr(a, k) not in (None, False)]
+            if mixed:
+                raise ValueError(f"--offline takes the project from the backup: drop {', '.join('--' + x.replace('_', '-') for x in mixed)}")
+            projects = [start_offline(a.offline)]
+            default = projects[0]["name"]
+        else:
+            projects, default = resolve(vars(a))
     except ValueError as ex:
         ap.error(str(ex))
     register(projects, default)
-    steer = not a.read_only
+    steer = not (a.read_only or a.offline)
     CFG.update(steer=steer, simulate=a.simulate_orchestrator)
     for p in projects:
         log.info("project %s: repo=%s project=%s manager=%s mode=%s", p["name"], p["repo"], p["project"], p["manager"], "STEERING" if steer else "READ-ONLY")
         if steer and gh_user() and gh_user() != p["manager"]:
             log.warning("%s: gh is logged in as %s but the Manager is %s: protected labels set now would be flagged unauthorised", p["name"], gh_user(), p["manager"])
     global CACHE_DIR
-    CACHE_DIR = None if a.cache_dir == "none" else pathlib.Path(a.cache_dir or DATA_DIR / "cache").expanduser()
+    if not a.offline:
+        CACHE_DIR = None if a.cache_dir == "none" else pathlib.Path(a.cache_dir or DATA_DIR / "cache").expanduser()
     H.token = load_token(a.token_file)
     threading.Thread(target=warm, daemon=True).start()
     host = "0.0.0.0" if a.lan else "127.0.0.1"

@@ -216,7 +216,7 @@ function sortKey(t){return t.stage==='wip'?0:(t.stage==='released'?1:(t.stage===
 
 
 /* Data layer: everything comes from the backend (/api/state, /api/timeline, /api/code). Nothing is stored in the browser. */
-let PROJ=null,PROJS=[];  /* the selected project (name) and the configured ones; the choice is kept in localStorage `cockpit-project` */
+let PROJ=null,PROJS=[],OFF=null;  /* OFF: set when this is an offline copy from a backup ({created, ghAttempts, gaps}) */  /* the selected project (name) and the configured ones; the choice is kept in localStorage `cockpit-project` */
 const NOMETA=()=>({footprint:{status:'missing'},churn:{status:'missing'},ambiguity:{status:'missing'}});
 let QL=null;  /* /api/queue: the local part of the Task Queue (Dispatcher state file, processing log, settings); never needs GitHub */
 let Q={questions:[],counts:{},projects:[]};  /* open questions of every project: /api/questions, not tied to the selected project */
@@ -295,7 +295,7 @@ async function pickProject(name){
   render();await reload(false);
 }
 async function boot(){
-  try{const j=await api('/api/projects');PROJS=j.projects;
+  try{const j=await api('/api/projects');PROJS=j.projects;OFF=j.offline||null;
     let v=null;try{v=localStorage.getItem('cockpit-project');}catch(e){}
     PROJ=PROJS.some(p=>p.name===v)?v:j.default;
   }catch(e){}
@@ -606,7 +606,7 @@ function vSettings(){
    +(r[0]==='enabled'?'<input id="s_enabled" name="enabled" type="checkbox"'+(v.enabled?' checked':'')+(ro?' disabled':'')+'>'
      :'<input id="s_'+r[0]+'" name="'+r[0]+'" type="number" step="1" min="'+(mn[r[0]]!==undefined?mn[r[0]]:(r[0]==='retries'?0:1))+'"'+(r[0]==='workers'?' max="'+SET.workers_cap+'"':'')+' value="'+esc(String(v[r[0]]))+'"'+(ro?' disabled':'')+'>')
    +'<span class="muted" style="font-size:12px">'+r[2]+note(r[0])+'</span></div>').join('')
-   +(ro?'<span class="muted">This Cockpit was started with --read-only: the values cannot be changed here.</span>':'<div><button class="btn primary">Save</button></div>')+'</form></div>';
+   +(ro?'<span class="muted">'+(OFF?'This is an offline copy from a backup':'This Cockpit was started with --read-only')+': the values cannot be changed here.</span>':'<div><button class="btn primary">Save</button></div>')+'</form></div>';
 }
 const USEF=[['input_tokens','Input'],['output_tokens','Output'],['cache_creation_input_tokens','Cache write'],['cache_read_input_tokens','Cache read'],['total','Sum']];
 function usageTable(title,rows){
@@ -875,6 +875,7 @@ function render(){
      +(s.steering&&s.user&&s.user!==s.manager?'<span class="pill bad">acting as '+esc(s.user)+', not the Manager ('+esc(s.manager)+')</span>':'')
      +'</div>';}
   h+='</div>';
+  if(OFF)h+='<div class="page" style="padding-bottom:0"><div class="card" role="status" style="border-color:var(--warn,var(--danger))"><b class="warnline">offline copy, data from '+esc(new Date(OFF.created*1000).toLocaleString())+'</b> <span class="muted">No GitHub call is made; actions are off.'+(OFF.gaps&&OFF.gaps.length?' Not in the backup: '+esc(OFF.gaps.map(g=>g.pane).join(', '))+'.':'')+'</span></div></div>';
   h+=paneBar(R);
   const LOCAL=R==='settings'||R==='usage'||R==='questions'||R==='backlog'||R==='code';  /* tabs with a local part: shown without the GitHub state */
   const GHR=PANE_STATE.includes(R);  /* only these tabs show GitHub-state banners */
