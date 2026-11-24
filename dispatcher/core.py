@@ -76,6 +76,9 @@ def choose_task(tasks, active_ids):
     return min(ready, key=rank_key) if ready else None
 
 
+INTERVAL_TOLERANCE = 30     # seconds: launchd's timing is not exact (3c)
+
+
 # --- the state file: the Workers a firing leaves running for the next one (3o) -------------------------------
 def load_state(path):
     try:
@@ -228,14 +231,22 @@ class Dispatcher:
         st = load_state(self.state_path)
         try:
             self.manage(st)
+            now = self.probes.now()
+            last = st.get("last_fired")
             if not self.settings["enabled"]:
                 did = "skipped: switched off in Settings"
+            elif isinstance(last, (int, float)) and now - last < self.settings["interval_minutes"] * 60 - INTERVAL_TOLERANCE:
+                did = "skipped: interval"
+                log.info("firing skipped: interval (%d s since the last firing, setting %s min)", now - last,
+                         self.settings["interval_minutes"])
             else:
                 try:
                     did = self.start(st)
                 except Skip as e:
                     log.warning("firing skipped: %s", e)
                     did = f"skipped: {e}"
+            if did != "skipped: interval":
+                st["last_fired"] = now
         finally:
             save_state(self.state_path, st)
         line = self.heartbeat(st, did)
