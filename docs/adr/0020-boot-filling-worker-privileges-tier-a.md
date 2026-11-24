@@ -1,6 +1,7 @@
 # 0020. Boot-filling job: worker privileges, tier A (tool lists, no links, role marker, rules block)
 
-Status: proposed (builder); the owner confirms or changes
+Status: Superseded by docs/specs/dispatcher-and-workers.md (2026-11-24)
+Earlier status: proposed (builder); the owner confirms or changes
 Date: 2026-11-22
 Modules: internal/bootfilling
 Amends: [0014](0014-boot-filling-job.md), [0015](0015-boot-filling-implementation-choices.md), [0019](0019-boot-filling-never-twice.md)

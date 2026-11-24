@@ -1,6 +1,7 @@
 # 0015. Boot-filling job: implementation choices beyond ADR 0014
 
-Status: proposed (builder, task PC-19); the owner confirms or changes
+Status: Superseded by docs/specs/dispatcher-and-workers.md (2026-11-24)
+Earlier status: proposed (builder, task PC-19); the owner confirms or changes
 Date: 2026-11-20
 Modules: internal/bootfilling
 

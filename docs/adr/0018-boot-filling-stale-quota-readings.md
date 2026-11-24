@@ -1,6 +1,7 @@
 # 0018. Boot-filling job: stale or missing quota readings are unknown, not invented
 
-Status: proposed (builder); the owner confirms or changes
+Status: Superseded by docs/specs/dispatcher-and-workers.md (2026-11-24)
+Earlier status: proposed (builder); the owner confirms or changes
 Date: 2026-11-20
 Modules: internal/bootfilling
 Amends: [0017](0017-boot-filling-quota-history.md)
