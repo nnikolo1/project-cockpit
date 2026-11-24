@@ -42,6 +42,7 @@
   {"path": "dispatcher/plog.py", "module": "taskqueue/dispatcher", "basis": "the Dispatcher's processing log; its test follows it"},
   {"path": "dispatcher/launchd.py", "module": "taskqueue/dispatcher", "basis": "renders the LaunchAgent files that start the Dispatcher and the proxy; its test is tests/dispatcher/test_launchd.py"},
   {"path": "dispatcher/quota.py", "module": "taskqueue/dispatcher", "basis": "collects the vendor quota history the Dispatcher side keeps; its test is tests/dispatcher/test_quota.py"},
+  {"path": "tools/transcript_usage.py", "module": "taskqueue/dispatcher", "basis": "collects the token counts the Token Usage page reads, next to the quota collector; its test is tests/tools/test_transcript_usage.py"},
   {"path": "dispatcher/note.py", "module": "taskqueue", "candidates": ["taskqueue/dispatcher", "taskqueue/worker"], "basis": "the good-bye note format is read by the Dispatcher and written by the Workers; its test tests/dispatcher/test_note.py follows it"},
   {"path": "dispatcher/relay.py", "module": "taskqueue/worker", "basis": "the relay runs inside the Workers' container; its test is tests/dispatcher/test_relay.py"},
   {"path": "dispatcher/image/", "module": "taskqueue/worker", "basis": "the Workers' image: Containerfile, Stop hook and note skill"},

@@ -1,0 +1,99 @@
+import json
+import logging
+import os
+import stat
+
+from tools import transcript_usage as tu
+
+
+def line(mid, ts="2026-01-02T03:04:05.123Z", usage=None, model="m-1", text="SECRET TEXT"):
+    msg = {"id": mid, "model": model, "content": [{"type": "text", "text": text}]}
+    if usage is not None:
+        msg["usage"] = usage
+    return json.dumps({"type": "assistant", "timestamp": ts, "cwd": "/secret/path", "message": msg})
+
+
+def write(folder, name, lines):
+    (folder / name).write_text("\n".join(lines) + "\n")
+
+
+def out_lines(path):
+    return [json.loads(x) for x in path.read_text().splitlines()]
+
+
+def test_duplicate_message_counted_once(tmp_path):
+    src = tmp_path / "s"; src.mkdir()
+    write(src, "sess1.jsonl", [line("a", usage={"input_tokens": 1, "output_tokens": 2}),
+                               line("a", usage={"input_tokens": 1, "output_tokens": 9})])
+    out = tmp_path / "o.jsonl"
+    stats = tu.collect({"L": str(src)}, str(out))
+    rows = out_lines(out)
+    assert len(rows) == 1 and stats["messages"] == 1
+    assert rows[0]["output_tokens"] == 9 and rows[0]["session"] == "sess1" and rows[0]["source"] == "L"
+    assert rows[0]["ts"] == "2026-01-02T03:04:05+00:00" and rows[0]["model"] == "m-1"
+
+
+def test_missing_counts_are_zero(tmp_path):
+    src = tmp_path / "s"; src.mkdir()
+    write(src, "x.jsonl", [line("a", usage={"output_tokens": 5}), line("b", usage={}, model=None)])
+    out = tmp_path / "o.jsonl"
+    tu.collect({"L": str(src)}, str(out))
+    a, b = out_lines(out)
+    assert a["input_tokens"] == 0 and a["cache_read_input_tokens"] == 0 and a["output_tokens"] == 5
+    assert b["model"] is None and b["output_tokens"] == 0
+
+
+def test_unreadable_lines_skipped_and_counted(tmp_path):
+    src = tmp_path / "s"; src.mkdir()
+    write(src, "x.jsonl", ["not json", json.dumps({"message": {"id": "q", "usage": {}}}),
+                           line("a", usage={"input_tokens": 1}), json.dumps({"type": "user"})])
+    out = tmp_path / "o.jsonl"
+    stats = tu.collect({"L": str(src)}, str(out))
+    assert stats["skipped"] == 2 and stats["messages"] == 1
+
+
+def test_no_text_or_path_in_output(tmp_path):
+    src = tmp_path / "s"; src.mkdir()
+    write(src, "x.jsonl", [line("a", usage={"input_tokens": 1})])
+    out = tmp_path / "o.jsonl"
+    tu.collect({"L": str(src)}, str(out))
+    body = out.read_text()
+    assert "SECRET" not in body and "/secret" not in body
+    assert set(out_lines(out)[0]) == {"ts", "source", "session", "message", "model", *tu.COUNTS}
+
+
+def test_atomic_rewrite_mode_and_no_leftover(tmp_path):
+    src = tmp_path / "s"; src.mkdir()
+    write(src, "x.jsonl", [line("a", usage={"input_tokens": 1})])
+    out = tmp_path / "o.jsonl"
+    out.write_text("old\n")
+    tu.collect({"L": str(src)}, str(out))
+    tu.collect({"L": str(src)}, str(out))
+    assert len(out_lines(out)) == 1
+    assert stat.S_IMODE(os.stat(out).st_mode) == 0o600
+    assert sorted(os.listdir(tmp_path)) == ["o.jsonl", "s"]
+
+
+def test_two_sources_sorted_and_only_top_level_jsonl(tmp_path, caplog):
+    a = tmp_path / "a"; a.mkdir()
+    b = tmp_path / "b"; b.mkdir()
+    (b / "sub").mkdir()
+    write(a, "s1.jsonl", [line("m1", ts="2026-01-02T00:00:02Z", usage={"input_tokens": 1})])
+    write(b, "s2.jsonl", [line("m2", ts="2026-01-02T00:00:01Z", usage={"input_tokens": 2})])
+    write(b / "sub", "s3.jsonl", [line("m3", usage={"input_tokens": 3})])
+    write(b, "notes.txt", [line("m4", usage={"input_tokens": 4})])
+    out = tmp_path / "o.jsonl"
+    with caplog.at_level(logging.WARNING):
+        stats = tu.collect({"A": str(a), "B": str(b), "C": str(tmp_path / "missing")}, str(out))
+    rows = out_lines(out)
+    assert [(r["source"], r["message"]) for r in rows] == [("B", "m2"), ("A", "m1")]
+    assert stats["sources"] == 2 and stats["files"] == 2
+    assert "folder missing" in caplog.text
+
+
+def test_main_parses_sources(tmp_path):
+    src = tmp_path / "s"; src.mkdir()
+    write(src, "x.jsonl", [line("a", usage={"input_tokens": 1})])
+    out = tmp_path / "o.jsonl"
+    tu.main(["--source", f"L={src}", "--out", str(out)])
+    assert len(out_lines(out)) == 1
