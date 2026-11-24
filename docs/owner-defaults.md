@@ -62,3 +62,4 @@ This replaces the earlier statement that tasks are created only by the Orchestra
 ## Production: all tasks go through the Task Queue (owner, 2026-11-24)
 - All tasks are submitted via the Task Queue: filed as issues, released by the owner, worked by the Dispatcher's Workers (up to 6 at once; 10 is de-prioritised); the assistant files, analyses and merges and does not start its own background agents for new work unless the owner says so.
 - A bug or task about the Task Queue itself is never run through the Task Queue: label `interactive-only`, worked outside the queue by the Interactive Session Agent as a high-priority task; everything else goes through the queue (owner, 2026-11-24).
+- The Project cockpit is the top-priority project unless the owner says otherwise: it is a meta-project that provides the bedrock for all projects, so its tasks rank before other projects' tasks in the shared Task Queue and its work comes first (owner, 2026-11-24).
