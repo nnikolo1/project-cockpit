@@ -49,6 +49,7 @@
   {"path": "tests/test_questions.py", "module": "core", "basis": "tests the open-questions parsing in logic.py"},
   {"path": "tests/test_modules.py", "module": "core", "basis": "tests the module functions of logic.py"},
   {"path": "tests/test_projects.py", "module": "core", "basis": "tests the --projects handling in cockpit.py"},
+  {"path": "tests/test_settings.py", "module": "core", "basis": "tests the settings validation in logic.py and the settings action in cockpit.py; tests follow the code"},
   {"path": "tests/test_report.py", "module": "core", "basis": "tests the report functions of logic.py"},
   {"path": "tests/test_rules.py", "module": "core", "basis": "tests the rule-change functions of logic.py"},
   {"path": "tests/fixtures/cardmeta/", "module": "core", "basis": "synthetic inputs of tests/test_cardmeta.py"},
