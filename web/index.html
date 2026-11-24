@@ -567,11 +567,12 @@ function quotaCard(q){
    +'</tbody></table></div></div>';
 }
 function latestCard(q){
-  const pc=x=>x==null?'':x+' %',T='Latest readings';
+  const T='Latest readings per hour',pc=x=>x==null?'':x+' %',hhmm=s=>s?esc(s.replace('T',' ').slice(5,16)):'';
   if(!q)return '<div class="card"><h2>'+T+'</h2><span class="muted">no data</span></div>';
-  return '<div class="card"><h2>'+T+'</h2><div class="tblbox narrow"><table><thead><tr><th>Time (UTC)</th><th>5-hour</th><th>Weekly</th></tr></thead><tbody>'
-   +q.recent.map(r=>'<tr><td class="mono">'+esc(r.ts)+'</td><td class="mono">'+pc(r.five_hour)+'</td><td class="mono">'+pc(r.seven_day)+'</td></tr>').join('')
-   +(q.recent.length?'':'<tr><td class="muted" colspan="3">no data</td></tr>')+'</tbody></table></div></div>';
+  const rng=s=>s&&s.first!=null?pc(s.first)+(s.last!==s.first?' → '+pc(s.last):'')+(s.high>Math.max(s.first,s.last)?' <span class="muted">(peak '+pc(s.high)+')</span>':''):'';
+  return '<div class="card"><h2>'+T+'</h2><span class="muted">One row per hour (UTC): first and last reading of the hour, and the peak if it was higher than both; “Readings” counts the changes the collector recorded; reset times are UTC.</span><div class="tblbox narrow"><table><thead><tr><th>Hour (UTC)</th><th>Readings</th><th>5-hour</th><th>5-hour resets</th><th>Weekly</th><th>Weekly resets</th></tr></thead><tbody>'
+   +q.hours.slice().reverse().map(r=>'<tr><td class="mono">'+esc(r.key.replace('T',' '))+'</td><td class="mono">'+r.readings+'</td><td class="mono">'+rng(r.five_hour)+'</td><td class="mono">'+hhmm(r.reset5)+'</td><td class="mono">'+rng(r.seven_day)+'</td><td class="mono">'+hhmm(r.reset7)+'</td></tr>').join('')
+   +(q.hours.length?'':'<tr><td class="muted" colspan="6">no data</td></tr>')+'</tbody></table></div></div>';
 }
 function projectsCard(){
   const nf=x=>x.toLocaleString('en-US'),P=USE.projects||[];

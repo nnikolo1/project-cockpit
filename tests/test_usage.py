@@ -86,7 +86,10 @@ def test_quota_history_gives_vendor_windows_and_daily_maxima():
     d = {x["key"]: x for x in r["quota"]["days"]}
     assert len(r["quota"]["days"]) == 90 and d["2026-11-20"]["five_hour"] == 40 and d["2026-11-20"]["seven_day"] == 35
     assert d["2026-11-19"]["five_hour"] is None
-    assert [x["five_hour"] for x in r["quota"]["recent"]] == [10, 40, 5]
+    h = {x["key"]: x for x in r["quota"]["hours"]}
+    assert list(h) == ["2026-11-20T04:00", "2026-11-20T06:00", "2026-11-21T00:00"]
+    assert h["2026-11-20T04:00"]["five_hour"] == dict(first=10, last=10, low=10, high=10) and h["2026-11-20T04:00"]["readings"] == 1
+    assert h["2026-11-20T04:00"]["reset5"] == "2026-11-20T08:30+00:00"
 
 
 def test_get_usage_reads_the_quota_file(tmp_path):
@@ -95,7 +98,7 @@ def test_get_usage_reads_the_quota_file(tmp_path):
     (d / "proxy-usage.jsonl").write_text(USAGE)
     assert C.get_usage(dict(name="proj", repo="o/r"), data_dir=tmp_path)["quota"] is None
     (d / "quota-history.jsonl").write_text(q("2026-11-21T00:30:00+00:00", 5, 36, 1))
-    assert C.get_usage(dict(name="proj", repo="o/r"), data_dir=tmp_path)["quota"]["recent"][0]["seven_day"] == 36
+    assert C.get_usage(dict(name="proj", repo="o/r"), data_dir=tmp_path)["quota"]["hours"][0]["seven_day"]["last"] == 36
 
 
 def test_all_projects_table_sums_each_project(tmp_path):
@@ -110,3 +113,13 @@ def test_all_projects_table_sums_each_project(tmp_path):
     rows = {x["name"]: x for x in r["projects"]}
     assert rows["two"]["total"] == 20 and rows["two"]["tasks"] == 0 and rows["two"]["last_day"] == "2026-11-22"
     assert rows["none"] == dict(name="none")
+
+
+def test_hours_aggregate_the_readings_of_one_utc_hour():
+    end = int(L._epoch("2026-11-20T08:30:00+00:00"))
+    qt = "\n".join([q("2026-11-20T06:05:00+00:00", 10, 30, end), q("2026-11-20T06:20:00+00:00", 25, 31, end),
+                     q("2026-11-20T06:50:00+00:00", 20, 31, end)])
+    (hour,) = L._quota(qt, None)[1]["hours"]
+    assert hour["readings"] == 3
+    assert hour["five_hour"] == dict(first=10, last=20, low=10, high=25)
+    assert hour["seven_day"] == dict(first=30, last=31, low=30, high=31)

@@ -1138,6 +1138,28 @@ def _pct(block, key):
     return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
 
+def _iso(epoch):
+    """An epoch-seconds number as an ISO UTC time to the minute, or None."""
+    if not isinstance(epoch, (int, float)) or isinstance(epoch, bool):
+        return None
+    return dt.datetime.fromtimestamp(epoch, dt.timezone.utc).isoformat(timespec="minutes")
+
+
+def _hours(reads):
+    """Readings (oldest first) aggregated per UTC hour: the count and, per window, first, last, lowest and highest percentage, and the window's reset time."""
+    out = {}
+    for r in reads:
+        h = out.setdefault(r["ts"][:13] + ":00", dict(key=r["ts"][:13] + ":00", readings=0, five_hour={}, seven_day={}, reset5=None, reset7=None))
+        h["readings"] += 1
+        for k in ("five_hour", "seven_day"):
+            v = r[k]
+            if v is not None:
+                s = h[k]
+                s.update(first=s.get("first", v), last=v, low=min(s.get("low", v), v), high=max(s.get("high", v), v))
+        h["reset5"], h["reset7"] = r["reset5"] or h["reset5"], r["reset7"] or h["reset7"]
+    return list(out.values())
+
+
 def _quota(quota_text, end_day):
     """The vendor's readings -> (vendor window ends as epoch seconds, report dict or None for no file). end_day: the last day of the 90."""
     recs = _json_lines(quota_text)
@@ -1150,7 +1172,9 @@ def _quota(quota_text, end_day):
             continue
         f, w = rec.get("five_hour"), rec.get("seven_day")
         reads.append(dict(t=t, ts=dt.datetime.fromtimestamp(t, dt.timezone.utc).isoformat(timespec="seconds"),
-                          five_hour=_pct(f, "used_percentage"), seven_day=_pct(w, "used_percentage")))
+                          five_hour=_pct(f, "used_percentage"), seven_day=_pct(w, "used_percentage"),
+                          reset5=_iso(f.get("resets_at") if isinstance(f, dict) else None),
+                          reset7=_iso(w.get("resets_at") if isinstance(w, dict) else None)))
         r = f.get("resets_at") if isinstance(f, dict) else None
         if isinstance(r, (int, float)) and not isinstance(r, bool):
             resets.append(r)
@@ -1172,8 +1196,7 @@ def _quota(quota_text, end_day):
                 if r[k] is not None and (d[k] is None or r[k] > d[k]):
                     d[k] = r[k]
     cut = reads[-1]["t"] - RECENT_DAYS * 86400 if reads else 0
-    recent = [{k: r[k] for k in ("ts", "five_hour", "seven_day")} for r in reads if r["t"] >= cut]
-    return ends, dict(days=[dict(key=k, **v) for k, v in days.items()], recent=recent)
+    return ends, dict(days=[dict(key=k, **v) for k, v in days.items()], hours=_hours([r for r in reads if r["t"] >= cut]))
 
 
 def usage_summary(rep):
