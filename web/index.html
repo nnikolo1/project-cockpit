@@ -564,7 +564,12 @@ function quotaCard(q){
   const pc=x=>x==null?'':x+' %',bar=x=>'<div class="bar" aria-hidden="true"><i style="width:'+Math.min(100,x||0)+'%;background:var(--accent)"></i></div>';
   return '<div class="card"><h2>'+T+' per day (highest reading)</h2><div class="tblbox narrow"><table><thead><tr><th>Day</th><th>5-hour</th><th></th><th>Weekly</th><th></th></tr></thead><tbody>'
    +q.days.map(d=>'<tr><td class="mono">'+esc(d.key)+'</td><td class="mono">'+pc(d.five_hour)+'</td><td style="width:120px">'+bar(d.five_hour)+'</td><td class="mono">'+pc(d.seven_day)+'</td><td style="width:120px">'+bar(d.seven_day)+'</td></tr>').join('')
-   +'</tbody></table></div><h2 style="margin-top:12px">Latest readings</h2><div class="tblbox narrow"><table><thead><tr><th>Time (UTC)</th><th>5-hour</th><th>Weekly</th></tr></thead><tbody>'
+   +'</tbody></table></div></div>';
+}
+function latestCard(q){
+  const pc=x=>x==null?'':x+' %',T='Latest readings';
+  if(!q)return '<div class="card"><h2>'+T+'</h2><span class="muted">no data</span></div>';
+  return '<div class="card"><h2>'+T+'</h2><div class="tblbox narrow"><table><thead><tr><th>Time (UTC)</th><th>5-hour</th><th>Weekly</th></tr></thead><tbody>'
    +q.recent.map(r=>'<tr><td class="mono">'+esc(r.ts)+'</td><td class="mono">'+pc(r.five_hour)+'</td><td class="mono">'+pc(r.seven_day)+'</td></tr>').join('')
    +(q.recent.length?'':'<tr><td class="muted" colspan="3">no data</td></tr>')+'</tbody></table></div></div>';
 }
@@ -583,7 +588,7 @@ function vUsage(){
   const tk=USE.tasks;
   const dv={},fh={};(USE.days||[]).forEach(r=>{dv[r.key]=r.total;});((USE.quota&&USE.quota.days)||[]).forEach(r=>{if(r.five_hour!=null)fh[r.key]=r.five_hour;});
   const hm='<div class="card"><h2>Tokens per day</h2>'+heatmap(dv,(d,n)=>nf(n)+' tokens on '+d+(fh[d]!=null?'\nhighest 5-hour reading '+fh[d]+' %':''),'Sum of the four token counts per day (UTC), as in the per-day table below; the proxy file keeps '+((USE.days||[]).length)+' days.')+'</div>';
-  return head+hm+projectsCard()+usageTable('Usage per day',USE.days)+usageTable('Usage per 5-hour window',USE.windows&&USE.windows.map(r=>Object.assign({},r,{key:r.key+' ('+r.kind+')'})))+quotaCard(USE.quota)+usageTable('Usage per Worker',USE.workers)
+  return head+latestCard(USE.quota)+hm+projectsCard()+usageTable('Usage per day',USE.days)+usageTable('Usage per 5-hour window',USE.windows&&USE.windows.map(r=>Object.assign({},r,{key:r.key+' ('+r.kind+')'})))+quotaCard(USE.quota)+usageTable('Usage per Worker',USE.workers)
    +'<div class="card"><h2>Per task</h2><div class="tblbox narrow"><table><thead><tr><th>Task</th><th>Worker</th><th>Launched (UTC)</th><th>Proxy sum</th><th>Good-bye note</th><th>Difference</th></tr></thead><tbody>'
    +(tk?tk.map(t=>'<tr><td class="mono">'+esc(t.task)+'</td><td class="mono">'+esc(t.worker||'')+'</td><td class="mono">'+esc(t.start)+'</td><td class="mono">'+nf(t.proxy)+(t.overlap?' <span class="muted" title="Another task ran at the same time; the sum may include its requests">overlap</span>':'')+'</td><td class="mono">'+nf(t.note)+'</td><td class="mono">'+nf(t.diff)+'</td></tr>').join(''):'')
    +(tk&&tk.length?'':'<tr><td class="muted" colspan="6">no data</td></tr>')+'</tbody></table></div><p class="muted" style="font-size:13px;margin:8px 0 0">The proxy sum counts the requests of the task’s Worker between the task’s launch and its last log entry. Older tasks, launched before the log named the Worker, count all Workers’ requests in that span (marked overlap when another task ran then).</p></div></div>';
