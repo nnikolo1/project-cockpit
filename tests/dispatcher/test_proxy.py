@@ -30,7 +30,8 @@ def stack():
 
     def upstream(method, path, headers, body):
         calls.append((method, path, headers, body))
-        return state["status"], [("content-type", "application/json"), ("content-length", "9")], iter(state["chunks"])
+        hdrs = state.get("headers") or [("content-type", "application/json"), ("content-length", "9")]
+        return state["status"], hdrs, iter(state["chunks"])
 
     usage = proxy.Usage(os.path.join(d, "u.jsonl"))
     srv = proxy.make_server(sock, "REAL", {"dummy-a": "a", "dummy-b": "b"}, usage, upstream)
@@ -136,3 +137,19 @@ def test_usage_line_carries_a_utc_timestamp(stack):
     rec = json.loads(open(os.path.join(d, "u.jsonl")).readline())
     ts = datetime.datetime.fromisoformat(rec["ts"])
     assert rec["worker"] == "a" and ts.utcoffset().total_seconds() == 0
+
+
+def test_ratelimit_headers_recorded_and_nothing_else(stack):
+    sock, _, state, _, d = stack
+    state["headers"] = [("content-type", "application/json"), ("Anthropic-RateLimit-Unified-5h-Utilization", "0.42"),
+                        ("x-ratelimit-remaining", "7"), ("set-cookie", "secret=1")]
+    post(sock, "/v1/messages", {"x-api-key": "dummy-a"})
+    rec = json.loads(open(os.path.join(d, "u.jsonl")).readline())
+    assert rec["ratelimit"] == {"Anthropic-RateLimit-Unified-5h-Utilization": "0.42", "x-ratelimit-remaining": "7"}
+    assert "secret" not in json.dumps(rec)
+
+
+def test_no_ratelimit_headers_no_field(stack):
+    sock, _, _, _, d = stack
+    post(sock, "/v1/messages", {"x-api-key": "dummy-a"})
+    assert "ratelimit" not in json.loads(open(os.path.join(d, "u.jsonl")).readline())

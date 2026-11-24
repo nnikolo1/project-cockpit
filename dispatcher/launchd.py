@@ -1,4 +1,4 @@
-"""The two LaunchAgent property lists of the Dispatcher (3c) and of the proxy service (4d).
+"""The three LaunchAgent property lists of the Dispatcher (3c), of the proxy service (4d) and of the quota collector.
 
 Pure rendering (plistlib); the command line only writes the files and prints the install commands, it installs nothing.
 
@@ -15,6 +15,7 @@ COCKPIT_DIR = pathlib.Path(__file__).resolve().parent.parent
 DATA_DIR = pathlib.Path("~/.local/share/project-cockpit").expanduser()  # as cockpit.DATA_DIR
 SOCKET_LIMIT = 104  # bytes, 4f
 INTERVAL = 120      # seconds, 3c
+QUOTA_INTERVAL = 30  # seconds, the quota collector
 PREFIX = "com.project-cockpit"
 
 
@@ -22,7 +23,7 @@ def paths(project, data_dir=DATA_DIR):
     """The per-project files, under <data dir>/<project>/ (the folder the Cockpit reads: settings_path, USAGE_FILE, PLOG_FILE, AREA_DIR)."""
     d = pathlib.Path(data_dir) / project
     return dict(dir=d, settings=d / "dispatcher-settings.json", state=d / "dispatcher-state.json", area=d / "area",
-                socket=d / "proxy.sock", usage=d / "proxy-usage.jsonl", processing=d / "processing", launchd=d / "launchd")
+                socket=d / "proxy.sock", usage=d / "proxy-usage.jsonl", quota=d / "quota-history.jsonl", processing=d / "processing", launchd=d / "launchd")
 
 
 def check_socket(sock):
@@ -61,8 +62,17 @@ def proxy_plist(project, token_file, image_workers=rt.Config.image_workers, data
                 StandardOutPath=str(p["dir"] / "proxy.log"), StandardErrorPath=str(p["dir"] / "proxy.log"))
 
 
+def quota_plist(project, data_dir=DATA_DIR, cockpit_dir=COCKPIT_DIR, python="python3"):
+    """The quota collector, one reading every 30 seconds into <data dir>/<project>/quota-history.jsonl."""
+    p = paths(project, data_dir)
+    args = [python, "-m", "dispatcher.quota", "--history", p["quota"]]
+    return dict(Label=f"{PREFIX}.quota.{project}", ProgramArguments=[str(a) for a in args], StartInterval=QUOTA_INTERVAL,
+                WorkingDirectory=str(cockpit_dir), EnvironmentVariables=_env(cockpit_dir),
+                StandardOutPath=str(p["dir"] / "quota.log"), StandardErrorPath=str(p["dir"] / "quota.log"))
+
+
 def render(argv=None):
-    ap = argparse.ArgumentParser(prog="dispatcher.launchd render", description="write the two LaunchAgent files; installs nothing")
+    ap = argparse.ArgumentParser(prog="dispatcher.launchd render", description="write the three LaunchAgent files; installs nothing")
     ap.add_argument("--project", required=True)
     ap.add_argument("--repo", required=True, help="owner/name")
     ap.add_argument("--repo-dir", required=True)
@@ -74,12 +84,12 @@ def render(argv=None):
     absolute = lambda s: str(pathlib.Path(s).expanduser().resolve())
     token, repo_dir = absolute(a.token_file), absolute(a.repo_dir)
     out.mkdir(parents=True, exist_ok=True)
-    for plist in (dispatcher_plist(a.project, a.repo, repo_dir, token, a.image), proxy_plist(a.project, token)):
+    for plist in (dispatcher_plist(a.project, a.repo, repo_dir, token, a.image), proxy_plist(a.project, token), quota_plist(a.project)):
         f = out / f"{plist['Label']}.plist"
         f.write_bytes(plistlib.dumps(plist))
         print(f)
     print("To install (by hand):")
-    for plist in (proxy_plist(a.project, token), dispatcher_plist(a.project, a.repo, repo_dir, token)):
+    for plist in (proxy_plist(a.project, token), quota_plist(a.project), dispatcher_plist(a.project, a.repo, repo_dir, token)):
         print(f"  launchctl bootstrap gui/$(id -u) {out / (plist['Label'] + '.plist')}")
 
 
