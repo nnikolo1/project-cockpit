@@ -16,7 +16,7 @@ ENV USE_BUILTIN_RIPGREP=0
 # Each has its own CLAUDE_CONFIG_DIR with skipWebFetchPreflight (4i) and the permissions below.
 # WORKER_SETTINGS is the one place to change the allowlist [proposed, not yet approved by the owner].
 ARG WORKER_SETTINGS='{"skipWebFetchPreflight": true, "permissions": {"allow": ["Edit", "Write", "Bash(git:*)", "Bash(python3:*)", "Bash(pytest:*)", "Read", "Glob", "Grep", "WebSearch"], "deny": ["WebFetch"]}, "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "python3 /opt/hook/stop_hook.py"}]}]}}'
-RUN for i in 1 2 3 4 5 6 7 8 9 10; do \
+RUN for i in 1 2 3 4 5 6; do \
       adduser -D -u $((1000 + i)) worker$i && \
       mkdir -p /home/worker$i/.claude && \
       printf '%s' "$WORKER_SETTINGS" > /home/worker$i/.claude/settings.json && \

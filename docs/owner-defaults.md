@@ -60,4 +60,4 @@ This replaces the earlier statement that tasks are created only by the Orchestra
 - **Separation of powers.** If at any time an agent finds that a file (documentation or code) contradicts a standing policy, it may file a task, and that task counts as released at once. The agent that found the contradiction is not allowed to work on that task itself: the finder files, someone else works. The separation of the filing from the working is a check and balance, like the separation of the Dispatcher, the Workers and the owner.
 
 ## Production: all tasks go through the Task Queue (owner, 2026-11-24)
-- All tasks are submitted via the Task Queue: filed as issues, released by the owner, worked by the Dispatcher's Workers (up to 10 at once); the assistant files, analyses and merges and does not start its own background agents for new work unless the owner says so.
+- All tasks are submitted via the Task Queue: filed as issues, released by the owner, worked by the Dispatcher's Workers (up to 6 at once; 10 is de-prioritised); the assistant files, analyses and merges and does not start its own background agents for new work unless the owner says so.
