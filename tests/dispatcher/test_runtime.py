@@ -103,6 +103,9 @@ def test_build_image(tmp_path):
     r, f = make(tmp_path)
     r.build_image("/ctx")
     assert f.calls[0][0][1] == "build" and f.calls[0][1] == rt.BUILD_TIMEOUT
+    args = f.calls[0][0]
+    assert args[args.index("--dns") + 1] == "1.1.1.1"
+    assert args[args.index("-f") + 1] == "/ctx/dispatcher/image/Containerfile"
     r, _ = make(tmp_path, ("build", (1, "fail")))
     with pytest.raises(rt.ContainerError):
         r.build_image("/ctx")
@@ -239,7 +242,7 @@ def test_containerfile_settings_allowlist():
     raw = re.search(r"^ARG WORKER_SETTINGS='(.*)'$", text, re.M).group(1)
     s = json.loads(raw)
     assert s["skipWebFetchPreflight"] is True
-    assert s["permissions"]["allow"] == ["Edit", "Write", "Bash(git:*)", "Bash(python3:*)", "Bash(pytest:*)", "WebSearch"]
+    assert s["permissions"]["allow"] == ["Edit", "Write", "Bash(git:*)", "Bash(python3:*)", "Bash(pytest:*)", "Read", "Glob", "Grep", "WebSearch"]
     assert s["permissions"]["deny"] == ["WebFetch"]
     assert '"$WORKER_SETTINGS"' in text
 

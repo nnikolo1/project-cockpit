@@ -57,6 +57,7 @@ class Config:
     relay_port: int = 8089              # where the relay of 4f listens inside the container
     data_folder: str = os.path.expanduser("~/Library/Application Support/com.apple.container")  # size shown in the heartbeat
     runaway_minutes: int = 40           # 3i; the in-guest backstop is twice this (4e)
+    build_dns: str = "1.1.1.1"          # name resolution of the image build fails with the tool's default (first real run)
 
 
 def default_run(args, timeout):
@@ -160,8 +161,9 @@ class Runtime:
         return out if rc == 0 else None
 
     def build_image(self, context):
-        """Build the image from the Containerfile in `context` (see image/Containerfile)."""
-        rc, out = self.call("build", "-t", self.cfg.image, "-f", os.path.join(context, "Containerfile"), context,
+        """Build the image; `context` has the repository layout (dispatcher/image/Containerfile, relay.py, note.py, ...) plus the `claude` binary at its root."""
+        rc, out = self.call("build", "--dns", self.cfg.build_dns, "-t", self.cfg.image, "-f",
+                            os.path.join(context, "dispatcher", "image", "Containerfile"), context,
                             timeout=BUILD_TIMEOUT)
         if rc:
             raise ContainerError(f"image build failed: {out[-500:]}")
