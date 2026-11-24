@@ -37,6 +37,9 @@ class FakeTasks:
     def set_state(self, tid, state):
         self.states.append((tid, state))
 
+    def reconcile_wip(self, running):
+        return []
+
     def fetch_branch(self, tid, path, branch):
         if self.fail_fetch:
             raise RuntimeError("bad bundle")

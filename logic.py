@@ -116,7 +116,7 @@ def stage(issue, eff):
         return "cancelled"
     lab = issue.get("labels") or []
     for s in STATES:
-        if s in lab:
+        if s in lab and not (s == "wip" and issue["state"] == "closed"):   # a closed issue is never running (PC-98)
             return s
     if issue["state"] == "closed":
         return "merged"

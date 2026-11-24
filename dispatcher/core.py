@@ -298,6 +298,15 @@ class Dispatcher:
             else:
                 log.warning("proxy (pid %s) did not stop", pid)
 
+    def reconcile(self, st):
+        """PC-98: no task stays `wip` without a Worker running it. A hosting-service failure is logged, never fatal to the firing."""
+        try:
+            for tid, what in self.tasks.reconcile_wip({w["task_id"] for w in st["workers"].values()}):
+                log.warning("%s: %s", tid, what)
+                self.plog.event(tid, "-", what)
+        except Exception as e:   # noqa: BLE001
+            log.warning("wip reconciliation skipped: %s", e)
+
     # -- the firing --
     def fire(self):
         st = load_state(self.state_path)
@@ -305,6 +314,7 @@ class Dispatcher:
         try:
             slept = self._detect_sleep(st, self.probes.now())
             self.manage(st)
+            self.reconcile(st)
             self.manage_proxy(st)
             now = self.probes.now()
             last = st.get("last_fired")

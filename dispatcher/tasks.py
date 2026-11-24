@@ -148,6 +148,31 @@ class GitHubTasks:
         self.gh(args)
         log.info("%s: %s -> %s", task_id, current or "no state label", state)
 
+    def reconcile_wip(self, running):
+        """PC-98: a task labelled `wip` that no running Worker holds is `unmerged` when its branch is in the task repository, otherwise `failed`;
+        a closed issue loses a stale `wip` label. `running`: the task ids the Dispatcher's Workers hold. -> list of (task id, what was done)."""
+        issues, _ = self._issues()
+        done = []
+        for i in issues:
+            if "wip" not in i["labels"]:
+                continue
+            tid = f"{self.short}-{i['number']}"
+            if i["state"] == "closed":
+                self.gh(["issue", "edit", str(i["number"]), "-R", self.repo, "--remove-label", "wip"])
+                done.append((tid, "stale wip label removed from a closed issue"))
+            elif tid not in running:
+                state = "unmerged" if self._has_branch(tid) else "failed"
+                self.set_state(tid, state)
+                self.gh(["issue", "comment", str(i["number"]), "-R", self.repo, "--body", f"Labelled wip but no Worker is running it: set to {state} (reconciliation, PC-98)."])
+                done.append((tid, f"wip with no Worker -> {state}"))
+        return done
+
+    def _has_branch(self, task_id):
+        try:
+            return bool(self.git(["rev-parse", "--verify", "--quiet", f"refs/heads/worker/{task_id}"], self.repo_dir).strip())
+        except Exception:
+            return False
+
     def fetch_branch(self, task_id, bundle_path, branch):
         """Fetch the Worker's bundle into the task repository as `worker/<task-id>` (3e); no push, no pull request."""
         self._number(task_id)
