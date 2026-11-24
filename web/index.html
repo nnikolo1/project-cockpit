@@ -506,12 +506,21 @@ function vModPage(id){
   h+=sec('Documents',d.docs==null?'<span class="muted">no data (no repository clone configured)</span>'
     :d.docs.length?'<ul style="margin:0;padding-left:18px">'+d.docs.map(x=>'<li><a href="'+esc(x.url)+'" target="_blank" rel="noopener">'+esc(x.title)+'</a> <span class="mono muted">'+esc(x.path)+'</span></li>').join('')+'</ul>':'<span class="muted">no document names this module in its Modules line</span>');
   return h+chgOne(id)+metaBlock(id)+'</div>';}
+/* The last daily backup (status record of tools/project_backup.py): time and result; a failure or an age over 24 h is shown as a warning. */
+function bkLine(b){
+  if(!b)return '<p class="warnline" style="font-size:12px;margin:6px 0 0">Daily backup: none recorded.</p>';
+  const t=x=>x?esc(new Date(x).toLocaleString()):'never',old=!b.last_ok||(Date.now()-new Date(b.last_ok))>864e5;
+  return '<p class="'+(b.ok&&!old?'muted':'warnline')+'" style="font-size:12px;margin:6px 0 0">Daily backup: '+t(b.time)+', '
+   +(b.ok?'ok ('+b.files+' files, '+(b.size/1048576).toFixed(1)+' MB)':'failed: '+esc(b.reason||'no reason given')+'; last good one '+t(b.last_ok))
+   +(b.ok&&old?'; older than 24 hours':'')+'.</p>';
+}
 function vQueueLocal(){
   const nf=t=>D&&D.tasks.find(x=>x.key===t),L=QL;
   if(!L)return '<div class="card"><h2>Being processed now</h2><span class="muted">The Dispatcher files could not be read.</span></div>';
   const t0=x=>x?esc(x.replace('T',' ').slice(0,16)):'';
   return '<div class="card"><h2>Being processed now</h2>'+(L.workers.length?L.workers.map(w=>{const t=nf(w.task);return '<div class="row" style="gap:10px;margin-top:8px"><b class="mono">'+esc(w.worker)+'</b><b class="mono">'+esc(w.task||'?')+'</b>'+(t?'<button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button>':'')+'<span class="muted">launched '+t0(w.launched)+(w.started?'':' · starting')+'</span></div>';}).join(''):'<p class="muted" style="margin:8px 0 0">No Worker is running now.</p>')
    +'<p class="muted" style="font-size:12px;margin:10px 0 0">From the Dispatcher: '+(L.settings.values.enabled?'on':'off')+', '+L.settings.values.workers+' Worker'+(L.settings.values.workers===1?'':'s')+' at most, every '+L.settings.values.interval_minutes+' min (settings in the Settings tab).</p>'
+   +bkLine(L.backup)
    +(L.log.length?'<details style="margin-top:8px"><summary class="muted">Processing log, newest '+L.log.length+'</summary><div class="mono" style="font-size:12px;margin-top:6px">'+L.log.map(r=>t0(r.time)+' '+esc(r.heartbeat?r.heartbeat:[r.task,r.state,r.reason,r.worker].filter(Boolean).join(' '))).join('<br>')+'</div></details>':'')+'</div>';
 }
 function vBacklog(){

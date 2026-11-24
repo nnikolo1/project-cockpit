@@ -613,10 +613,11 @@ def get_settings(p):
 
 
 def get_queue(p):
-    """The local part of the Task Queue tab (no GitHub): running Workers from the Dispatcher's state file, the processing log's newest lines and
-    the Dispatcher settings. The token and quota files are read for the Token Usage tab (`/api/usage`), also local."""
+    """The local part of the Task Queue tab (no GitHub): running Workers from the Dispatcher's state file, the processing log's newest lines,
+    the Dispatcher settings and the last daily backup's status record (None when there is none). The token and quota files are read for the Token Usage tab (`/api/usage`), also local."""
     d = DATA_DIR / (p.get("name") or p["repo"].split("/")[-1])
-    return dict(L.queue_local(_read_text(d / "dispatcher-state.json"), _read_text(d / PLOG_FILE)), settings=get_settings(p), asOf=time.time())
+    return dict(L.queue_local(_read_text(d / "dispatcher-state.json"), _read_text(d / PLOG_FILE)), settings=get_settings(p), asOf=time.time(),
+                backup=L.backup_status(_read_text(d / L.BACKUP_STATUS_FILE)))
 
 
 def card_settings_path(p):

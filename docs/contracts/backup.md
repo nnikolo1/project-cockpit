@@ -15,8 +15,10 @@ data/<name>/       the project's data folder (<data dir>/<name>/): dispatcher-st
                    proxy-usage.jsonl, quota-history.jsonl, transcript-usage.jsonl, dispatcher-settings.json,
                    cockpit-settings.json, area/*/outbox/goodbye.json, cardmeta/{footprint,churn,ambiguity}.json
 files/...          where the manifest's paths point: the module map (and its modules/ folder of module pages),
-                   the code snapshot folder, the phases file and, optionally, a clone
+                   the code snapshot folder, the phases file and, optionally, a clone; files/projects.json: the projects file
 ```
+
+The daily backup (`tools/project_backup.py`) writes `<project>-YYYY-MM-DD.tar.gz` with one top folder of that name. It packs, from the data folder, only `dispatcher-state.json`, `dispatcher-settings.json`, `cockpit-settings.json`, `projects.json`, the processing log, the usage files (proxy, quota, transcript, statistics cache), `backup-status.json`, `cardmeta/*.json`, `area/*/outbox/goodbye.json` and `transcripts/` (the never-pruned mirror of the coding tool's raw session transcripts: conversation text, the one deliberate exception to numbers only). It never packs a file whose name marks a secret (a token, credential, environment or key file: refused and listed as `refused` in the status record), a link, a log, a task bundle, or anything inside the project's clone (the code and a module map kept in the repository are in the repository; such a path is left out of the manifest).
 
 The module cards' files are read from `data/<name>/cardmeta/`; a `meta` setting is not used offline. A path in the manifest that points outside the backup is refused. An archive member with an absolute path, `..`, a link or a device is also refused.
 

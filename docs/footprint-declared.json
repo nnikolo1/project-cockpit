@@ -68,7 +68,7 @@
     }
    ],
    "policy": {
-    "backup": "code: the git repository and its remote; the settings files (dispatcher-settings.json, cockpit-settings.json) and projects.json are owner decisions, not rebuildable: they belong into the daily backup of local data once it exists; the token file is a secret and the log and the in-memory cache are rebuildable: not backed up on purpose; the cache folder is rebuildable and not backed up on purpose",
+    "backup": "code: the git repository and its remote; the settings files (dispatcher-settings.json, cockpit-settings.json) and projects.json are owner decisions, not rebuildable: they and the project's files of the cache folder go into the daily backup to Drive (PC-62, tools/project_backup.py; so that a copy of the Cockpit can run from the backup alone); the token file is a secret and is never backed up; the log and the in-memory cache are not backed up on purpose",
     "retention": "in-memory cache: lives with the process, entries refresh after 60 to 3600 seconds (GitHub-sourced data after 3600 s) (cached() in cockpit.py); token file: kept until the owner deletes it, no rotation in the code; cockpit.log: grows without limit (no rotation yet: open); settings files: kept; no database; cache folder: files are overwritten on each refresh and never pruned, safe to delete at any time"
    }
   },
@@ -133,7 +133,7 @@
      "kind": "file",
      "personal_data": false,
      "written_by": "taskqueue/dispatcher (tools/transcript_usage.py)",
-     "note": "the exact token counts of the owner's interactive sessions, one JSON line per message (time, source label, session id, message id, model, four counts); mode 0600; numbers only, no text or paths; rewritten atomically on each run, not backed up on purpose (rebuildable from the transcripts)"
+     "note": "the exact token counts of the owner's interactive sessions, one JSON line per message (time, source label, session id, message id, model, four counts); mode 0600; numbers only, no text or paths; rewritten atomically on each run; in the daily backup (PC-62)"
     },
     {
      "path": "~/.local/share/project-cockpit/<project>/proxy.sock",
@@ -209,7 +209,7 @@
     }
    ],
    "policy": {
-    "backup": "code: the git repository and its remote; the processing log: once a day to GDrive (5e); settings, state, proxy usage, the transcript usage file (rebuildable), logs, rendered LaunchAgent files and socket are not backed up on purpose; the token file is a secret and is not backed up",
+    "backup": "code: the git repository and its remote; the processing log: once a day to GDrive (5e); the daily backup of the project's Cockpit data (PC-62, tools/project_backup.py) holds the processing log, settings, state, proxy usage, quota history, transcript usage and the Workers' good-bye notes; logs, rendered LaunchAgent files, the socket and the task bundles (code) are not backed up on purpose; the token files are secrets and are never backed up",
     "retention": "processing log: kept, no rotation in the code; task folders: not torn down by the Dispatcher, old ones are mopped up later (3m); settings, state and token: kept until the owner changes or deletes them; transcript-usage.jsonl: rewritten on each run; no database tables"
    }
   },
@@ -299,11 +299,40 @@
    }
   },
   "internal/devops": {
-   "files": [],
-   "logging": [],
+   "files": [
+    {
+     "path": "~/.local/share/project-cockpit/<project>/backup-status.json",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "internal/devops (tools/project_backup.py)",
+     "note": "the status record of the last daily backup (time, ok, archive path, size, number of files, reason, last good time); replaced atomically after every run; read by the gap checker (kind backup) and the Task Queue tab"
+    },
+    {
+     "path": "~/.local/share/project-cockpit/<project>/transcripts",
+     "kind": "dir",
+     "personal_data": true,
+     "written_by": "internal/devops (tools/project_backup.py)",
+     "volume": true,
+     "note": "SENSITIVE: the mirror of the coding tool's raw session transcripts of the project (owner, 2026-11-24): conversation text, may hold secrets or personal data; new and grown files are copied, nothing is ever deleted (the tool deletes old ones); goes only into the owner's own Drive"
+    },
+    {
+     "path": "<the --drive folder>/project_cockpits/<project>/",
+     "kind": "dir",
+     "personal_data": true,
+     "written_by": "internal/devops (tools/project_backup.py)",
+     "note": "one dated archive a day (<project>-YYYY-MM-DD.tar.gz, a taken name gets -2, -3, ...), written create-only into the folder the Drive desktop app syncs; holds the transcripts, so personal data; never edited or deleted by the job"
+    }
+   ],
+   "logging": [
+    {
+     "logger": "project_backup",
+     "file": null,
+     "rotation": "none: one line per step on standard error, kept by whatever runs the daily job; never logs file contents"
+    }
+   ],
    "policy": {
-    "backup": "the git repository and its remote; nothing else to back up",
-    "retention": "kept until the owner deletes them (git history)"
+    "backup": "the job and the retention script: the git repository and its remote; the status record and the transcript mirror are themselves in each daily archive; the archives in Drive are the backup",
+    "retention": "archives in Drive: the newest 30 per project, kept by the Apps Script tools/drive_retention.gs that the owner installs (a count, not an age: a pause in the backups removes nothing); transcript mirror: never pruned; status record: replaced at each run"
    }
   },
   "internal/agents": {
@@ -333,7 +362,7 @@
     }
    ],
    "policy": {
-    "backup": "map and collectors: the git repository and its remote; generated card data is not backed up on purpose (the collectors regenerate it)",
+    "backup": "map and collectors: the git repository and its remote; the generated card data is in the daily backup of the project's Cockpit data (PC-62), so that an offline copy shows the cards",
     "retention": "only the latest run is kept (files are replaced); no history"
    }
   }
