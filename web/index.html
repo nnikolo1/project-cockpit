@@ -608,11 +608,11 @@ async function hydrate(){
   const again=document.getElementById('dgbox');if(again&&again.dataset.k===k)again.innerHTML=SVGC[k];
 }
 function vCode(){
-  const tabs=[['quality','Quality'],['deps','Dependencies'],['flow','Data flow'],['erd','ERD'],['js','Extension']];
+  const tabs=[['quality','Quality'],['deps','Dependencies'],['flow','Data flow'],['erd','ERD'],['js','Extension'],['flowchart','Flowchart']];
   const T=UI.codeTab;
   return '<div class="page"><div><h1>Code</h1><span class="muted">Metrics and documentation drawn from the code itself, one snapshot of the repository.</span></div>'
    +'<div class="tabs" role="tablist">'+tabs.map(t=>'<button role="tab" data-act="codetab" data-v="'+t[0]+'" aria-selected="'+(T===t[0])+'">'+t[1]+'</button>').join('')+'</div>'
-   +(T==='quality'?vQuality():vDiagram(T))+'</div>';
+   +(T==='quality'?vQuality():T==='flowchart'?vHow():vDiagram(T))+'</div>';
 }
 function wfSvg(){
   const L=(cx,cy,ls,c)=>'<text'+(c?' class="'+c+'"':'')+' x="'+cx+'" y="'+(cy-(ls.length-1)*8+4)+'" text-anchor="middle">'+ls.map((l,i)=>'<tspan x="'+cx+'" dy="'+(i?16:0)+'">'+esc(l)+'</tspan>').join('')+'</text>';
@@ -643,10 +643,10 @@ function wfSvg(){
   return s+'</svg>';
 }
 function vHow(){
-  return '<div class="page"><div><h1>How it works</h1><span class="muted">The life of a task, who does each step, and where the decisions are.</span></div>'
+  return '<div><h2>Flowchart</h2><span class="muted">The life of a task, who does each step, and where the decisions are.</span></div>'
    +'<div class="legend"><span><b>Rounded box</b> a step</span><span><b>Diamond</b> a decision</span><span><b>Pill</b> a state of the task</span><span><b>Arrow</b> what happens next</span></div>'
    +'<div class="dg">'+wfSvg()+'</div>'
-   +'<div class="card" style="max-width:75ch"><h2>What to call these diagrams</h2><p style="margin:8px 0 0">This one is a <b>flowchart</b> (steps, decisions, arrows) with lanes for who acts. Because the pills are the task\u2019s states, it also works as a <b>state diagram</b>. A <b>data-flow diagram</b> is a different picture: it shows data moving between parts of the system. That is the Data flow tab under Code, which shows which code reads and writes which database tables.</p></div></div>';
+   +'<div class="card" style="max-width:75ch"><h2>What to call these diagrams</h2><p style="margin:8px 0 0">This one is a <b>flowchart</b> (steps, decisions, arrows) with lanes for who acts. Because the pills are the task\u2019s states, it also works as a <b>state diagram</b>. A <b>data-flow diagram</b> is a different picture: it shows data moving between parts of the system. That is the Data flow tab under Code, which shows which code reads and writes which database tables.</p></div>';
 }
 /* ---------- drawer ---------- */
 function seg(name,sel){return '<fieldset class="seg" aria-label="Priority">'+[1,2,3].map(n=>'<input type="radio" id="'+name+n+'" name="p" value="'+n+'"'+(sel===n?' checked':'')+'><label class="l'+n+'" for="'+name+n+'">P'+n+'</label>').join('')+'</fieldset>';}
@@ -700,9 +700,10 @@ function drawerNew(p){
 
 /* ---------- render and actions ---------- */
 function render(){
+  if(UI.route==='how'){UI.route='code';UI.codeTab='flowchart';}
   if(UI.route==='rules'){UI.route='settings';UI.setSec='policies';}  /* old route */
   const R=UI.route;
-  const nav=[['cockpit','Cockpit'],['backlog','Task Queue'],['questions','Open questions'],['timeline','Timeline'],['settings','Settings'],['usage','Token Usage'],['code','Code'],['how','How it works']];
+  const nav=[['cockpit','Cockpit'],['backlog','Task Queue'],['questions','Open questions'],['timeline','Timeline'],['settings','Settings'],['usage','Token Usage'],['code','Code']];
   let h='<div class="top"><span class="brand">Project cockpit</span><nav class="nav" aria-label="Main">'+nav.map(n=>'<button data-act="go" data-r="'+n[0]+'"'+(R===n[0]?' aria-current="page"':'')+'>'+n[1]+(n[0]==='questions'?' <span class="chip" aria-label="'+Q.questions.length+' open">'+Q.questions.length+'</span>':n[0]==='backlog'&&runCount()?' <span class="chip" aria-label="'+runCount()+' running">'+runCount()+'</span>':'')+'</button>').join('')+'</nav>';
   if(PROJS.length>1)h=h.replace('</span><nav','</span><select class="psel" id="psel" aria-label="Project">'+PROJS.map(p=>'<option value="'+esc(p.name)+'"'+(p.name===PROJ?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select><nav');
   if(D){const s=D.source;
@@ -713,7 +714,7 @@ function render(){
   if(UI.err)h+='<div class="page"><div class="card" style="border-color:var(--danger)"><b class="warnline">Could not load from GitHub.</b> <span class="muted">'+esc(UI.err)+'</span> <button class="btn small" data-act="refresh">Retry</button></div></div>';
   else if(!D)h+='<div class="page"><span class="muted">Loading…</span></div>';
   else{
-  h+=R==='cockpit'?vCockpit():R==='backlog'?vBacklog():R==='questions'?vQuestions():R==='timeline'?vTimeline():R==='how'?vHow():R==='settings'?vSettings():R==='usage'?vUsage():vCode();
+  h+=R==='cockpit'?vCockpit():R==='backlog'?vBacklog():R==='questions'?vQuestions():R==='timeline'?vTimeline():R==='settings'?vSettings():R==='usage'?vUsage():vCode();
   if(UI.drawer){const t=UI.drawer.key&&byKey(D,UI.drawer.key);h+='<div class="drawer-bg" data-act="close"></div><div class="drawer" role="dialog" aria-modal="true" aria-label="Task">'+(UI.drawer.mode==='new'&&ST()?drawerNew(UI.drawer.prefill):(t?drawerTask(t):''))+'</div>';}
   }
   if(UI.toast)h+='<div class="toast" role="status">'+esc(UI.toast)+'</div>';
@@ -728,7 +729,7 @@ function act(a,ds){
   if(a!=='arm'&&UI.armed){UI.armed=null;clearTimeout(armTimer);}  /* any other click disarms */
   switch(a){
    case 'setsec':UI.setSec=ds.v;render();break;
-   case 'go':UI.route=ds.r;if(ds.r==='rules'){UI.route='settings';UI.setSec='policies';}UI.drawer=null;render();window.scrollTo(0,0);break;
+   case 'go':UI.route=ds.r;if(ds.r==='how'){UI.route='code';UI.codeTab='flowchart';}if(ds.r==='rules'){UI.route='settings';UI.setSec='policies';}UI.drawer=null;render();window.scrollTo(0,0);break;
    case 'code':UI.route='code';UI.codeTab='quality';UI.codeMod=ds.m;render();window.scrollTo(0,0);break;
       case 'codetab':UI.codeTab=ds.v;render();break;
    case 'fit':UI.fit[ds.v]=!UI.fit[ds.v];render();break;
