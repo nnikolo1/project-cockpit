@@ -338,3 +338,9 @@ def test_worker_runs_in_a_private_mount_namespace_with_only_its_task(tmp_path):
     assert cmd[i:i + 3] == ["unshare", "-Urm", "sh"] and cmd[i + 4] == rt.PRIVATE_AREA and cmd[i + 6] == "T-8"
     assert cmd[cmd.index("timeout") + 1].isdigit()  # the time limit stays outermost
     assert 'mount -t tmpfs none /area' in rt.PRIVATE_AREA and '"/area/$1"' in rt.PRIVATE_AREA
+
+
+def test_worker_temp_folder_is_its_own_for_every_program(tmp_path):
+    r, _ = make(tmp_path)
+    _, cmd = r.launch("worker4", "T-6")
+    assert "TMPDIR=/home/worker4/.tmp" in cmd  # a shared /tmp had folders of other users (pytest needed --basetemp in the concurrency test)

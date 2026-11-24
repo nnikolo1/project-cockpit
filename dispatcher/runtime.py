@@ -254,7 +254,7 @@ class Runtime:
         clone = self.clone_main(user, task_id)
         base = f"/area/{task_id}"
         env = dict(agent.env(user, f"http://127.0.0.1:{self.cfg.relay_port}", dummy_token(user)),
-                   HOME=f"/home/{user}", WORKER_TASK_ID=task_id, WORKER_OUTBOX=f"{base}/outbox")  # 4t: for the Stop hook
+                   HOME=f"/home/{user}", TMPDIR=f"/home/{user}/.tmp", WORKER_TASK_ID=task_id, WORKER_OUTBOX=f"{base}/outbox")  # 4t: for the Stop hook
         prompt = INSTRUCTION.format(inbox=f"{base}/inbox", outbox=f"{base}/outbox", clone=clone)
         backstop = 2 * self.cfg.runaway_minutes * 60
         cmd = [self.cfg.container, "exec", "--user", user, "--workdir", clone]
