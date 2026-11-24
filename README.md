@@ -38,6 +38,9 @@ The **Token Usage** page (read-only) shows the Dispatcher proxy's token counts p
 ## Settings
 The **Settings** page shows and changes the seven values the Dispatcher reads at each firing (on/off, interval, retries, workers, runaway, no-activity and no-start limits), kept per project in `<data dir>/<project name>/dispatcher-settings.json` (mode 0600; a missing file shows the defaults). The page refuses a runaway limit below 30 minutes, a no-activity limit below 10 and a no-start limit below 1, and shows the cap on workers (the image's worker users); the Dispatcher itself does not enforce these. A Cockpit started with `--read-only` refuses to save (403) and shows the values read-only.
 
+## LaunchAgents of the Dispatcher
+`python3 -m dispatcher.launchd render --project NAME --repo OWNER/NAME --repo-dir DIR --token-file F [--out DIR]` writes two property lists (default folder `<data dir>/<project name>/launchd/`): the Dispatcher job `com.project-cockpit.dispatcher.NAME` (every 120 seconds) and the proxy service `com.project-cockpit.proxy.NAME` (kept alive, run under `caffeinate -i`). It prints their paths and the two `launchctl bootstrap gui/$(id -u) FILE` commands; it installs nothing, so copy or point `launchctl` at the files yourself, proxy first.
+
 ## Several projects
 `--projects FILE` serves several repos from one instance (replaces `--repo`, `--manager`, `--project`, `--git`, `--modules`, `--phases`, `--code`; `--port`, `--lan`, `--read-only`, `--token-file` stay global):
 `{"default": "widgets", "projects": [{"name": "widgets", "repo": "acme/widgets", "project": 3, "manager": "alice", "modules": "m.json", "git": "~/src/widgets", "code": "~/snap"}, {"name": "gadgets", "repo": "acme/gadgets"}]}`.
