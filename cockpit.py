@@ -584,7 +584,7 @@ def build_timeline(S, p=None):
             seen.add(k)
             out.append(dict(e, links=[list(l) for l in e["links"]]))
     log.info("timeline: %d entries in %.2fs", len(out), time.time() - t0)
-    return dict(entries=out[:400], total=len(out))
+    return dict(entries=out[:400], total=len(out), activity=L.activity_days(S["tasks"], S["events"], mod_of))
 
 
 def code_snapshot(p=None):

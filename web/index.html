@@ -77,6 +77,14 @@ tr.blocked{background:var(--danger-tint)}tr.blocked td:first-child{box-shadow:in
 .linkbtn:hover{text-decoration:underline}
 .inh{font-style:italic;color:var(--muted)}
 .warnline{color:var(--danger);font-size:12px}
+.heat{--h0:var(--line);--h1:color-mix(in srgb,var(--accent) 25%,var(--surface));--h2:color-mix(in srgb,var(--accent) 50%,var(--surface));--h3:color-mix(in srgb,var(--accent) 75%,var(--surface));--h4:var(--accent);overflow-x:auto}
+.heat .g{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,11px);gap:3px;width:max-content}
+.heat .m{display:grid;grid-auto-flow:column;grid-auto-columns:11px;gap:3px;width:max-content;font-size:11px;height:16px;color:var(--muted)}
+.heat .m span{overflow:visible;white-space:nowrap}
+.heat .c{width:11px;height:11px;border-radius:2px;background:var(--h0)}
+.heat .c.l1{background:var(--h1)}.heat .c.l2{background:var(--h2)}.heat .c.l3{background:var(--h3)}.heat .c.l4{background:var(--h4)}
+.heat .lg{display:flex;gap:3px;align-items:center;font-size:11px;color:var(--muted);margin-top:8px}
+.heat .lg .c{display:inline-block}
 .feed{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:10px}
 .feed .e{display:grid;grid-template-columns:96px 84px 104px 1fr;gap:12px;padding:11px 14px;border-bottom:1px solid var(--line);align-items:baseline}
 .feed .e:last-child{border-bottom:0}
@@ -200,7 +208,7 @@ function sortKey(t){return STAGES.indexOf(t.stage)===2?0:(t.stage==='released'?1
 let PROJ=null,PROJS=[];  /* the selected project (name) and the configured ones; the choice is kept in localStorage `cockpit-project` */
 const NOMETA=()=>({footprint:{status:'missing'},churn:{status:'missing'},ambiguity:{status:'missing'}});
 let Q={questions:[],counts:{},projects:[]};  /* open questions of every project: /api/questions, not tied to the selected project */
-let USE=null,SET=null,D=null,CODE={wired:false,modules:{}},FEED=[],MODULES=[],RULES={configured:false},META=NOMETA();
+let USE=null,SET=null,D=null,CODE={wired:false,modules:{}},FEED=[],ACT=[],MODULES=[],RULES={configured:false},META=NOMETA();
 const SVGC={};
 const UI={churnRel:true,route:'cockpit',filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',tlType:'all',rulesGroup:'all',qProj:'all',codeMod:'unassigned',codeTab:'quality',fit:{deps:true,erd:true,js:true,flow:false},toast:'',err:'',armed:null};
 const ST=()=>!!(D&&D.source.steering);
@@ -236,7 +244,7 @@ async function reload(fresh){
   try{
     const [s,f,c,r,mt,se,us]=await Promise.all([api('/api/state'+(fresh?'?fresh=1':'')),api('/api/timeline'),api('/api/code'),api('/api/rules').catch(e=>({configured:false,error:e.message})),api('/api/cardmeta').catch(e=>null),api('/api/settings').catch(e=>null),api('/api/usage').catch(e=>null)]);SET=se;USE=us;
     if(mine!==PROJ)return;  /* the user switched project while this was loading: drop the answer */
-    D=s;TODAY=D.today;MODULES=D.modules;FEED=f.entries;CODE=c;RULES=r;META=mt||NOMETA();UI.err='';
+    D=s;TODAY=D.today;MODULES=D.modules;FEED=f.entries;ACT=f.activity||[];CODE=c;RULES=r;META=mt||NOMETA();UI.err='';
     if(!CODE.modules[UI.codeMod]&&!MODULES.some(m=>m.id===UI.codeMod&&m.parent)){const k=MODULES.find(m=>!m.virtual);UI.codeMod=CODE.modules[k&&k.id]?k.id:'unassigned';}
   }catch(e){if(mine!==PROJ)return;UI.err=String(e.message||e);}
   await qp;
@@ -245,7 +253,7 @@ async function reload(fresh){
 async function pickProject(name){
   if(name===PROJ)return;
   PROJ=name;try{localStorage.setItem('cockpit-project',name);}catch(e){}
-  D=null;FEED=[];MODULES=[];CODE={wired:false,modules:{}};RULES={configured:false};META=NOMETA();REV=null;  /* page caches of the old project */
+  D=null;FEED=[];ACT=[];MODULES=[];CODE={wired:false,modules:{}};RULES={configured:false};META=NOMETA();REV=null;  /* page caches of the old project */
   for(const k in SVGC)delete SVGC[k];
   Object.assign(UI,{filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',rulesGroup:'all',codeMod:'unassigned',err:''});
   render();await reload(false);
@@ -434,9 +442,27 @@ function vBacklog(){
   return h+'</tbody></table></div><p class="muted" style="font-size:13px;margin:0">'+(ST()?'Submit releases an embryo as P2 without a deadline (use the task view for another priority or a deadline). Both buttons ask once more before they act. ':'')+'Only you set or move a deadline. A task without one inherits its parent’s, then its sub-module’s or module’s.</p></div>';
 }
 
+/* Calendar heatmap (GitHub style): 52 weeks ending TODAY, weeks as columns, Monday first. vals {YYYY-MM-DD: n}; tip(day,n) -> hover text.
+   Shades 0..4 scale to the largest day shown (same rule as shade_level in logic.py). */
+function shade(n,mx){return !n||n<=0||!mx?0:Math.min(4,Math.ceil(4*n/mx));}
+function heatmap(vals,tip,legend){
+  const U=s=>{const x=s.split('-');return Date.UTC(+x[0],+x[1]-1,+x[2]);},iso=t=>new Date(t).toISOString().slice(0,10),DAY=864e5;
+  const t0=U(TODAY),mon=t0-((new Date(t0).getUTCDay()+6)%7)*DAY,start=mon-51*7*DAY;
+  let mx=0;for(let t=start;t<=t0;t+=DAY)mx=Math.max(mx,vals[iso(t)]||0);
+  const MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  let cells='',months='',prev=-1;
+  for(let w=0;w<52;w++){
+    const m=new Date(start+w*7*DAY).getUTCMonth();months+='<span>'+(m!==prev?MN[m]:'')+'</span>';prev=m;
+    for(let r=0;r<7;r++){const t=start+(w*7+r)*DAY;
+      if(t>t0){cells+='<i></i>';continue;}
+      const d=iso(t),n=vals[d]||0;cells+='<i class="c l'+shade(n,mx)+'" title="'+esc(tip(d,n))+'"></i>';}
+  }
+  return '<div class="heat"><div class="m">'+months+'</div><div class="g">'+cells+'</div><div class="lg">Less '+[0,1,2,3,4].map(i=>'<i class="c l'+i+'"></i>').join('')+' More'+(legend?' &nbsp; '+legend:'')+'</div></div>';
+}
 function vTimeline(){
   const up=D.tasks.filter(t=>isOpen(t)&&eff(D,t).d).sort((a,b)=>eff(D,a).d.localeCompare(eff(D,b).d)||a.key.localeCompare(b.key)).slice(0,8);
   const types=['all','commit','doc','gap','milestone','issue','task event','rule change'];
+  const hv={};ACT.filter(a=>UI.tlMod==='all'||inMod(a.mod,UI.tlMod)).forEach(a=>{hv[a.d]=(hv[a.d]||0)+a.n;});
   let all=FEED.slice();
   if(UI.tlMod!=='all')all=all.filter(x=>inMod(x.mod,UI.tlMod));
   if(UI.tlType!=='all')all=all.filter(x=>x.type===UI.tlType);
@@ -444,6 +470,7 @@ function vTimeline(){
   let h='<div class="page"><div><h1>Timeline</h1><span class="muted">Everything that happened, newest first, and what is due next.</span></div>';
   h+='<div class="card"><h2>Upcoming deadlines</h2><div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">'
    +(up.length?up.map(t=>{const e=eff(D,t);const n=days(TODAY,e.d);return '<div class="row" style="gap:10px"><span class="mono" style="width:86px">'+e.d+'</span><span class="'+(n<0?'warnline':'muted')+'" style="width:84px;font-size:12px">'+(n<0?'overdue '+(-n)+' d':(n===0?'today':'in '+n+' d'))+'</span>'+prioChip(t)+'<button class="linkbtn" data-act="open" data-k="'+t.key+'"><b class="mono">'+esc(t.key)+'</b> '+esc(t.title)+'</button>'+(e.inh?'<span class="inh" style="font-size:12px">inherited from '+esc(e.src)+'</span>':'')+'</div>';}).join(''):'<span class="muted">No deadlines set.</span>')+'</div></div>';
+  h+='<div class="card"><h2>Activity</h2>'+heatmap(hv,(d,n)=>n+(n===1?' event':' events')+' on '+d,'One count per task created, closed, labelled or assigned, on the day it happened.')+'</div>';
   h+=modFilter(UI.tlMod,'tlm','All','all of {}');
   h+='<div class="filters" role="group" aria-label="Type filter">'+types.map(x=>'<button class="f" data-act="tlt" data-v="'+x+'" aria-pressed="'+(UI.tlType===x)+'">'+x+'</button>').join('')+'</div>';
   h+='<div class="feed">'+all.map(x=>'<div class="e'+(x.type==='rule change'?' rule':'')+'"><span class="mono muted">'+esc(x.d)+'</span><span><span class="chip'+(x.type==='rule change'?' rc':'')+'">'+x.type+'</span></span><span><span class="chip" style="background:var(--accent-tint)">'+esc(modShort(x.mod))+'</span></span><span>'+esc(x.text)+' '+x.links.map(s=>s[1]?'<a class="mono" target="_blank" rel="noopener" href="'+esc(s[1])+'">'+esc(s[0])+'</a>':'<span class="mono muted">'+esc(s[0])+'</span>').join(' ')+'</span></div>').join('')+(all.length?'':'<div class="e"><span class="muted">Nothing matches.</span></div>')+'</div>';
@@ -497,7 +524,9 @@ function vUsage(){
   if(!USE)return head+'<div class="card"><span class="muted">no data</span></div></div>';
   const nf=x=>x==null?'no data':x.toLocaleString('en-US');
   const tk=USE.tasks;
-  return head+projectsCard()+usageTable('Usage per day',USE.days)+usageTable('Usage per 5-hour window',USE.windows&&USE.windows.map(r=>Object.assign({},r,{key:r.key+' ('+r.kind+')'})))+quotaCard(USE.quota)+usageTable('Usage per Worker',USE.workers)
+  const dv={},fh={};(USE.days||[]).forEach(r=>{dv[r.key]=r.total;});((USE.quota&&USE.quota.days)||[]).forEach(r=>{if(r.five_hour!=null)fh[r.key]=r.five_hour;});
+  const hm='<div class="card"><h2>Tokens per day</h2>'+heatmap(dv,(d,n)=>nf(n)+' tokens on '+d+(fh[d]!=null?'\nhighest 5-hour reading '+fh[d]+' %':''),'Sum of the four token counts per day (UTC), as in the per-day table below; the proxy file keeps '+((USE.days||[]).length)+' days.')+'</div>';
+  return head+hm+projectsCard()+usageTable('Usage per day',USE.days)+usageTable('Usage per 5-hour window',USE.windows&&USE.windows.map(r=>Object.assign({},r,{key:r.key+' ('+r.kind+')'})))+quotaCard(USE.quota)+usageTable('Usage per Worker',USE.workers)
    +'<div class="card"><h2>Per task</h2><div class="tblbox narrow"><table><thead><tr><th>Task</th><th>Worker</th><th>Launched (UTC)</th><th>Proxy sum</th><th>Good-bye note</th><th>Difference</th></tr></thead><tbody>'
    +(tk?tk.map(t=>'<tr><td class="mono">'+esc(t.task)+'</td><td class="mono">'+esc(t.worker||'')+'</td><td class="mono">'+esc(t.start)+'</td><td class="mono">'+nf(t.proxy)+(t.overlap?' <span class="muted" title="Another task ran at the same time; the sum may include its requests">overlap</span>':'')+'</td><td class="mono">'+nf(t.note)+'</td><td class="mono">'+nf(t.diff)+'</td></tr>').join(''):'')
    +(tk&&tk.length?'':'<tr><td class="muted" colspan="6">no data</td></tr>')+'</tbody></table></div><p class="muted" style="font-size:13px;margin:8px 0 0">The proxy sum counts the requests of the task’s Worker between the task’s launch and its last log entry. Older tasks, launched before the log named the Worker, count all Workers’ requests in that span (marked overlap when another task ran then).</p></div></div>';
