@@ -18,7 +18,7 @@ Full text: [docs/constitution.md](docs/constitution.md).
 ## Quickstart
 Needs Python 3.10+ and an authenticated [`gh`](https://cli.github.com/).
 
-    python3 cockpit.py --repo OWNER/REPO [--project N] [--steer]
+    python3 cockpit.py --repo OWNER/REPO [--project N] [--read-only]
 
 Open the printed `http://127.0.0.1:PORT/?t=TOKEN` URL. Optional: `--token-file PATH` (keep the token across restarts), `--modules` (JSON `{modules:[{id,name}], assign:[{path,module}]}`), `--git` (local clone), `--code DIR`.
 
@@ -31,10 +31,10 @@ The metrics snapshot may carry `alpha/one` entries under `modules`; the parent's
 Module and sub-module cards show three blocks read from files a producer writes: **churn** (commits, lines, net, trend for 30 and 90 days, coloured by rank within the project: `▲ hot` top fifth, `▽ cold` bottom fifth, `– dormant` no change; a button switches to churn relative to size), **persistence footprint** (tables, files and folders, logging, volume, backup and retention, with "undocumented" shown as a gap) and **file ambiguity** (unsorted files with candidates, a marker above 30 percent; module-level ambiguous files on the overview). Every block says "as of" and warns when older than 48 hours; no file means "no data". Contract: [docs/contracts/card-metadata.md](docs/contracts/card-metadata.md); folder setting `meta` per project: [docs/deployment.md](docs/deployment.md).
 
 ## Submit, Cancel and the budget panel
-With `--steer` the Backlog table has a **Submit** column (embryos: releases the task as P2 without a deadline, the same as the Release form with its defaults) and a **Cancel** column (open tasks). Each button needs two clicks: the first turns it into "Confirm?" (it disarms after 6 seconds or on any other click), the second acts. No bulk selection. The **Budget** page shows the quota windows (used share, time to reset, age and stale marker), token numbers with the cap marked as an estimate, a table of tasks released by the boot-filling job and a table of its latest polls, all read from files a producer writes (`--quota-feed`, `--usage-report`, `--decision-log`). Contract: [docs/contracts/budget-panel.md](docs/contracts/budget-panel.md).
+Unless started with `--read-only`, the Backlog table has a **Submit** column (embryos: releases the task as P2 without a deadline, the same as the Release form with its defaults) and a **Cancel** column (open tasks). Each button needs two clicks: the first turns it into "Confirm?" (it disarms after 6 seconds or on any other click), the second acts. No bulk selection. The **Budget** page shows the quota windows (used share, time to reset, age and stale marker), token numbers with the cap marked as an estimate, a table of tasks released by the boot-filling job and a table of its latest polls, all read from files a producer writes (`--quota-feed`, `--usage-report`, `--decision-log`). Contract: [docs/contracts/budget-panel.md](docs/contracts/budget-panel.md).
 
 ## Several projects
-`--projects FILE` serves several repos from one instance (replaces `--repo`, `--manager`, `--project`, `--git`, `--modules`, `--phases`, `--code`; `--port`, `--lan`, `--steer`, `--token-file` stay global):
+`--projects FILE` serves several repos from one instance (replaces `--repo`, `--manager`, `--project`, `--git`, `--modules`, `--phases`, `--code`; `--port`, `--lan`, `--read-only`, `--token-file` stay global):
 `{"default": "widgets", "projects": [{"name": "widgets", "repo": "acme/widgets", "project": 3, "manager": "alice", "modules": "m.json", "git": "~/src/widgets", "code": "~/snap"}, {"name": "gadgets", "repo": "acme/gadgets"}]}`.
 Only `name` and `repo` are required (optional: `project`, `manager`, `modules`, `git`, `code`, `phases`, `meta`). With more than one project the header shows a selector (remembered in the browser); every `/api/*` call takes `?project=NAME` (default: the `default`), `/api/projects` lists `[{name, repo}]`, and only the visible project is polled.
 Rationale and limits: [ADR 0012](docs/adr/0012-several-projects-in-one-instance.md).
@@ -48,7 +48,7 @@ A change is flagged when it carries a Co-Authored-By trailer or bot author, or i
 
 ## How it works
 - GitHub is the store; labels carry the protected state (`released`, `P1`-`P3`, `due:DATE`, `cancelled`), counted only if the Manager set them.
-- One `gh` call per action. Read-only unless `--steer`.
+- One `gh` call per action. Actions are enabled unless started with `--read-only`.
 - Acts as your `gh` login; stores no token.
 
 ## Limits

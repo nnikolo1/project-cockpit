@@ -433,7 +433,7 @@ def do_act(form, run=run_gh, state=None, p=None):
     """-> (http status, body). 403 when the app is read-only; acts on the project named in form["project"] (default project otherwise)."""
     if not CFG["steer"]:
         log.warning("refused action %s: read-only", form.get("action"))
-        return 403, dict(error="read-only: this repo is not steerable (start with --steer)")
+        return 403, dict(error="read-only: this instance was started with --read-only")
     try:
         p = p or proj(form.get("project"))
         S = state or get_state(fresh=True, p=p)
@@ -656,7 +656,7 @@ def resolve(a):
     if a.get("projects"):
         mixed = [f"--{k}" for k in PROJECT_KEYS if a.get(k) is not None]
         if mixed:
-            raise ValueError(f"--projects replaces {', '.join(mixed)}: put them into the projects file (only --port, --lan, --steer, --token-file, --simulate-orchestrator stay on the command line)")
+            raise ValueError(f"--projects replaces {', '.join(mixed)}: put them into the projects file (only --port, --lan, --read-only, --token-file, --simulate-orchestrator stay on the command line)")
         try:
             data = json.load(open(a["projects"]))
         except (OSError, ValueError) as ex:
@@ -681,7 +681,8 @@ def main():
     ap.add_argument("--phases", help="extra timeline.json ({module, events:[...]}) merged into the timeline")
     ap.add_argument("--code", help="code snapshot directory: metrics.json and erd|dataflow|deps|js.svg (see README)")
     ap.add_argument("--token-file", help="keep the access token in this file (created 0600 if missing), so the URL survives restarts")
-    ap.add_argument("--steer", action="store_true", help="enable actions (default: read-only)")
+    ap.add_argument("--read-only", action="store_true", help="refuse every action (default: actions are enabled)")
+    ap.add_argument("--steer", action="store_true", help=argparse.SUPPRESS)  # actions are the default now; kept so that existing service files still start
     ap.add_argument("--simulate-orchestrator", action="store_true", help="demo buttons: 'takes it' and 'completes it'")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -690,8 +691,8 @@ def main():
     except ValueError as ex:
         ap.error(str(ex))
     register(projects, default)
-    CFG.update(steer=a.steer, simulate=a.simulate_orchestrator)
-    steer = a.steer
+    steer = not a.read_only
+    CFG.update(steer=steer, simulate=a.simulate_orchestrator)
     for p in projects:
         log.info("project %s: repo=%s project=%s manager=%s mode=%s", p["name"], p["repo"], p["project"], p["manager"], "STEERING" if steer else "READ-ONLY")
         if steer and gh_user() != p["manager"]:

@@ -12,14 +12,14 @@ How to run the cockpit, and how far the Manager / Orchestrator / Worker separati
 | `gh` CLI | same machine, same OS user | the cockpit runs `gh` and acts as whoever `gh` is logged in as; it stores no GitHub token |
 | Access token | random per start, or `--token-file PATH` (created mode 0600) | given once as `?t=TOKEN`, then an HttpOnly, SameSite=Strict cookie; hidden in the request log. The cookie has no `Secure` flag |
 | Listen address | `127.0.0.1:8795` (`--port`) | `--lan` binds `0.0.0.0`, plain HTTP: the token and cookie travel unencrypted |
-| Mode | read-only | every `POST /api/act` gets 403 unless started with `--steer` |
+| Mode | steering | every `POST /api/act` gets 403 only when started with `--read-only` |
 | Inputs | GitHub (always); `--modules` JSON; `--git` local clone; `--code` snapshot dir; `--phases` JSON; the card-metadata folder | the clone, snapshot and metadata files are read, never written |
 
 **Card metadata folder.** Per project the cockpit reads `footprint.json`, `churn.json` and `ambiguity.json` ([contract](contracts/card-metadata.md)) from the `meta` key of the project in the `--projects` file, default `~/.local/share/project-cockpit/<project name>/cardmeta/` (next to the project's token folder). Example: `{"name": "widgets", "repo": "acme/widgets", "meta": "~/.local/share/project-cockpit/widgets/cardmeta"}`. The folder is written by a producer on the project side, not by the cockpit; missing files just show "no data". This repository ships generic collectors for it (`tools/cardmeta_collect.py --repo PATH --map MODULE_MAP.json --project NAME`, stdlib, read-only on the repository; the footprint collector also reads a committed declaration, see its docstring). The cockpit's own map is `docs/cockpit-modules.json` and its declaration `docs/footprint-declared.json`.
 
 **Budget panel files.** The Budget page reads `quota.json`, `usage.json` and `decisions.jsonl` ([contract](contracts/budget-panel.md)) from `~/.local/share/project-cockpit/budget/`; `--quota-feed`, `--usage-report` and `--decision-log` set other paths. They are written by external producers, read-only for the cockpit; a missing file shows "no data".
 
-The token protects the page; it is one shared secret, not a user. Whoever holds it can do, in `--steer` mode, everything the `gh` login can do through the cockpit's actions. Treat it like the login itself.
+The token protects the page; it is one shared secret, not a user. Whoever holds it can do, unless the cockpit runs with `--read-only`, everything the `gh` login can do through the cockpit's actions. Treat it like the login itself.
 
 ## 2. The three roles
 
@@ -33,7 +33,7 @@ The Manager's rights are the only ones that matter for the protected attributes 
 | May merge | yes | yes: reviews and merges Worker PRs | no (ruleset needs approval from someone else) |
 | May push to `main` | only via the ruleset's rules | no direct pushes (ruleset) | no; own branch or fork only |
 | Reads | everything | issues, PRs, code | the task it is given |
-| Reaches the cockpit | the token URL, `--steer` | not at all, or a read-only instance | not at all |
+| Reaches the cockpit | the token URL, a steering instance | not at all, or a read-only instance | not at all |
 
 Why the Orchestrator must not use the cockpit in steering mode: the cockpit's actions run as the `gh` login of the cockpit process. An Orchestrator that can drive a steering cockpit borrows the Manager's rights.
 
@@ -56,7 +56,7 @@ Consequence: an assistant session holds the Manager's credentials. Once identiti
 | Policy workflow (`kit/.github/workflows/policy.yml`) | reverts such a label, comments, on label events and every 10 minutes | **[after]**: up to about 10 minutes visible; label changes made with the workflow token start no workflows, hence the schedule |
 | Repo variable `MANAGER` | names the Manager for the policy workflow | **[GitHub]** only as far as nobody with Write edits it: Write may set variables (see 7) |
 | Separate OS users or containers, token files 0600 with different owners | an agent cannot read another role's `gh` credentials or token file | **[OS]**, and only if agents really run as different users or in containers that mount nothing of the Manager's |
-| Cockpit `--steer` guard | no action without `--steer`; at start it warns when the `gh` login is not the Manager | **[convention]**: a warning, not a refusal |
+| Cockpit `--read-only` guard | with `--read-only` no action is possible; at start it warns when the `gh` login is not the Manager | **[convention]**: a warning, not a refusal |
 
 Honest limit: processes of the same OS user can read that user's `gh` credentials (the keychain item or `~/.config/gh`). One user on one machine is therefore never separation, whatever the labels say. Separate OS users stop a casual read, not root or a shared writable path; separate hosts or containers are stronger. Projects v2 field edits emit no events, so a changed Project field cannot be attributed to an actor.
 
@@ -67,7 +67,7 @@ Honest limit: processes of the same OS user can read that user's `gh` credential
 1. `gh auth login` as the Manager on the machine that will run the cockpit.
 2. Create the labels: `kit/setup.sh acme/widgets` (idempotent: creates or updates labels).
 3. Copy `kit/.github` to `.github` in the target repo (issue forms; the policy workflow is optional and does nothing useful yet).
-4. Start: `python3 cockpit.py --repo acme/widgets --token-file ~/.local/share/project-cockpit/widgets/token` (add `--steer` to act).
+4. Start: `python3 cockpit.py --repo acme/widgets --token-file ~/.local/share/project-cockpit/widgets/token` (add `--read-only` for an instance that cannot act).
 
 Guaranteed: read-only by default, a token on the page, no stored GitHub secrets. **Not** guaranteed: that anyone but the Manager set a protected label. Every change made through this `gh` login, including by agents on this machine, counts as the Manager's.
 
@@ -104,7 +104,6 @@ Write `~/Library/LaunchAgents/org.example.project-cockpit.plist` (in the user's 
         <string>/usr/bin/python3</string><string>/Users/alice/src/project-cockpit/cockpit.py</string>
         <string>--repo</string><string>acme/widgets</string>
         <string>--token-file</string><string>/Users/alice/.local/share/project-cockpit/widgets/token</string>
-        <string>--steer</string>
       </array>
       <key>WorkingDirectory</key><string>/Users/alice/src/project-cockpit</string>
       <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin</string></dict>
@@ -122,7 +121,7 @@ Write `~/Library/LaunchAgents/org.example.project-cockpit.plist` (in the user's 
 | Status | `launchctl print gui/$(id -u)/org.example.project-cockpit \| grep state` |
 | Stop (unload) | `launchctl bootout gui/$(id -u)/org.example.project-cockpit` |
 
-Add `--lan` and `--port N` only for phone access; the first LAN connection may raise an OS firewall prompt for Python. Drop `--steer` for a read-only instance.
+Add `--lan` and `--port N` only for phone access; the first LAN connection may raise an OS firewall prompt for Python. Add `--read-only` for a read-only instance.
 
 ### Linux: systemd user unit
 
@@ -133,7 +132,7 @@ Add `--lan` and `--port N` only for phone access; the first LAN connection may r
     After=network-online.target
 
     [Service]
-    ExecStart=/usr/bin/python3 %h/src/project-cockpit/cockpit.py --repo acme/widgets --token-file %h/.local/share/project-cockpit/widgets/token --steer
+    ExecStart=/usr/bin/python3 %h/src/project-cockpit/cockpit.py --repo acme/widgets --token-file %h/.local/share/project-cockpit/widgets/token
     WorkingDirectory=%h/src/project-cockpit
     Environment=PATH=/usr/local/bin:/usr/bin:/bin
     Restart=on-failure
@@ -162,7 +161,7 @@ Add `--lan` and `--port N` only for phone access; the first LAN connection may r
 
 ### One instance for several projects
 
-Instead of one service per repo, list the repos in a `--projects` file (see the README) and start one process: `python3 cockpit.py --projects ~/.config/project-cockpit/projects.json --token-file ... [--steer]`. There is one token and one mode for all projects. The `gh` login must have access to every configured repo, and each project's `manager` (default: its repo owner) should be that login, since every action runs as it; a mismatch is warned about per project at start. Pages poll only the project on screen, but all projects share the login's rate-limit allowance ([ADR 0012](adr/0012-several-projects-in-one-instance.md)). For different logins or modes, keep one instance each.
+Instead of one service per repo, list the repos in a `--projects` file (see the README) and start one process: `python3 cockpit.py --projects ~/.config/project-cockpit/projects.json --token-file ... [--read-only]`. There is one token and one mode for all projects. The `gh` login must have access to every configured repo, and each project's `manager` (default: its repo owner) should be that login, since every action runs as it; a mismatch is warned about per project at start. Pages poll only the project on screen, but all projects share the login's rate-limit allowance ([ADR 0012](adr/0012-several-projects-in-one-instance.md)). For different logins or modes, keep one instance each.
 
 ## 6. Operations
 
@@ -181,7 +180,7 @@ Instead of one service per repo, list the repos in a `--projects` file (see the 
 | Worker | same as the Orchestrator | as the Orchestrator, if it holds Write or Pull-requests-write; cannot merge | sets a label (flagged); cannot merge, push to `main` or read the others' credentials |
 | Both, on one OS user | n/a | can read the Manager's `gh` credential: no separation | prevented by OS users or containers, not by GitHub |
 | Anyone with Write | n/a | can edit workflows on a branch and, if the ruleset allows, merge the change: CODEOWNERS on `.github/` closes this | same |
-| Anyone who learns the cockpit token | acts as the Manager's login if `--steer` | same | same; use loopback, a short-lived token, or a read-only instance |
+| Anyone who learns the cockpit token | acts as the Manager's login unless `--read-only` | same | same; use loopback, a short-lived token, or a read-only instance |
 | Anyone on the LAN (`--lan`) | sees the token in plain HTTP | same | same |
 | Admin or bypass actor | bypasses the ruleset | same | same: keep the list empty |
 

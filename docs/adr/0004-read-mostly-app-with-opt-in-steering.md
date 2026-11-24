@@ -1,6 +1,6 @@
 # 0004. Read-mostly app, opt-in steering, local by default
 
-Status: accepted
+Status: accepted; the default of steering amended 2026-11-24 (see Amendment)
 Date: 2026-11-17
 
 ## Context
@@ -18,3 +18,7 @@ The cockpit is mainly a viewer. A viewer that can silently change a project, or 
 - Given up: multi-user access with separate rights (there is one token), encryption on the network, and any action that is not a GitHub operation.
 
 Revisit when: the cockpit must serve several people, or run anywhere other than a trusted machine or network.
+
+## Amendment (2026-11-24, owner)
+
+Steering is the default: the cockpit acts unless started with `--read-only`. `--steer` is still accepted and does nothing, so that existing service files keep starting. The token, the loopback default and the warning when the `gh` login is not the Manager are unchanged.
