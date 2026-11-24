@@ -609,20 +609,6 @@ def static_entries(d, mod_id, repo):
     return out
 
 
-def module_facts(d):
-    """(open gap items, document sources) from the module's backlog/documents json; None = no data."""
-    gaps = docs = None
-    try:
-        gaps = sum(1 for i in json.load(open(d / "backlog.json"))["items"] if i.get("kind") == "gap" and i.get("status") == "open")
-    except FileNotFoundError:
-        pass
-    try:
-        docs = len(json.load(open(d / "documents.json"))["sources"])
-    except FileNotFoundError:
-        pass
-    return gaps, docs
-
-
 def filter_feed(feed, module=None, typ=None):
     return [e for e in feed if (not module or e["mod"] == module) and (not typ or e["type"] == typ)]
 
@@ -1502,7 +1488,7 @@ def _stale(project, kind, label, age, max_h, module=None):
     return [_gap(project, kind, f"{label} is older than {max_h:g} hours", module, age)] if age is not None and age > max_h else []
 
 
-def metadata_gaps(project, now, modules, cards, metrics, usage, policies, max_age_h=GAPS_MAX_AGE_H, descs=None, module_facts=None,
+def metadata_gaps(project, now, modules, cards, metrics, usage, policies, max_age_h=GAPS_MAX_AGE_H, descs=None,
                   tracked=None, assign=None, docs_heads=None, content=None, data_root=None, data_entries=None, timings=None, timing_limit=3.0, quality=None):
     """Pure detection of what the Cockpit shows as no data / not wired / not measured / stale / missing. Every fact comes from the project's own
     data, already read; -> list of gap dicts {project, module|None, kind, what, age_h|None}; an empty list means clean. A check whose input is
@@ -1512,7 +1498,7 @@ def metadata_gaps(project, now, modules, cards, metrics, usage, policies, max_ag
       metrics       parsed metrics.json of the code snapshot, or None (not configured or unreadable)
       usage         {quota, transcript, proxy: file text or None}
       policies      dict(config=rules_config(...) or None, files=tracked paths or None when there is no clone)
-      module_facts  {id: (open gaps, documents)} as module_facts(); tracked / assign: the clone's files and the map's `assign`
+      tracked / assign: the clone's files and the map's `assign`
       docs_heads    {path: first text} of the tracked docs/*.md; content {id: {txt: bool, svg: bool}} of docs/modules/
       quality       dict(modules={id: the `/api/code` module payload}, thresholds=`quality_thresholds` of the card settings or None for the defaults)
       data_root     the project's data folder, data_entries the names in it; timings [(request, seconds|None)] of a live check"""
@@ -1542,9 +1528,6 @@ def metadata_gaps(project, now, modules, cards, metrics, usage, policies, max_ag
                 add("churn", f"churn data counts {shown} unassigned files, the repository has {actual}: files that no longer exist", None, c["age_h"])
     _snapshot_gaps(add, g, project, now, mods, metrics, max_age_h)
     for mid in mods:
-        docs_n = (module_facts or {}).get(mid, (None, None))[1] if module_facts is not None else 0
-        if docs_n is None:
-            add("no_data", "module card: documents: no data", mid)
         if content is not None:
             c = content.get(mid) or {}
             if not (c.get("txt") or (descs or {}).get(mid)):
