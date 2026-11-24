@@ -60,7 +60,7 @@ There can be relations between tasks. It could be a "vertical" 1:n relationship 
 
 ## The Life Stages of a Task
 
-Much like a human, a task begins its life as an embryo: it has been conceived by a human or an agent. At the moment all embryos (apart from questions and decisions) are regarded as released. A released task is assigned by the Dispatcher to a Worker, and while the Worker works on it the task is WIP. When the Worker has finished, the task is unmerged, or failed if the Worker gave up or left no usable result. Once the Interactive Session Agent has merged its branch into the main branch, the task is merged. Only the Owner or an interactive agent can change the status of a task once it is merged or failed.
+Much like a human, a task begins its life as an embryo: it has been conceived by a human or an agent. At the moment all embryos (apart from questions and decisions) are regarded as released. A released task can be assigned by the Dispatcher to a Worker, and while the Worker works on it the task is WIP. When the Worker has finished, the task is unmerged, or failed if the Worker gave up or left no usable result. Once the Interactive Session Agent has merged its branch into the main branch, the task is merged. Only the Owner or an interactive agent can change the status of a task once it is merged or failed.
 
 ## The Roles
 
