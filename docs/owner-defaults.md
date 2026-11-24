@@ -49,6 +49,6 @@ A settings page lets the owner change the behaviour of the system without a code
 
 Accepted for the time being, to resolve the ambiguity about task creation:
 - The Interactive Session Agent may create tasks. Such a task counts as released once 10 days have passed since its creation (the Dispatcher computes this; nobody sets a label).
-- A Worker may create at most one task per run, so whatever it wants to suggest goes into that single task. A task created by a Worker is not released by default; it is released as any other embryo the owner releases.
-- The author of every task is recorded (who created it: the owner, an interactive session, a Worker, or a scheduled job), so that the rules above can be applied and checked.
+- A Worker may suggest at most one task per run, so whatever it wants to suggest goes into that single suggestion, a pre-embryo in its good-bye note. The Dispatcher does not file it; the Interactive Session Agent that mops up decides whether to file one or more tasks from it.
+- The author of every task is recorded (who created it: the owner, an interactive session, or a scheduled job), so that the rules above can be applied and checked.
 This replaces the earlier statement that tasks are created only by the Orchestrator and the Personal Assistant. The release privilege itself (the owner releases embryos) is unchanged apart from the 10-day rule above.
