@@ -41,7 +41,7 @@ def page(use):
 
 
 def keys(html):
-    return re.findall(r'<tr><td class="mono">([^<]*)</td>', html)
+    return re.findall(r'<tr(?: class="[^"]*")?><td class="mono">([^<]*)', html)
 
 
 def test_usage_per_day_and_per_window_newest_first_without_empty_days():
@@ -91,4 +91,4 @@ def test_interactive_periods_newest_first_without_empty_periods():
              input_tokens=7, output_tokens=0, cache_creation_input_tokens=0, cache_read_input_tokens=0)])
     rep = report([req("2026-11-21T10:00:00+00:00")], None)
     rep["sessions"] = T
-    assert keys(page(rep)["Interactive sessions per period"]) == ["2026-11-24 02:00", "2026-11-23"]
+    assert keys(page(rep)["Interactive sessions history"]) == ["2026-11-24 02:00", "2026-11-23"]

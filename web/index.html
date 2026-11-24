@@ -10,6 +10,7 @@
   --p1:#b42318;--p1-ink:#ffffff;--p2:#f7d9bf;--p2-ink:#7d3503;--p3:#e6ecf5;--p3-ink:#2f4a73;
   --danger:#b42318;--danger-tint:#fdecea;--warn:#fbf0d9;--warn-ink:#724d00;--q-ok:#2e7d32;--q-warn:#d9a400;--q-bad:#b42318;--q-none:#9a9990;
   --s-embryo:#d9a400;--s-released:#c0392b;--s-wip:#0f766e;--s-unmerged:#2f5fc4;--s-failed:#8e3aa8;--s-merged:#2e7d32;
+  --lv-hour:#2f5fc4;--lv-hour-tint:#e9effb;--lv-day:#7a4cc2;--lv-day-tint:#f2ecfa;--lv-week:#a35f00;--lv-week-tint:#fbf1e1;--lv-month:#5b6b2f;--lv-month-tint:#eef1e2;
   --edge:#8b8a82;--add-bg:#e4f3e8;--add-ink:#14532d;--del-bg:#fdecea;--del-ink:#8f1d12;--font:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
@@ -17,13 +18,13 @@
   --accent:#3fb5a8;--accent-ink:#0b1f1c;--accent-tint:#17332f;
   --p1:#e5645a;--p1-ink:#1a0503;--p2:#5a3a1c;--p2-ink:#f5d5b5;--p3:#26354d;--p3-ink:#cfdcf0;
   --danger:#f17b72;--danger-tint:#3a1a17;--warn:#3a2f12;--warn-ink:#f0cf84;--q-ok:#5fbf7a;--q-warn:#e0b94a;--q-bad:#e57368;--q-none:#77766e;
-  --s-embryo:#e0b94a;--s-released:#e57368;--s-wip:#3fb5a8;--s-unmerged:#7ea2f0;--s-failed:#c98be0;--s-merged:#5fbf7a;--edge:#77766e;--add-bg:#143323;--add-ink:#9fe0b4;--del-bg:#3a1a17;--del-ink:#f4a8a0;color-scheme:dark}}
+  --s-embryo:#e0b94a;--s-released:#e57368;--s-wip:#3fb5a8;--s-unmerged:#7ea2f0;--s-failed:#c98be0;--s-merged:#5fbf7a;--edge:#77766e;--add-bg:#143323;--add-ink:#9fe0b4;--del-bg:#3a1a17;--del-ink:#f4a8a0;--lv-hour:#7ea2f0;--lv-hour-tint:#1d2740;--lv-day:#b99af0;--lv-day-tint:#2a2140;--lv-week:#e0a95a;--lv-week-tint:#36290f;--lv-month:#b5c77a;--lv-month-tint:#262c17;color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#151513;--surface:#1e1e1b;--line:#34342f;--ink:#ecebe6;--muted:#a09f97;
   --accent:#3fb5a8;--accent-ink:#0b1f1c;--accent-tint:#17332f;
   --p1:#e5645a;--p1-ink:#1a0503;--p2:#5a3a1c;--p2-ink:#f5d5b5;--p3:#26354d;--p3-ink:#cfdcf0;
   --danger:#f17b72;--danger-tint:#3a1a17;--warn:#3a2f12;--warn-ink:#f0cf84;--q-ok:#5fbf7a;--q-warn:#e0b94a;--q-bad:#e57368;--q-none:#77766e;
-  --s-embryo:#e0b94a;--s-released:#e57368;--s-wip:#3fb5a8;--s-unmerged:#7ea2f0;--s-failed:#c98be0;--s-merged:#5fbf7a;--edge:#77766e;--add-bg:#143323;--add-ink:#9fe0b4;--del-bg:#3a1a17;--del-ink:#f4a8a0;color-scheme:dark}
+  --s-embryo:#e0b94a;--s-released:#e57368;--s-wip:#3fb5a8;--s-unmerged:#7ea2f0;--s-failed:#c98be0;--s-merged:#5fbf7a;--edge:#77766e;--add-bg:#143323;--add-ink:#9fe0b4;--del-bg:#3a1a17;--del-ink:#f4a8a0;--lv-hour:#7ea2f0;--lv-hour-tint:#1d2740;--lv-day:#b99af0;--lv-day-tint:#2a2140;--lv-week:#e0a95a;--lv-week-tint:#36290f;--lv-month:#b5c77a;--lv-month-tint:#262c17;color-scheme:dark}
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font:14px/1.45 var(--font);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 48px}
 .wrap{max-width:1180px;margin:0 auto}
@@ -156,6 +157,9 @@ tr.blocked{background:var(--danger-tint)}tr.blocked td:first-child{box-shadow:in
 .btn.danger.armed{background:var(--danger);color:#fff;border-color:var(--danger)}
 .chip.stale{background:var(--warn);color:var(--warn-ink);font-weight:600}.chip.ok{background:var(--accent-tint);color:var(--accent)}.chip.dry{border:1px dashed var(--edge);background:none;color:var(--muted)}
 .tblbox.narrow table{min-width:640px}
+/* Interactive sessions history: one colour per aggregation level (tokens --lv-*), the Per column keeps the word */
+tr.lv-hour td{background:var(--lv-hour-tint)}tr.lv-hour td:first-child{border-left:4px solid var(--lv-hour)}.lvkey.lv-hour i{background:var(--lv-hour)}tr.lv-day td{background:var(--lv-day-tint)}tr.lv-day td:first-child{border-left:4px solid var(--lv-day)}.lvkey.lv-day i{background:var(--lv-day)}tr.lv-week td{background:var(--lv-week-tint)}tr.lv-week td:first-child{border-left:4px solid var(--lv-week)}.lvkey.lv-week i{background:var(--lv-week)}tr.lv-month td{background:var(--lv-month-tint)}tr.lv-month td:first-child{border-left:4px solid var(--lv-month)}.lvkey.lv-month i{background:var(--lv-month)}
+.lvlegend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;margin:6px 0}.lvkey{display:inline-flex;align-items:center;gap:6px}.lvkey i{display:inline-block;width:12px;height:12px;border-radius:3px}
 @media (max-width:640px){
   .feed .e{grid-template-columns:1fr;gap:4px}
   .proto{margin-left:0}
@@ -662,8 +666,12 @@ function sessionCards(T){
   const card=(title,note,head,rows,row,n)=>'<div class="card"><h2>'+title+'</h2><span class="muted">'+note+'</span><div class="tblbox narrow"><table><thead><tr>'+head+'<th>Messages</th>'+cols+(n?'<th>5-hour peak</th><th>Weekly peak</th>':'')+'</tr></thead><tbody>'
     +rows.map(row).join('')+(rows.length?'':'<tr><td class="muted" colspan="9">no data</td></tr>')+'</tbody></table></div></div>';
   if(!T)return '<div class="card"><h2>Interactive sessions</h2><span class="muted">no data</span></div>';
-  return card('Interactive sessions per period','Exact token counts of the interactive Claude Code sessions, in the periods of “Today’s readings” and “Earlier readings” (UTC), newest first, only the periods with use, with the highest quota percentage of the same period. Days before the transcripts exist come from the tool’s statistics cache as a daily aggregate without a split: counted in the sum only, marked “daily aggregate, no split”.','<th>Period (UTC)</th><th>Per</th>',recentRows(T.periods,r=>r.messages>0||r.total>0),
-      r=>'<tr><td class="mono">'+esc(r.label)+(r.aggregate?' <span class="muted" title="'+nf(r.aggregate)+' tokens of the tool’s statistics cache, counted in the sum only">incl. daily aggregate, no split</span>':'')+'</td><td>'+r.level+'</td>'+cells(r)+'<td class="mono">'+pc(r.five_hour)+'</td><td class="mono">'+pc(r.seven_day)+'</td></tr>',true)
+  const LV=['hour','day','week','month'],hist=recentRows(T.periods,r=>r.messages>0||r.total>0);
+  if(hist.length&&!hist.some(r=>r.level==='hour'))hist.unshift({level:'hour',none:true});
+  const legend='<span class="lvlegend" aria-label="Aggregation levels">'+LV.map(l=>'<span class="lvkey lv-'+l+'"><i aria-hidden="true"></i>'+l+'</span>').join('')+'</span>';
+  return card('Interactive sessions history','Token counts of the interactive Claude Code sessions per period (UTC), with the highest quota percentage of the same period; hours without messages are not listed. Days before the transcripts exist come from the tool’s statistics cache as a daily aggregate without a split: counted in the sum only, marked “daily aggregate, no split”.'+legend,'<th>Period (UTC)</th><th>Per</th>',hist,
+      r=>r.none?'<tr class="lv-hour"><td class="muted" colspan="10">no sessions today</td></tr>'
+        :'<tr class="lv-'+r.level+'"><td class="mono">'+esc(r.label)+(r.aggregate?' <span class="muted" title="'+nf(r.aggregate)+' tokens of the tool’s statistics cache, counted in the sum only">incl. daily aggregate, no split</span>':'')+'</td><td>'+r.level+'</td>'+cells(r)+'<td class="mono">'+pc(r.five_hour)+'</td><td class="mono">'+pc(r.seven_day)+'</td></tr>',true)
    +card('Interactive sessions per source','Last 90 days.','<th>Source</th>',T.sources,r=>'<tr><td class="mono">'+esc(r.key)+'</td>'+cells(r)+'</tr>')
    +card('Sessions with the most tokens','Last 90 days, at most 20.','<th>Session</th><th>Source</th>',T.sessions,r=>'<tr><td class="mono">'+esc(r.key)+'</td><td class="mono">'+esc(r.source)+'</td>'+cells(r)+'</tr>');
 }

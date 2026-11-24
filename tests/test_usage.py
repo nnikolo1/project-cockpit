@@ -164,9 +164,9 @@ def test_transcript_periods_follow_the_quota_grading_with_peaks():
     rows = {(p["level"], p["key"]): p for p in r["periods"]}
     h10 = rows[("hour", "2026-11-20T10:00")]
     assert (h10["messages"], h10["input_tokens"], h10["total"], h10["five_hour"], h10["seven_day"]) == (2, 2, 20, 40, 22)
-    assert rows[("hour", "2026-11-20T12:00")]["messages"] == 0 and ("hour", "2026-11-20T13:00") not in rows
+    assert ("hour", "2026-11-20T12:00") not in rows and ("hour", "2026-11-20T13:00") not in rows   # an hour without messages has no row
     assert rows[("day", "2026-11-19")]["total"] == 10 and rows[("day", "2026-11-19")]["five_hour"] is None
-    assert [p["label"] for p in r["periods"]][-1] == "2026-11-20 12:00"
+    assert [p["label"] for p in r["periods"]][-1] == "2026-11-20 10:00"
 
 
 def test_transcript_hours_without_readings_keep_the_held_peak():
@@ -176,8 +176,7 @@ def test_transcript_hours_without_readings_keep_the_held_peak():
     assert [p["key"] for p in quota["periods"]] == ["2026-11-20T10:00", "2026-11-20T12:00"]
     rows = {(p["level"], p["key"]): p for p in L.transcript_report(m("2026-11-20T11:05:00+00:00", "s1"), quota)["periods"]}
     assert (rows[("hour", "2026-11-20T11:00")]["messages"], rows[("hour", "2026-11-20T11:00")]["five_hour"], rows[("hour", "2026-11-20T11:00")]["seven_day"]) == (1, 40, 22)
-    assert rows[("hour", "2026-11-20T09:00")]["five_hour"] is None  # before the first reading: nothing to hold
-    assert rows[("hour", "2026-11-20T12:00")]["five_hour"] == 5
+    assert ("hour", "2026-11-20T09:00") not in rows and ("hour", "2026-11-20T12:00") not in rows  # hours without messages are not listed (PC-76)
 
 
 def test_held_peaks_start_from_the_newest_earlier_period():
