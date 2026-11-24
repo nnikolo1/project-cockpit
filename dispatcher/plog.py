@@ -36,8 +36,8 @@ class ProcessingLog:
             f.write(json.dumps(rec) + "\n")
         log.info("processing log: %s", rec)
 
-    def event(self, task_id, task_folder, state, reason=None):
-        self._write(task=task_id, folder=str(task_folder), state=state, **({"reason": reason} if reason else {}))
+    def event(self, task_id, task_folder, state, reason=None, worker=None):
+        self._write(task=task_id, folder=str(task_folder), state=state, **({"reason": reason} if reason else {}), **({"worker": worker} if worker else {}))
 
     def failure(self, task_id, task_folder, reason):
         if reason not in REASONS and not re.fullmatch(r"over \d+ minutes", reason):

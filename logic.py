@@ -857,39 +857,113 @@ def _add(into, c):
     return into
 
 
-def usage_report(usage_text, plog_text, goodbye_tokens):
-    """The Usage tab. usage_text / plog_text: the file contents or None when missing; goodbye_tokens(folder) -> the `tokens` of the task's
-    good-bye note or None. -> dict(days, windows, workers (each a list of {key, counts}), tasks) or None parts where there is no data.
-    Windows are fixed 5-hour blocks counted from the epoch (UTC); days are UTC dates. The Worker label is not in the processing log, so a task's
-    sum counts the requests of all Workers in its time span (`overlap` marks spans that overlap another task's)."""
+HISTORY_DAYS = 90
+RECENT_DAYS = 2
+
+
+def _pct(block, key):
+    v = block.get(key) if isinstance(block, dict) else None
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def _quota(quota_text, end_day):
+    """The vendor's readings -> (vendor window ends as epoch seconds, report dict or None for no file). end_day: the last day of the 90."""
+    recs = _json_lines(quota_text)
+    if recs is None:
+        return [], None
+    reads, resets = [], []
+    for rec in recs:
+        t = _epoch(rec.get("ts"))
+        if t is None:
+            continue
+        f, w = rec.get("five_hour"), rec.get("seven_day")
+        reads.append(dict(t=t, ts=dt.datetime.fromtimestamp(t, dt.timezone.utc).isoformat(timespec="seconds"),
+                          five_hour=_pct(f, "used_percentage"), seven_day=_pct(w, "used_percentage")))
+        r = f.get("resets_at") if isinstance(f, dict) else None
+        if isinstance(r, (int, float)) and not isinstance(r, bool):
+            resets.append(r)
+    reads.sort(key=lambda r: r["t"])
+    ends = []
+    for r in sorted(resets):  # the same window's reset time can wobble by seconds: merge ends closer than 10 minutes
+        if not ends or r - ends[-1] > 600:
+            ends.append(r)
+    if end_day is None and reads:
+        end_day = dt.datetime.fromtimestamp(reads[-1]["t"], dt.timezone.utc).date()
+    days = {}
+    if end_day is not None:
+        for i in range(HISTORY_DAYS):
+            days[(end_day - dt.timedelta(days=HISTORY_DAYS - 1 - i)).isoformat()] = dict(five_hour=None, seven_day=None)
+    for r in reads:
+        d = days.get(dt.datetime.fromtimestamp(r["t"], dt.timezone.utc).date().isoformat())
+        if d is not None:
+            for k in ("five_hour", "seven_day"):
+                if r[k] is not None and (d[k] is None or r[k] > d[k]):
+                    d[k] = r[k]
+    cut = reads[-1]["t"] - RECENT_DAYS * 86400 if reads else 0
+    recent = [{k: r[k] for k in ("ts", "five_hour", "seven_day")} for r in reads if r["t"] >= cut]
+    return ends, dict(days=[dict(key=k, **v) for k, v in days.items()], recent=recent)
+
+
+def usage_summary(rep):
+    """One project's row for the All projects table: the 90 days' counts, their sum, the number of tasks, the last day with use. None for no data."""
+    if not rep or rep["days"] is None:
+        return None
+    row = {}
+    for k in (*USAGE_FIELDS, "total"):
+        row[k] = sum(d[k] for d in rep["days"])
+    used = [d["key"] for d in rep["days"] if d["total"]]
+    return dict(row, tasks=len(rep["tasks"] or []), last_day=used[-1] if used else None)
+
+
+def usage_report(usage_text, plog_text, goodbye_tokens, quota_text=None):
+    """The Usage tab. usage_text / plog_text / quota_text: the file contents or None when missing; goodbye_tokens(folder) -> the `tokens` of the
+    task's good-bye note or None. -> dict(days, windows, workers (each a list of {key, counts}), tasks, quota) or None parts where there is no data.
+    days: the last 90 UTC days counted back from the latest day of use, a day without use as zeros. Windows are the vendor's 5-hour windows (from
+    the quota readings' `resets_at`, kind "vendor") and, for requests outside them or without readings, fixed 5-hour blocks counted from the
+    epoch (kind "fixed"). A task launched with a Worker name counts only that Worker's requests between its launch and its last log entry; an
+    older task counts all Workers' requests in that span (`overlap` marks spans that overlap another task's)."""
     reqs = []
     for rec in _json_lines(usage_text) or []:
         t = _epoch(rec.get("ts"))
         if t is not None:
             reqs.append((t, rec.get("worker") or "?", _counts(rec)))
+    end_day = max((dt.datetime.fromtimestamp(t, dt.timezone.utc).date() for t, _, _ in reqs), default=None)
+    ends, quota = _quota(quota_text, end_day)
     groups = {"days": {}, "windows": {}, "workers": {}}
+    if end_day is not None:
+        for i in range(HISTORY_DAYS):
+            groups["days"][(end_day - dt.timedelta(days=HISTORY_DAYS - 1 - i)).isoformat()] = {k: 0 for k in (*USAGE_FIELDS, "total")}
     for t, w, c in reqs:
         u = dt.datetime.fromtimestamp(t, dt.timezone.utc)
-        start = dt.datetime.fromtimestamp(t - t % WINDOW_SECONDS, dt.timezone.utc)
-        _add(groups["days"].setdefault(u.date().isoformat(), {}), c)
-        _add(groups["windows"].setdefault(start.strftime("%Y-%m-%d %H:%M"), {}), c)
+        if u.date().isoformat() in groups["days"]:
+            _add(groups["days"][u.date().isoformat()], c)
+        win = next((e for e in ends if e - WINDOW_SECONDS <= t < e), None)
+        if win is not None:
+            key = dict(key=dt.datetime.fromtimestamp(win - WINDOW_SECONDS, dt.timezone.utc).strftime("%Y-%m-%d %H:%M"), kind="vendor")
+        else:
+            key = dict(key=dt.datetime.fromtimestamp(t - t % WINDOW_SECONDS, dt.timezone.utc).strftime("%Y-%m-%d %H:%M"), kind="fixed")
+        _add(groups["windows"].setdefault((key["key"], key["kind"]), {}), c)
         _add(groups["workers"].setdefault(w, {}), c)
-    rep = {k: None if usage_text is None else [dict(key=key, **v) for key, v in sorted(g.items())] for k, g in groups.items()}
+    rep = {k: None if usage_text is None else [dict(key=key, **v) for key, v in sorted(g.items())] for k, g in groups.items() if k != "windows"}
+    rep["windows"] = None if usage_text is None else [dict(key=k[0], kind=k[1], **v) for k, v in sorted(groups["windows"].items())]
+    rep["quota"] = quota
     spans = {}
     for rec in _json_lines(plog_text) or []:
         t, task = _epoch(rec.get("time")), rec.get("task")
         if t is None or not task:
             continue
-        s = spans.setdefault(task, dict(task=task, folder=rec.get("folder"), start=None, end=t))
+        s = spans.setdefault(task, dict(task=task, folder=rec.get("folder"), start=None, end=t, worker=None))
         if rec.get("state") == "launched":
-            s["start"], s["folder"] = t, rec.get("folder")
+            s["start"], s["folder"], s["worker"] = t, rec.get("folder"), rec.get("worker") or None
         s["end"] = max(s["end"], t)
     tasks = []
     for s in sorted((s for s in spans.values() if s["start"] is not None), key=lambda s: s["start"]):
-        proxy = None if usage_text is None else sum(c["total"] for t, _, c in reqs if s["start"] <= t <= s["end"])
+        proxy = None if usage_text is None else sum(c["total"] for t, w, c in reqs
+                                                    if s["start"] <= t <= s["end"] and (s["worker"] is None or w == s["worker"]))
         note = goodbye_tokens(s["folder"]) if s["folder"] else None
         tasks.append(dict(task=s["task"], start=dt.datetime.fromtimestamp(s["start"], dt.timezone.utc).isoformat(timespec="seconds"),
-                          proxy=proxy, note=note, diff=None if proxy is None or note is None else proxy - note,
-                          overlap=any(o is not s and o["start"] is not None and o["start"] <= s["end"] and s["start"] <= o["end"] for o in spans.values())))
+                          worker=s["worker"], proxy=proxy, note=note, diff=None if proxy is None or note is None else proxy - note,
+                          overlap=s["worker"] is None and any(o is not s and o["start"] is not None and o["start"] <= s["end"] and s["start"] <= o["end"]
+                                                              for o in spans.values())))
     rep["tasks"] = None if plog_text is None else tasks
     return rep

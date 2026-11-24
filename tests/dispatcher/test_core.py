@@ -46,8 +46,9 @@ class FakeLog:
     def __init__(self):
         self.events, self.failures, self.beats = [], [], []
 
-    def event(self, tid, folder, state, reason=None):
+    def event(self, tid, folder, state, reason=None, worker=None):
         self.events.append((tid, state))
+        self.workers = getattr(self, "workers", []) + ([(tid, worker)] if worker else [])
 
     def failure(self, tid, folder, reason):
         self.failures.append((tid, reason))
@@ -186,7 +187,7 @@ def test_starts_one_worker_per_firing(tmp_path):
     assert w.fire() == "started worker1 on x-1"
     assert w.runtime.launched == [("worker1", "x-1")]
     assert w.runtime.prepared[0][2].startswith("# title")
-    assert w.worker()["launched"] == NOW and ("x-1", "launched") in w.plog.events
+    assert w.worker()["launched"] == NOW and ("x-1", "launched") in w.plog.events and w.plog.workers == [("x-1", "worker1")]
     assert "started worker1 on x-1" in w.plog.beats[0]
 
 
