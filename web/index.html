@@ -620,14 +620,15 @@ function vSettings(){
    +'<span class="muted" style="font-size:12px">'+r[2]+note(r[0])+'</span></div>').join('')
    +(ro?'<span class="muted">'+(OFF?'This is an offline copy from a backup':'This Cockpit was started with --read-only')+': the values cannot be changed here.</span>':'<div><button class="btn primary">Save</button></div>')+'</form></div>';
 }
+const NOUSE='no usage in the last 90 days';  // the per-day and per-window tables list only periods with usage
 const USEF=[['input_tokens','Input'],['output_tokens','Output'],['cache_creation_input_tokens','Cache write'],['cache_read_input_tokens','Cache read'],['total','Sum']];
-function usageTable(title,rows){
+function usageTable(title,rows,empty){
   const nf=x=>x.toLocaleString('en-US');
   if(!rows)return '<div class="card"><h2>'+title+'</h2><span class="muted">no data</span></div>';
   const mx=Math.max(1,...rows.map(r=>r.total));
   return '<div class="card"><h2>'+title+'</h2><div class="tblbox narrow"><table><thead><tr><th>'+title.split(' ').pop()+'</th>'+USEF.map(f=>'<th>'+f[1]+'</th>').join('')+'<th></th></tr></thead><tbody>'
    +rows.map(r=>'<tr><td class="mono">'+esc(r.key)+'</td>'+USEF.map(f=>'<td class="mono">'+nf(r[f[0]])+'</td>').join('')+'<td style="width:120px"><div class="bar" aria-hidden="true"><i style="width:'+(100*r.total/mx)+'%;background:var(--accent)"></i></div></td></tr>').join('')
-   +(rows.length?'':'<tr><td class="muted" colspan="7">no data</td></tr>')+'</tbody></table></div></div>';
+   +(rows.length?'':'<tr><td class="muted" colspan="7">'+(empty||'no data')+'</td></tr>')+'</tbody></table></div></div>';
 }
 function quotaCard(q){
   const T='Vendor quota used';
@@ -676,8 +677,8 @@ function vUsage(){
   const nf=x=>x==null?'no data':x.toLocaleString('en-US');
   const tk=USE.tasks;
   const dv={},fh={},ag=(USE.sessions&&USE.sessions.aggregate_days)||{};(USE.days||[]).forEach(r=>{dv[r.key]=r.total;});Object.keys(ag).forEach(d=>{dv[d]=(dv[d]||0)+ag[d];});((USE.quota&&USE.quota.days)||[]).forEach(r=>{if(r.five_hour!=null)fh[r.key]=r.five_hour;});
-  const hm='<div class="card"><h2>Tokens per day</h2>'+heatmap(dv,(d,n)=>nf(n)+' tokens on '+d+(ag[d]!=null?'\nincl. '+nf(ag[d])+' daily aggregate, no split':'')+(fh[d]!=null?'\nhighest 5-hour reading '+fh[d]+' %':''),'Sum of the four token counts per day (UTC), as in the per-day table below; the proxy file keeps '+((USE.days||[]).length)+' days. Days before the interactive transcripts add the statistics cache’s daily total (daily aggregate, no split).')+'</div>';
-  return head+latestCard(USE.quota)+sessionCards(USE.sessions)+hm+projectsCard()+usageTable('Usage per day',USE.days)+usageTable('Usage per 5-hour window',USE.windows&&USE.windows.map(r=>Object.assign({},r,{key:r.key+' ('+r.kind+')'})))+quotaCard(USE.quota)
+  const hm='<div class="card"><h2>Tokens per day</h2>'+heatmap(dv,(d,n)=>nf(n)+' tokens on '+d+(ag[d]!=null?'\nincl. '+nf(ag[d])+' daily aggregate, no split':'')+(fh[d]!=null?'\nhighest 5-hour reading '+fh[d]+' %':''),'Sum of the four token counts per day (UTC), as in the per-day table below; the proxy file has usage on '+((USE.days||[]).length)+' of the last 90 days. Days before the interactive transcripts add the statistics cache’s daily total (daily aggregate, no split).')+'</div>';
+  return head+latestCard(USE.quota)+sessionCards(USE.sessions)+hm+projectsCard()+usageTable('Usage per day',USE.days,NOUSE)+usageTable('Usage per 5-hour window',USE.windows&&USE.windows.map(r=>Object.assign({},r,{key:r.key+' ('+r.kind+')'})),NOUSE)+quotaCard(USE.quota)
    +'<div class="card"><h2>Per task</h2><div class="tblbox narrow"><table><thead><tr><th>Task</th><th>Worker</th><th>Launched (UTC)</th><th>Proxy sum</th><th>Good-bye note</th><th>Difference</th></tr></thead><tbody>'
    +(tk?tk.map(t=>'<tr><td class="mono">'+esc(t.task)+'</td><td class="mono">'+esc(t.worker||'')+'</td><td class="mono">'+esc(t.start)+'</td><td class="mono">'+nf(t.proxy)+(t.overlap?' <span class="muted" title="Another task ran at the same time; the sum may include its requests">overlap</span>':'')+'</td><td class="mono">'+nf(t.note)+'</td><td class="mono">'+nf(t.diff)+'</td></tr>').join(''):'')
    +(tk&&tk.length?'':'<tr><td class="muted" colspan="6">no data</td></tr>')+'</tbody></table></div><p class="muted" style="font-size:13px;margin:8px 0 0">The proxy sum counts the requests of the task’s Worker between the task’s launch and its last log entry. Older tasks, launched before the log named the Worker, count all Workers’ requests in that span (marked overlap when another task ran then).</p></div></div>';
