@@ -71,6 +71,7 @@
   {"path": "tests/test_readings_page.py", "module": "githubclient", "basis": "tests the Today's readings and Earlier readings cards of the Token Usage page"},
   {"path": "tests/test_usage_rows.py", "module": "githubclient", "basis": "tests that the Token Usage period tables list only periods with usage"},
   {"path": "tests/test_period_tables_page.py", "module": "githubclient", "basis": "tests the order and the empty-period rule of the Token Usage period tables in the page"},
+  {"path": "tests/test_usage_order.py", "module": "githubclient", "basis": "tests the order of the Token Usage cards (the one list USAGE_ORDER in the page)"},
   {"path": "tests/test_projects.py", "module": "githubclient", "basis": "tests the --projects handling in cockpit.py"},
   {"path": "tests/test_workflow.py", "module": "cockpitwebpage", "basis": "guards the Workflow page (web/index.html) against going stale; tests follow the code"},
   {"path": "tests/test_usage.py", "module": "githubclient", "basis": "tests usage_report in logic.py and the usage endpoint in cockpit.py; tests follow the code"},
