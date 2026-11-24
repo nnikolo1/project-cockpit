@@ -11,7 +11,7 @@ import re
 
 log = logging.getLogger("dispatcher.plog")
 
-REASONS = ("no start", "over N minutes", "no activity", "no note", "unusable note", "no commit in the bundle")   # 5b; N is the runaway limit
+REASONS = ("no start", "over N minutes", "no activity", "no note", "unusable note", "no commit in the bundle", "the Worker gave up")   # 5b; N is the runaway limit
 LOG_NAME, STAMP_NAME = "processing.jsonl", "backup.stamp"
 
 

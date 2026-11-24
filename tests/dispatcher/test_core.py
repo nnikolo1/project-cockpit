@@ -366,10 +366,11 @@ def test_done_without_commit_fails(tmp_path):
     assert w.plog.failures == [("x-1", "no commit in the bundle")]
 
 
-def test_outcome_is_not_used(tmp_path):
+def test_gave_up_fails_even_with_a_commit_and_keeps_the_branch(tmp_path):
     w = start_one(tmp_path)
     finish(w, {"outcome": "gave_up", "branch": "b", "summary": "s", "tokens": 5})
-    assert ("x-1", "unmerged") in w.tasks.states and w.plog.failures == []
+    assert w.plog.failures == [("x-1", "the Worker gave up")]
+    assert ("x-1", "failed") in w.tasks.states and w.tasks.fetched == [("x-1", "/b/x-1", "b")]
 
 
 def test_no_note_and_unusable_note_fail_with_reason(tmp_path):

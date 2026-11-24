@@ -162,7 +162,7 @@ class Dispatcher:
             self._fail(st, user, w, why)
 
     def _finish(self, st, user, w, note, reason):
-        """3e: the process has ended; unmerged if the bundle holds a commit, else failed."""
+        """3e: the process has ended; unmerged if the bundle holds a commit and the Worker did not give up, else failed."""
         tid = w["task_id"]
         if note is None:
             return self._fail(st, user, w, reason)
@@ -174,6 +174,8 @@ class Dispatcher:
             return self._fail(st, user, w, "no commit in the bundle")
         if ahead < 1:
             return self._fail(st, user, w, "no commit in the bundle")
+        if note["outcome"] == "gave_up":  # the Worker's own declaration; the branch stays fetched for the owner
+            return self._fail(st, user, w, "the Worker gave up")
         self.tasks.set_state(tid, "unmerged")
         self.plog.event(tid, w["folder"], "unmerged")
         log.info("task %s is unmerged (%d commits on worker/%s)", tid, ahead, tid)
