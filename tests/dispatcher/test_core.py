@@ -56,6 +56,9 @@ class FakeLog:
     def heartbeat(self, line):
         self.beats.append(line)
 
+    def sleep(self, start, end, minutes):
+        self.sleeps = getattr(self, "sleeps", []) + [(start, end, minutes)]
+
 
 class FakeProc:
     pid = 4242
@@ -109,6 +112,7 @@ class World:
     def __init__(self, tmp_path, tasks=(), **settings):
         self.now, self.free, self.last, self.mtime = NOW, 50 * core.GIB, {}, None
         self.ahead = 1
+        self.detect_sleep = False        # the old tests jump the clock with interval 0; only the sleep tests turn it on
         self.runtime, self.tasks, self.plog = FakeRuntime(tmp_path), FakeTasks(tasks), FakeLog()
         self.state = str(tmp_path / "state.json")
         self.settings = dict(core.DEFAULTS, **{"interval_minutes": 0, **settings})
@@ -130,7 +134,10 @@ class World:
             now=lambda: self.now, free_disk=lambda: self.free, proxy_last=lambda: dict(self.last),
             transcript_mtime=lambda u: self.mtime, ensure_proxy=lambda: None,
             commits_ahead=lambda repo, tid: self.ahead, heartbeat_parts=lambda: {"memory_pressure": "normal"})
-        return core.Dispatcher(self.settings, self.state, self.runtime, self.tasks, self.plog, p)
+        d = core.Dispatcher(self.settings, self.state, self.runtime, self.tasks, self.plog, p)
+        if not self.detect_sleep:
+            d._detect_sleep = lambda st, now: None
+        return d
 
     def fire(self):
         return self.dispatcher().fire()
@@ -463,6 +470,144 @@ def test_heartbeat_line_contents(tmp_path):
 def test_heartbeat_without_container_report(tmp_path):
     w = World(tmp_path)
     assert "not reported" in w.dispatcher().heartbeat({"workers": {}}, "nothing to do")
+
+
+# --- host sleep (3i) ---
+H = 3600
+
+
+def sleepy(tmp_path, **settings):
+    """A Worker started and 'started' written; 2-minute firings; sleep detection on."""
+    w = World(tmp_path, [T("x-1")], interval_minutes=2, **settings)
+    w.detect_sleep = True
+    w.fire()
+    w.runtime.outbox["x-1"] = (True, None, "no note")
+    w.alive_pids = {4242}
+    return w
+
+
+def awake(w, seconds, record=False):
+    """Real awake time: a firing every 2 minutes (optionally with a fresh proxy record each time)."""
+    for _ in range(seconds // 120):
+        w.now += 120
+        if record:
+            w.last = {"worker1": w.now}
+        w.fire()
+
+
+def test_awake_seconds_overlap_edges():
+    a = core.awake_seconds
+    assert a(0, 100, []) == 100
+    assert a(0, 100, [(20, 50)]) == 70
+    assert a(0, 100, [(-50, 30)]) == 70           # starts before the window
+    assert a(0, 100, [(80, 500)]) == 80           # ends after the window
+    assert a(0, 100, [(-5, 500)]) == 0            # covers the window
+    assert a(0, 100, [(100, 200), (-9, 0)]) == 100  # touching at the edges only
+    assert a(0, 100, [(10, 20), (30, 40)]) == 80  # several
+    assert a(100, 0, []) == 0
+
+
+def test_sleep_does_not_kill_a_young_worker(tmp_path):
+    w = sleepy(tmp_path)
+    w.now += 8 * H
+    w.last = {"worker1": w.now - 8 * H + 60}      # its last record was just before the sleep
+    w.fire()
+    assert w.killed == [] and w.plog.sleeps[0][2] == 478
+    assert w.worker()["task_id"] == "x-1"
+    awake(w, 600)
+    assert w.killed == []                         # the sleep stays excluded in later firings
+    awake(w, 12 * 60)
+    assert w.killed == [4242] and ("x-1", "no activity") in w.plog.failures
+
+
+def test_real_41_awake_minutes_still_kills_as_over_limit(tmp_path):
+    w = sleepy(tmp_path)
+    w.now += 8 * H                                 # sleep
+    w.fire()
+    awake(w, 41 * 60, record=True)                 # then 41 awake minutes with records
+    assert w.killed == [4242] and ("x-1", "over 40 minutes") in w.plog.failures
+
+
+def test_no_record_for_21_awake_minutes_still_kills(tmp_path):
+    w = sleepy(tmp_path)
+    w.last = {"worker1": w.now}
+    w.now += 8 * H
+    w.fire()
+    assert w.killed == []
+    awake(w, 21 * 60)
+    assert w.killed == [4242] and ("x-1", "no activity") in w.plog.failures
+
+
+def test_no_record_for_9_hours_of_which_8_9_slept_is_not_killed(tmp_path):
+    w = sleepy(tmp_path, runaway_minutes=1000)    # only the no-activity limit is under test
+    w.last = {"worker1": w.now}
+    w.now += int(8.9 * H)
+    w.fire()
+    awake(w, 6 * 60)                               # 6 awake minutes more
+    assert w.killed == []
+
+
+def test_sleep_does_not_count_towards_the_start_limit(tmp_path):
+    w = World(tmp_path, [T("x-1")], interval_minutes=1)
+    w.detect_sleep = True
+    w.fire()
+    w.alive_pids = {4242}
+    w.now += 8 * H                                 # "started" is still missing; one interval of it was awake
+    w.fire()
+    assert w.killed == []
+    w.now += 1
+    w.fire()
+    assert w.killed == [4242] and ("x-1", "no start") in w.plog.failures
+
+
+def test_missing_or_bad_last_fired_is_never_a_sleep(tmp_path):
+    w = World(tmp_path, interval_minutes=2)
+    w.detect_sleep = True
+    w.fire()                                       # first firing: no last_fired
+    assert not hasattr(w.plog, "sleeps")
+    st = core.load_state(w.state)
+    st["last_fired"] = "garbage"
+    core.save_state(w.state, st)
+    w.now += 8 * H
+    w.fire()
+    assert not hasattr(w.plog, "sleeps") and "slept" not in w.plog.beats[-1]
+
+
+def test_gap_threshold_and_state_pruning(tmp_path):
+    w = World(tmp_path, interval_minutes=2, runaway_minutes=40)
+    w.detect_sleep = True
+    w.fire()
+    w.now += 5 * 60                                # exactly 2 x interval + 1 minute: not a sleep
+    w.fire()
+    assert not hasattr(w.plog, "sleeps")
+    w.now += 5 * 60 + 1
+    w.fire()
+    assert len(w.plog.sleeps) == 1
+    w.now += 3 * H                                 # another sleep; the first lies beyond twice the runaway limit
+    w.fire()
+    assert core.load_state(w.state)["sleeps"] == [[w.now - 3 * H + 120, w.now]]
+
+
+def test_sleep_event_and_heartbeat_text(tmp_path):
+    w = World(tmp_path, interval_minutes=2)
+    w.detect_sleep = True
+    w.fire()
+    w.now += 2 * H
+    w.fire()
+    assert w.plog.sleeps == [(NOW + 120, NOW + 2 * H, 118)]
+    assert "slept 118 minutes" in w.plog.beats[-1]
+    w.now += 120
+    w.fire()
+    assert "slept" not in w.plog.beats[-1]
+    assert core.load_state(w.state)["sleeps"] == [[NOW + 120, NOW + 2 * H]]
+
+
+def test_processing_log_sleep_event(tmp_path):
+    from dispatcher.plog import ProcessingLog
+    pl = ProcessingLog(str(tmp_path / "d"))
+    pl.sleep(10.0, 20.0, 5)
+    rec = json.loads(pl.path.read_text().splitlines()[-1])
+    assert rec["event"] == "sleep" and rec["minutes"] == 5
 
 
 # --- default probes ---
