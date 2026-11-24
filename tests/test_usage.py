@@ -155,7 +155,7 @@ QUOTA = "\n".join(json.dumps(dict(ts=t, five_hour=dict(used_percentage=a, resets
 
 def test_transcript_missing_file_is_no_data():
     assert L.transcript_report(None) is None
-    assert L.transcript_report("") == dict(periods=[], sources=[], sessions=[])
+    assert L.transcript_report("") == dict(periods=[], sources=[], sessions=[], aggregate_days={})
 
 
 def test_transcript_periods_follow_the_quota_grading_with_peaks():
@@ -186,3 +186,32 @@ def test_get_usage_reads_the_transcript_file(tmp_path):
     p = dict(name="proj", repo="o/proj")
     assert C.get_usage(p, tmp_path, {"proj": p})["sessions"]["sources"][0]["total"] == 10
     assert C.get_usage(p, tmp_path / "none", {"proj": p})["sessions"] is None
+
+
+def a(day, tokens, model="m-1"):
+    return json.dumps(dict(day=day, model=model, tokens=tokens, messages=4, sessions=1, source="stats-cache"))
+
+
+def test_daily_aggregates_count_in_the_period_total_only_and_exact_days_win():
+    quota = L.usage_report(None, None, lambda f: None, QUOTA)["quota"]
+    text = m("2026-11-19T08:00:00+00:00", "s2")
+    agg = "\n".join([a("2026-10-05", 100), a("2026-10-05", 50, "m-2"), a("2026-11-19", 999), a("2026-11-03", None), "bad",
+                     json.dumps(dict(day="2026-10-06", tokens=7, source="other"))])
+    r = L.transcript_report(text, quota, agg)
+    rows = {(p["level"], p["key"]): p for p in r["periods"]}
+    oct_ = rows[("month", "2026-10")]
+    assert (oct_["total"], oct_["aggregate"], oct_["messages"], oct_["input_tokens"]) == (150, 150, 0, 0)
+    assert rows[("day", "2026-11-19")]["total"] == 10 and rows[("day", "2026-11-19")]["aggregate"] == 0   # the exact data wins
+    assert r["aggregate_days"] == {"2026-10-05": 150}
+    assert [s["total"] for s in r["sources"]] == [10] and [s["total"] for s in r["sessions"]] == [10]
+
+
+def test_aggregates_alone_are_shown_and_neither_file_is_no_data(tmp_path):
+    r = L.transcript_report(None, None, a("2026-10-05", 100))
+    assert r["aggregate_days"] == {"2026-10-05": 100} and r["sources"] == [] and sum(p["aggregate"] for p in r["periods"]) == 100
+    assert L.transcript_report(None, None, None) is None
+    d = tmp_path / "proj"
+    d.mkdir()
+    (d / "stats-cache-usage.jsonl").write_text(a("2026-10-05", 100))
+    p = dict(name="proj", repo="o/proj")
+    assert C.get_usage(p, tmp_path, {"proj": p})["sessions"]["aggregate_days"] == {"2026-10-05": 100}

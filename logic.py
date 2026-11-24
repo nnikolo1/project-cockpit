@@ -1355,23 +1355,32 @@ def _period_skeleton(anchor):
     return out
 
 
-def transcript_report(text, quota=None):
-    """The counts of interactive sessions (contract transcript-usage.jsonl) -> dict(periods, sources, sessions), or None for no file.
-    periods: the graded rows of _period(), anchored on the newest quota reading (else the newest message), each with the message count,
-    the four counts, their sum and the highest 5-hour and weekly percentage of the same period from `quota` (the report of _quota()).
-    sources, sessions: the last HISTORY_DAYS days; sessions are the SESSIONS_SHOWN with the most tokens."""
-    recs = _json_lines(text)
-    if recs is None:
+def transcript_report(text, quota=None, aggregate=None):
+    """The counts of interactive sessions (contract transcript-usage.jsonl) -> dict(periods, sources, sessions, aggregate_days), or None when
+    neither file exists. periods: the graded rows of _period(), anchored on the newest quota reading (else the newest message or aggregate
+    day), each with the message count, the four counts, their sum and the highest 5-hour and weekly percentage of the same period from
+    `quota` (the report of _quota()). sources, sessions: the last HISTORY_DAYS days; sessions are the SESSIONS_SHOWN with the most tokens.
+    aggregate: the text of stats-cache-usage.jsonl (its contract): its token totals per day count in a period's `total` and `aggregate`
+    only (no split, no messages), never in sources or sessions; a day with per-message records ignores them (the exact data wins).
+    aggregate_days: {day: tokens} of the aggregates used."""
+    recs, agg = _json_lines(text), _json_lines(aggregate)
+    if recs is None and agg is None:
         return None
     msgs = []
-    for rec in recs:
+    for rec in recs or []:
         t = _epoch(rec.get("ts"))
         if t is not None:
             msgs.append((t, str(rec.get("source") or "?"), str(rec.get("session") or "?"), _message_counts(rec)))
-    anchor = (quota or {}).get("anchor") or max((m[0] for m in msgs), default=None)
+    exact = {dt.datetime.fromtimestamp(m[0], dt.timezone.utc).date().isoformat() for m in msgs}
+    days = {}
+    for rec in agg or []:
+        d, n = rec.get("day"), rec.get("tokens")
+        if rec.get("source") == "stats-cache" and isinstance(n, int) and not isinstance(n, bool) and _epoch(f"{d}T00:00:00+00:00") is not None and d not in exact:
+            days[d] = days.get(d, 0) + n
+    anchor = (quota or {}).get("anchor") or max([m[0] for m in msgs] + [_epoch(f"{d}T00:00:00+00:00") for d in days], default=None)
     empty = lambda: {k: 0 for k in ("messages", *USAGE_FIELDS, "total")}
     peaks = {(p["level"], p["key"]): p for p in (quota or {}).get("periods", [])}
-    rows = {p[:2]: dict(level=p[0], key=p[1], label=p[2], **empty()) for p in (_period_skeleton(anchor) if anchor is not None else [])}
+    rows = {p[:2]: dict(level=p[0], key=p[1], label=p[2], aggregate=0, **empty()) for p in (_period_skeleton(anchor) if anchor is not None else [])}
     sources, sessions = {}, {}
     since = anchor - HISTORY_DAYS * 86400 if anchor is not None else None
     for t, src, ses, c in msgs:
@@ -1382,12 +1391,17 @@ def transcript_report(text, quota=None):
             _add_messages(sources.setdefault(src, empty()), c)
             row = sessions.setdefault((src, ses), dict(source=src, **empty()))
             _add_messages(row, c)
+    for d, n in days.items():
+        p = _period(_epoch(f"{d}T00:00:00+00:00"), anchor)
+        if p is not None and p[:2] in rows:
+            rows[p[:2]]["aggregate"] += n
+            rows[p[:2]]["total"] += n
     for k, row in rows.items():
         q = peaks.get(k, {})
         row["five_hour"], row["seven_day"] = (q.get(w, {}).get("high") for w in ("five_hour", "seven_day"))
     top = sorted(sessions.items(), key=lambda kv: (-kv[1]["total"], kv[0]))[:SESSIONS_SHOWN]
     return dict(periods=list(rows.values()), sources=[dict(key=k, **v) for k, v in sorted(sources.items(), key=lambda kv: (-kv[1]["total"], kv[0]))],
-                sessions=[dict(v, key=k[1]) for k, v in top])
+                sessions=[dict(v, key=k[1]) for k, v in top], aggregate_days=dict(sorted(days.items())))
 
 
 def _add_messages(into, c):

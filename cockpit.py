@@ -644,7 +644,7 @@ def save_card_settings(p, form):
 
 # The Token Usage tab's files, under DATA_DIR/<project name>/ (the folder the Settings page uses)
 USAGE_FILE, PLOG_FILE, AREA_DIR, QUOTA_FILE = "proxy-usage.jsonl", "processing/processing.jsonl", "area", "quota-history.jsonl"
-TRANSCRIPT_FILE = "transcript-usage.jsonl"
+TRANSCRIPT_FILE, AGGREGATE_FILE = "transcript-usage.jsonl", "stats-cache-usage.jsonl"
 
 
 def _read_text(path):
@@ -674,7 +674,7 @@ def get_usage(p, data_dir=None, projects=None):
     """The selected project's report plus `summary` (its 90-day row) and `projects` (one row per project the Cockpit serves; no counts = no data)."""
     rep = _usage_one(p, data_dir)
     d = (data_dir or DATA_DIR) / (p.get("name") or p["repo"].split("/")[-1])
-    rep["sessions"] = L.transcript_report(_read_text(d / TRANSCRIPT_FILE), rep["quota"])
+    rep["sessions"] = L.transcript_report(_read_text(d / TRANSCRIPT_FILE), rep["quota"], _read_text(d / AGGREGATE_FILE))
     rep["summary"] = L.usage_summary(rep)
     rep["projects"] = [dict(name=n, **(L.usage_summary(_usage_one(q, data_dir)) or {})) for n, q in (projects or PROJECTS or {p.get("name", ""): p}).items()]
     return rep

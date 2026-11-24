@@ -46,6 +46,13 @@
      "note": "read only, by get_usage for the Token Usage page (a missing file shows as no data); exact token counts of interactive sessions, numbers and ids only"
     },
     {
+     "path": "~/.local/share/project-cockpit/<project>/stats-cache-usage.jsonl",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "tools/stats_cache_usage.py",
+     "note": "read only, by get_usage for the Token Usage page (a missing file shows as no data); daily token totals per model and daily message and session counts from the vendor tool's statistics cache, a coarse backfill marked source stats-cache; numbers only; rewritten whole on each run, rebuildable while the cache exists"
+    },
+    {
      "path": "~/.local/share/project-cockpit/cache/",
      "kind": "dir",
      "personal_data": false,
