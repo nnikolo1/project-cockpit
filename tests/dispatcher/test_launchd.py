@@ -17,6 +17,7 @@ def test_dispatcher_plist():
     assert d["Label"] == "com.project-cockpit.dispatcher.demo"
     assert d["StartInterval"] == 120
     assert d["WorkingDirectory"] == "/cp" and d["EnvironmentVariables"]["PYTHONPATH"] == "/cp"
+    assert "/opt/homebrew/bin" in d["EnvironmentVariables"]["PATH"] and "/usr/local/bin" in d["EnvironmentVariables"]["PATH"]
     a = d["ProgramArguments"]
     assert a[:3] == ["python3", "-m", "dispatcher.core"]
     for flag, val in (("--settings", "/data/demo/dispatcher-settings.json"), ("--socket", "/data/demo/proxy.sock"), ("--repo", "o/n"),

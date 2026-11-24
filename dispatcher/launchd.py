@@ -32,8 +32,12 @@ def check_socket(sock):
     return str(sock)
 
 
+# launchd starts jobs with a bare PATH (/usr/bin:/bin:...): python3, gh, git and the container tool live elsewhere.
+JOB_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+
 def _env(cockpit_dir):
-    return {"PYTHONPATH": str(cockpit_dir)}
+    return {"PYTHONPATH": str(cockpit_dir), "PATH": JOB_PATH}
 
 
 def dispatcher_plist(project, repo, repo_dir, token_file, image=None, data_dir=DATA_DIR, cockpit_dir=COCKPIT_DIR, python="python3"):
