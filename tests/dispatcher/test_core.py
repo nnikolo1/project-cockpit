@@ -355,22 +355,22 @@ def finish(w, note, ahead=1):
 
 def test_done_with_commit_is_unmerged_and_branch_fetched(tmp_path):
     w = start_one(tmp_path)
-    finish(w, {"outcome": "done", "branch": "b", "summary": "s", "tokens": 5})
-    assert w.tasks.fetched == [("x-1", "/b/x-1", "b")]
+    finish(w, {"outcome": "done", "summary": "s", "tokens": 5})
+    assert w.tasks.fetched == [("x-1", "/b/x-1", "worker/x-1")]
     assert ("x-1", "unmerged") in w.tasks.states and core.load_state(w.state)["workers"] == {}
 
 
 def test_done_without_commit_fails(tmp_path):
     w = start_one(tmp_path)
-    finish(w, {"outcome": "done", "branch": "b", "summary": "s", "tokens": 5}, ahead=0)
+    finish(w, {"outcome": "done", "summary": "s", "tokens": 5}, ahead=0)
     assert w.plog.failures == [("x-1", "no commit in the bundle")]
 
 
 def test_gave_up_fails_even_with_a_commit_and_keeps_the_branch(tmp_path):
     w = start_one(tmp_path)
-    finish(w, {"outcome": "gave_up", "branch": "b", "summary": "s", "tokens": 5})
+    finish(w, {"outcome": "gave_up", "summary": "s", "tokens": 5})
     assert w.plog.failures == [("x-1", "the Worker gave up")]
-    assert ("x-1", "failed") in w.tasks.states and w.tasks.fetched == [("x-1", "/b/x-1", "b")]
+    assert ("x-1", "failed") in w.tasks.states and w.tasks.fetched == [("x-1", "/b/x-1", "worker/x-1")]
 
 
 def test_no_note_and_unusable_note_fail_with_reason(tmp_path):
@@ -388,7 +388,7 @@ def test_no_note_and_unusable_note_fail_with_reason(tmp_path):
 def test_fetch_failure_fails_the_task_not_the_firing(tmp_path):
     w = start_one(tmp_path)
     w.tasks.fail_fetch = True
-    finish(w, {"outcome": "done", "branch": "b", "summary": "s", "tokens": 5})
+    finish(w, {"outcome": "done", "summary": "s", "tokens": 5})
     assert w.plog.failures == [("x-1", "no commit in the bundle")]
 
 

@@ -167,7 +167,7 @@ class Dispatcher:
         if note is None:
             return self._fail(st, user, w, reason)
         try:
-            self.tasks.fetch_branch(tid, self.runtime.bundle_path(tid), note["branch"])
+            self.tasks.fetch_branch(tid, self.runtime.bundle_path(tid), f"worker/{tid}")
             ahead = self.probes.commits_ahead(w["repo"], tid)
         except Exception:  # a missing or broken bundle holds no commit; it must fail this task, not the firing
             log.exception("fetching the branch of %s failed", tid)

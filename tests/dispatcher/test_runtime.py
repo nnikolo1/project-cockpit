@@ -181,7 +181,7 @@ def outbox(tmp_path, r, repo, note=None, started=False):
     return base
 
 
-GOOD = {"outcome": "done", "summary": "s", "branch": "b", "tokens": 12}
+GOOD = {"outcome": "done", "summary": "s", "tokens": 12}
 
 
 def test_read_outbox(tmp_path, repo):
@@ -198,7 +198,7 @@ def test_read_outbox_good_and_started(tmp_path, repo):
 
 
 @pytest.mark.parametrize("note", [
-    "not json", "[]", {**GOOD, "outcome": "maybe"}, {**GOOD, "branch": ""}, {**GOOD, "tokens": "many"},
+    "not json", "[]", {**GOOD, "outcome": "maybe"}, {**GOOD, "summary": ""}, {**GOOD, "tokens": "many"},
     {**GOOD, "tokens": True}, {k: v for k, v in GOOD.items() if k != "summary"}])
 def test_read_outbox_unusable(tmp_path, repo, note):
     r, _ = make(tmp_path)

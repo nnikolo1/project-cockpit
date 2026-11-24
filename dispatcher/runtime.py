@@ -12,16 +12,17 @@ import signal
 import subprocess
 from dataclasses import dataclass
 
+from dispatcher import note as good_bye
+
 log = logging.getLogger("dispatcher.runtime")
 
 CALL_TIMEOUT = 60        # seconds for any single call to the container tool (3p)
 START_TIMEOUT = 300      # first start of the container can pull/unpack the image
 BUILD_TIMEOUT = 1800
 TASK_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-OUTCOMES = ("done", "gave_up")
 INSTRUCTION = (  # 4r
     "Read {inbox}/task.md. Work in your own clone ({clone}). Write {outbox}/started first. "
-    "At the end write {outbox}/goodbye.json (outcome, summary, branch, tokens) and {outbox}/result.bundle "
+    "At the end write {outbox}/goodbye.json (outcome, summary, tokens) and {outbox}/result.bundle "
     "(a git bundle of your branch).")
 # 4i: Claude Code's non-essential traffic off; skipWebFetchPreflight is set in the image's settings.json
 SWITCHES = {
@@ -205,10 +206,7 @@ class Runtime:
         try:
             with open(path) as f:
                 note = json.load(f)
-            ok = (isinstance(note, dict) and note.get("outcome") in OUTCOMES
-                  and isinstance(note.get("summary"), str) and isinstance(note.get("branch"), str)
-                  and note["branch"] and isinstance(note.get("tokens"), (int, dict))
-                  and not isinstance(note["tokens"], bool))
+            ok = not good_bye.validate(note)
         except (OSError, ValueError):
             ok = False
         if not ok:
