@@ -60,6 +60,7 @@
   {"path": "tests/test_questions.py", "module": "githubclient", "basis": "tests the open-questions parsing in logic.py"},
   {"path": "tests/test_modules.py", "module": "githubclient", "basis": "tests the module functions of logic.py"},
   {"path": "tests/test_modulepage.py", "module": "githubclient", "basis": "tests the module-page functions of logic.py; it also reads the content files in docs/modules/ and the Workflow ids in web/index.html"},
+  {"path": "tests/test_quality_bands_page.py", "module": "cockpitwebpage", "basis": "tests the colour bars of the Quality view in web/index.html"},
   {"path": "tests/test_projects.py", "module": "githubclient", "basis": "tests the --projects handling in cockpit.py"},
   {"path": "tests/test_workflow.py", "module": "cockpitwebpage", "basis": "guards the Workflow page (web/index.html) against going stale; tests follow the code"},
   {"path": "tests/test_usage.py", "module": "githubclient", "basis": "tests usage_report in logic.py and the usage endpoint in cockpit.py; tests follow the code"},
