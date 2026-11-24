@@ -3,7 +3,7 @@
 Status: Superseded by docs/specs/dispatcher-and-workers.md (2026-11-24)
 Earlier status: proposed (builder); the owner confirms or changes
 Date: 2026-11-20
-Modules: internal/bootfilling
+Modules: taskqueue
 Amends: [0017](0017-boot-filling-quota-history.md)
 
 ## Context

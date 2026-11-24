@@ -2,7 +2,7 @@
 
 Status: research report, persisted as received (read-only run by a background agent, 2026-11-24, code at main `4c42347`)
 Date: 2026-11-24
-Modules: internal/bootfilling
+Modules: taskqueue
 
 Owner decisions on this report (2026-11-24): abstract base classes are accepted, a plugin registry is not (yet); the tool-neutral rewording of the specification (section 4) is applied; refactorings R1, R3 and R6 are to be done; R2, R4 and R5 and everything else are left to the memo `docs/memos/2026.11.24-refactoring-for-agent-and-os-independence.md`.
 

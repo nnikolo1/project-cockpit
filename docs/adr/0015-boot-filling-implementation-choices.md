@@ -3,7 +3,7 @@
 Status: Superseded by docs/specs/dispatcher-and-workers.md (2026-11-24)
 Earlier status: proposed (builder, task PC-19); the owner confirms or changes
 Date: 2026-11-20
-Modules: internal/bootfilling
+Modules: taskqueue
 
 ## Decisions
 - One poll is one short process started by launchd every `poll_minutes` (default 10, owner 2026-11-20; `--once`); no resident loop. State lives in `state-<mode>.json`, so the dry run and the real mode never share fired-window or day counters.
