@@ -2,7 +2,7 @@
 
 Status: research report, persisted as received (read-only run by a background agent, 2026-11-24; written into the docs afterwards because the later analysis of agent and OS dependence could not find it)
 Date: 2026-11-24
-Modules: internal/bootfilling
+Modules: taskqueue
 
 Owner decisions on this report (2026-11-24): the spec texts 4c, 4e, 4f and Approach 1 were applied tool-neutral; the code change (alive, kill, relay start and the data folder into the runtime adapter) was made; the proxy sits in the Dispatcher sub-module and the relay in the Worker sub-module. Open: the remaining seam fixes are in `docs/memos/2026.11.24-refactoring-for-agent-and-os-independence.md`.
 

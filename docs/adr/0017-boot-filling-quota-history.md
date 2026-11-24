@@ -3,7 +3,7 @@
 Status: Superseded by docs/specs/dispatcher-and-workers.md (2026-11-24)
 Earlier status: proposed (builder); the owner confirms or changes
 Date: 2026-11-20
-Modules: internal/bootfilling
+Modules: taskqueue
 Amended by: [0018](0018-boot-filling-stale-quota-readings.md) (source `refreshed` only when the feed moved; stale and missing readings; estimates)
 
 ## Context

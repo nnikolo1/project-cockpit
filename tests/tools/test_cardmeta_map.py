@@ -65,7 +65,7 @@ def test_load_map_rejects_bad_maps(tmp_path):
 # ---- guard on the real map of this repository
 def test_real_map_every_assigned_path_exists_and_loads():
     mmap = mp.load_map(ROOT / "docs" / "cockpit-modules.json")
-    assert [m["id"] for m in mmap["modules"]] == ["core", "web", "docs", "internal", "internal/bootfilling", "internal/bootfilling/dispatcher", "internal/bootfilling/worker", "internal/metadata", "internal/devops", "internal/agents"]
+    assert [m["id"] for m in mmap["modules"]] == ["core", "web", "docs", "internal", "taskqueue", "taskqueue/dispatcher", "taskqueue/worker", "internal/metadata", "internal/devops", "internal/agents"]
     r = mp.check_map(mp.tracked_files(ROOT), mmap)
     assert r["stale_paths"] == []
 

@@ -3,7 +3,7 @@
 Status: Superseded by docs/specs/dispatcher-and-workers.md (2026-11-24)
 Earlier status: proposed (builder); the owner confirms or changes
 Date: 2026-11-20
-Modules: internal/bootfilling
+Modules: taskqueue
 
 ## Context
 Background workers may end in a dead end that needs a resolution from the owner or the personal assistant. That stays an accepted limitation, but the job, an orchestrator that may release tasks, should avoid releasing tasks likely to dead-end for lack of authority. It does not formulate tasks and does not resolve dead ends.
