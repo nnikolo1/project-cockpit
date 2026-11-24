@@ -218,12 +218,13 @@ function sortKey(t){return t.stage==='wip'?0:(t.stage==='released'?1:(t.stage===
 /* Data layer: everything comes from the backend (/api/state, /api/timeline, /api/code). Nothing is stored in the browser. */
 let PROJ=null,PROJS=[];  /* the selected project (name) and the configured ones; the choice is kept in localStorage `cockpit-project` */
 const NOMETA=()=>({footprint:{status:'missing'},churn:{status:'missing'},ambiguity:{status:'missing'}});
+let QL=null;  /* /api/queue: the local part of the Task Queue (Dispatcher state file, processing log, settings); never needs GitHub */
 let Q={questions:[],counts:{},projects:[]};  /* open questions of every project: /api/questions, not tied to the selected project */
 let USE=null,SET=null,CSET=null,D=null,CODE={wired:false,modules:{}},FEED=[],ACT=[],MODULES=[],RULES={configured:false},META=NOMETA();
 const SVGC={};
 const MODDOC={};  /* module page content (/api/moduledoc) by project:id */
 const UI={route:'cockpit',filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',tlType:'all',setSec:'dispatcher',rulesGroup:'all',qProj:'all',codeMod:'unassigned',codeTab:'quality',fit:{deps:true,erd:true,js:true,flow:false},toast:'',err:'',armed:null};
-const ST=()=>!!(D&&D.source.steering);
+const ST=()=>!!(D?D.source.steering:(SET&&SET.steering));
 const SIM=()=>!!(D&&D.source.simulate);
 const nd=(v,f)=>v==null?'<span class="muted">no data</span>':(f?f(v):v);
 const modShort=id=>{const m=MODULES.find(x=>x.id===id);return m?(m.parent?modShort(m.parent)+' / ':'')+m.short:(id==='all'?'All':id==='rules'?'Policies':'Unassigned');};
@@ -255,10 +256,11 @@ async function reload(fresh){
   const qp=loadQuestions(fresh);
   try{
     const errs=[],soft=(pr,d,w)=>pr.catch(e=>{errs.push(w+': '+e.message);return d;});  /* one failing part must not blank the others */
-    const [s,f,c,r,mt,se,cs,us]=await Promise.all([api('/api/state'+(fresh?'?fresh=1':'')),soft(api('/api/timeline'),{entries:[],activity:[]},'timeline'),soft(api('/api/code'),{wired:false,modules:{},diagrams:[]},'code'),api('/api/rules').catch(e=>({configured:false,error:e.message})),api('/api/cardmeta').catch(e=>null),api('/api/settings').catch(e=>null),api('/api/cardsettings').catch(e=>null),api('/api/usage').catch(e=>null)]);SET=se;CSET=cs;USE=us;
+    const [s,f,c,r,mt,se,cs,us,ql]=await Promise.all([soft(api('/api/state'+(fresh?'?fresh=1':'')),null,'state'),soft(api('/api/timeline'),{entries:[],activity:[]},'timeline'),soft(api('/api/code'),{wired:false,modules:{},diagrams:[]},'code'),api('/api/rules').catch(e=>({configured:false,error:e.message})),api('/api/cardmeta').catch(e=>null),api('/api/settings').catch(e=>null),api('/api/cardsettings').catch(e=>null),api('/api/usage').catch(e=>null),api('/api/queue').catch(e=>null)]);SET=se;CSET=cs;USE=us;QL=ql;  /* local parts first: they never wait for or depend on GitHub */
     if(mine!==PROJ)return;  /* the user switched project while this was loading: drop the answer */
     if(fresh)for(const k in MODDOC)delete MODDOC[k];
-    D=s;TODAY=D.today;MODULES=D.modules;FEED=f.entries;ACT=f.activity||[];CODE=c;RULES=r;META=mt||NOMETA();UI.err=errs.join('; ');
+    if(s){D=s;TODAY=D.today;MODULES=D.modules;FEED=f.entries;ACT=f.activity||[];}  /* a failed state keeps the copy the page already has */
+    CODE=c;RULES=r;META=mt||NOMETA();UI.err=errs.join('; ');
     if(!CODE.modules[UI.codeMod]&&!MODULES.some(m=>m.id===UI.codeMod&&m.parent)){const k=MODULES.find(m=>!m.virtual);UI.codeMod=CODE.modules[k&&k.id]?k.id:'unassigned';}
   }catch(e){if(mine!==PROJ)return;UI.err=String(e.message||e);}
   render();  /* the questions of the other projects may take longer: they fill in when they arrive */
@@ -423,6 +425,7 @@ function vCockpit(){
   return h+'</div></div>';
 }
 
+function ageMin(s){return s<90?s+' s':s<5400?Math.round(s/60)+' min':Math.round(s/3600)+' h';}
 function ageText(d){return d<1?'today':d===1?'1 day':d<60?d+' days':Math.round(d/30)+' months';}
 function vQuestions(){
   const f=UI.qProj,all=Q.questions,rows=f==='all'?all:all.filter(q=>q.project===f);
@@ -438,7 +441,7 @@ function vQuestions(){
    :(bad.length?'':'<p class="muted">No open questions.</p>');
   return h+'</div>';
 }
-function runCount(){return D?D.tasks.filter(t=>t.running).length:0;}
+function runCount(){return QL?QL.workers.length:(D?D.tasks.filter(t=>t.running).length:0);}
 /* ---------- module page: what a module is, how it works, how it relates to the rest; its tasks follow (vBacklog) ---------- */
 const modPage=()=>UI.mod!=='all'&&MODULES.some(m=>m.id===UI.mod&&!m.virtual);
 const modDocKey=id=>(PROJ||'')+':'+id;
@@ -475,16 +478,24 @@ function vModPage(id){
   h+=sec('Documents',d.docs==null?'<span class="muted">no data (no repository clone configured)</span>'
     :d.docs.length?'<ul style="margin:0;padding-left:18px">'+d.docs.map(x=>'<li><a href="'+esc(x.url)+'" target="_blank" rel="noopener">'+esc(x.title)+'</a> <span class="mono muted">'+esc(x.path)+'</span></li>').join('')+'</ul>':'<span class="muted">no document names this module in its Modules line</span>');
   return h+chgOne(id)+metaBlock(id)+'</div>';}
+function vQueueLocal(){
+  const nf=t=>D&&D.tasks.find(x=>x.key===t),L=QL;
+  if(!L)return '<div class="card"><h2>Being processed now</h2><span class="muted">The Dispatcher files could not be read.</span></div>';
+  const t0=x=>x?esc(x.replace('T',' ').slice(0,16)):'';
+  return '<div class="card"><h2>Being processed now</h2>'+(L.workers.length?L.workers.map(w=>{const t=nf(w.task);return '<div class="row" style="gap:10px;margin-top:8px"><b class="mono">'+esc(w.worker)+'</b><b class="mono">'+esc(w.task||'?')+'</b>'+(t?'<button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button>':'')+'<span class="muted">launched '+t0(w.launched)+(w.started?'':' · starting')+'</span></div>';}).join(''):'<p class="muted" style="margin:8px 0 0">No Worker is running now.</p>')
+   +'<p class="muted" style="font-size:12px;margin:10px 0 0">From the Dispatcher: '+(L.settings.values.enabled?'on':'off')+', '+L.settings.values.workers+' Worker'+(L.settings.values.workers===1?'':'s')+' at most, every '+L.settings.values.interval_minutes+' min (settings in the Settings tab).</p>'
+   +(L.log.length?'<details style="margin-top:8px"><summary class="muted">Processing log, newest '+L.log.length+'</summary><div class="mono" style="font-size:12px;margin-top:6px">'+L.log.map(r=>t0(r.time)+' '+esc(r.heartbeat?r.heartbeat:[r.task,r.state,r.reason,r.worker].filter(Boolean).join(' '))).join('<br>')+'</div></details>':'')+'</div>';
+}
 function vBacklog(){
-  const rq=ranked(D),nx=rq[0],run=D.tasks.filter(t=>t.running);
+  if(!D)return '<div class="page">'+vQueueLocal()+'<p class="muted">The task list needs GitHub and is not available yet.</p></div>';
+  const rq=ranked(D),nx=rq[0];
   const f=UI.filter;let ts=D.tasks.slice();
   if(UI.mod!=='all')ts=ts.filter(t=>UI.ex?t.module===UI.mod:inMod(t.module,UI.mod));
   if(f==='blocked')ts=ts.filter(t=>isBlocked(D,t));else if(f!=='all')ts=ts.filter(t=>t.stage===f);
   ts.sort((a,b)=>sortKey(a)-sortKey(b)||((a.prio||9)-(b.prio||9))||((eff(D,a).d||'9').localeCompare(eff(D,b).d||'9'))||a.key.localeCompare(b.key,undefined,{numeric:true}));
   const fl=['all','embryo','released','wip','unmerged','failed','merged','cancelled','blocked'];
   const mp=modPage();
-  let h='<div class="page">'+(mp?modFilter(UI.mod,'modf','all modules','all of {}',true)+vModPage(UI.mod)+'<h2>Tasks</h2>':'')+'<div class="card"><h2>Being processed now</h2>'+(run.length?run.map(t=>'<div class="row" style="gap:10px;margin-top:8px"><b class="mono">'+esc(t.key)+'</b><button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button><span class="muted">'+modCell(t.module)+'</span></div>').join(''):'<p class="muted" style="margin:8px 0 0">Nothing is running now.</p>')
-   +'<p style="margin:12px 0 0">'+(nx?'Next up: <button class="linkbtn" data-act="open" data-k="'+nx.key+'"><b>'+esc(nx.key)+'</b> '+esc(nx.title)+'</button> <span class="muted">'+(nx.prio?'P'+nx.prio:'no priority')+' · '+(eff(D,nx).d?'due '+eff(D,nx).d:'no deadline')+' · unblocks '+blocksCount(D,nx)+' · '+nx.cls+'</span> '+(SIM()?'<button class="btn small" data-act="take" data-k="'+nx.key+'">Simulate: Orchestrator takes it</button>':''):'<span class="muted">Nothing released and unblocked.</span>')+'</p>'
+  let h='<div class="page">'+(mp?modFilter(UI.mod,'modf','all modules','all of {}',true)+vModPage(UI.mod)+'<h2>Tasks</h2>':'')+''+vQueueLocal()+'<div class="card">'+'<p style="margin:12px 0 0">'+(nx?'Next up: <button class="linkbtn" data-act="open" data-k="'+nx.key+'"><b>'+esc(nx.key)+'</b> '+esc(nx.title)+'</button> <span class="muted">'+(nx.prio?'P'+nx.prio:'no priority')+' · '+(eff(D,nx).d?'due '+eff(D,nx).d:'no deadline')+' · unblocks '+blocksCount(D,nx)+' · '+nx.cls+'</span> '+(SIM()?'<button class="btn small" data-act="take" data-k="'+nx.key+'">Simulate: Orchestrator takes it</button>':''):'<span class="muted">Nothing released and unblocked.</span>')+'</p>'
    +'<p class="muted" style="font-size:12px;margin:6px 0 0">Ranking (column #): your priority, then deadline, then tasks that unblock the most, then must before nice.</p></div>'
    +'<div class="row spread"><div><h1>Task Queue</h1><span class="muted">'+ts.length+' of '+D.tasks.length+' tasks</span></div>'+(ST()?'<button class="btn primary" data-act="new">New task</button>':'')+'</div>';
   h+='<div class="filters" role="group" aria-label="Stage filter">'+fl.map(x=>'<button class="f" data-act="filter" data-v="'+x+'" aria-pressed="'+(f===x)+'">'+(STAGE_LABEL[x]||x)+'</button>').join('')+'</div>';
@@ -831,11 +842,14 @@ function render(){
   if(PROJS.length>1)h=h.replace('</span><nav','</span><select class="psel" id="psel" aria-label="Project">'+PROJS.map(p=>'<option value="'+esc(p.name)+'"'+(p.name===PROJ?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select><nav');
   if(D){const s=D.source;
     h+='<div class="proto"><span class="pill'+(s.steering?' on':'')+'">'+esc(s.repo)+', '+(s.steering?'steering on':'read-only')+'</span>'
-     +(s.steering&&s.user!==s.manager?'<span class="pill bad">acting as '+esc(s.user)+', not the Manager ('+esc(s.manager)+')</span>':'')
+     +(s.steering&&s.user&&s.user!==s.manager?'<span class="pill bad">acting as '+esc(s.user)+', not the Manager ('+esc(s.manager)+')</span>':'')
      +'<span class="muted">fetched '+esc(s.fetched)+'</span><button class="btn small" data-act="refresh">Refresh</button></div>';}
   h+='</div>';
-  if(UI.err)h+='<div class="page"><div class="card" style="border-color:var(--danger)"><b class="warnline">Could not load from GitHub.</b> <span class="muted">'+esc(UI.err)+'</span> <button class="btn small" data-act="refresh">Retry</button></div></div>';
-  else if(!D)h+='<div class="page"><span class="muted">Loading…</span></div>';
+  const LOCAL=R==='settings'||R==='usage'||R==='questions'||R==='backlog';  /* tabs with a local part: shown without the GitHub state */
+  if(D&&D.staleNote){const n=D.staleNote;h+='<div class="page" style="padding-bottom:0"><div class="card" style="border-color:var(--warn,var(--danger))"><b class="warnline">GitHub data is old.</b> <span class="muted">Showing the copy from '+esc(D.source.fetched)+' ('+ageMin(n.age_s)+' old). '+(n.rate_limited?'GitHub rate limit reached; ':'GitHub could not be read ('+esc(n.error)+'); ')+(n.until?'next try at '+esc(new Date(n.until*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}))+'. ':'next try within a minute. ')+'</span> <button class="btn small" data-act="refresh">Retry</button></div></div>';}
+  if(UI.err&&!D)h+='<div class="page" style="padding-bottom:0"><div class="card" style="border-color:var(--danger)"><b class="warnline">Could not load from GitHub, and no earlier copy exists.</b> <span class="muted">'+esc(UI.err)+'</span> <button class="btn small" data-act="refresh">Retry</button></div></div>';
+  else if(UI.err)h+='<div class="page" style="padding-bottom:0"><div class="card" style="border-color:var(--danger)"><span class="warnline">Some parts could not be loaded:</span> <span class="muted">'+esc(UI.err)+'</span></div></div>';
+  if(!D&&!LOCAL){if(!UI.err)h+='<div class="page"><span class="muted">Loading…</span></div>';}
   else{
   h+=R==='cockpit'?vCockpit():R==='backlog'?vBacklog():R==='questions'?vQuestions():R==='timeline'?vTimeline():R==='settings'?vSettings():R==='usage'?vUsage():vCode();
   if(UI.drawer){const t=UI.drawer.key&&byKey(D,UI.drawer.key);h+='<div class="drawer-bg" data-act="close"></div><div class="drawer" role="dialog" aria-modal="true" aria-label="Task">'+(UI.drawer.mode==='new'&&ST()?drawerNew(UI.drawer.prefill):(t?drawerTask(t):''))+'</div>';}

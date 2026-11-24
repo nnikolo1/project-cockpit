@@ -50,7 +50,7 @@
      "kind": "dir",
      "personal_data": false,
      "written_by": "githubclient",
-     "note": "disk copies of the state, rules, timeline, card data, code view and module-page inputs (JSON, the --cache-dir argument); shown at once after a restart and refreshed behind; holds GitHub issue data (titles, bodies, labels), no token; rebuildable"
+     "note": "disk copies of the state, rules, timeline, card data, code view and module-page inputs (JSON, the --cache-dir argument); shown at once after a restart (a copy younger than 15 minutes is not refreshed at all, so a restart costs no GitHub call) and refreshed behind; holds GitHub issue data (titles, bodies, labels), no token; rebuildable"
     }
    ],
    "logging": [
@@ -62,7 +62,7 @@
    ],
    "policy": {
     "backup": "code: the git repository and its remote; the settings files (dispatcher-settings.json, cockpit-settings.json) and projects.json are owner decisions, not rebuildable: they belong into the daily backup of local data once it exists; the token file is a secret and the log and the in-memory cache are rebuildable: not backed up on purpose; the cache folder is rebuildable and not backed up on purpose",
-    "retention": "in-memory cache: lives with the process, entries refresh after 60 to 3600 seconds (cached() in cockpit.py); token file: kept until the owner deletes it, no rotation in the code; cockpit.log: grows without limit (no rotation yet: open); settings files: kept; no database; cache folder: files are overwritten on each refresh and never pruned, safe to delete at any time"
+    "retention": "in-memory cache: lives with the process, entries refresh after 60 to 3600 seconds (the state after 300 s) (cached() in cockpit.py); token file: kept until the owner deletes it, no rotation in the code; cockpit.log: grows without limit (no rotation yet: open); settings files: kept; no database; cache folder: files are overwritten on each refresh and never pruned, safe to delete at any time"
    }
   },
   "cockpitwebpage": {

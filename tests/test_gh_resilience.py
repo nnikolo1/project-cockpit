@@ -1,0 +1,161 @@
+"""GitHub unavailable or rate limited: stale copies, no call while paused or over the cap, restarts without calls, a local Task Queue."""
+import json
+import os
+import sys
+import pathlib
+import time
+import types
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+import pytest
+import cockpit as C
+import logic as L
+
+P = dict(name="proj", repo="o/r", manager="m", project=None, git=None)
+
+
+def state(at):
+    return dict(today="2026-01-01", tasks=[], questions=[], modules=[], source=dict(fetchedAt=at, fetched="10:00:00"))
+
+
+@pytest.fixture(autouse=True)
+def clean(tmp_path, monkeypatch):
+    C._cache.clear()
+    C._failures.clear()
+    C._gh_calls.clear()
+    C._gh_pause.update(until=0.0)
+    monkeypatch.setattr(C, "CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(C, "DATA_DIR", tmp_path / "data")
+    yield
+    C._cache.clear()
+
+
+def fake_gh(monkeypatch, stderr, code=1):
+    calls = []
+
+    def run(cmd, **kw):
+        calls.append(cmd)
+        return types.SimpleNamespace(returncode=code, stdout="", stderr=stderr)
+    monkeypatch.setattr(C.subprocess, "run", run)
+    return calls
+
+
+def test_rate_limit_error_pauses_every_call_until_reset(monkeypatch):
+    calls = fake_gh(monkeypatch, "API rate limit already exceeded for user ID 1")
+    with pytest.raises(RuntimeError):
+        C.run_gh(["api", "x"])
+    with pytest.raises(C.GitHubUnavailable) as e:
+        C.run_gh(["api", "y"])
+    assert len(calls) == 1 and "no GitHub call until" in str(e.value)
+    assert e.value.until == pytest.approx(time.time() + C.RATE_LIMIT_PAUSE_S, abs=5)
+    C._gh_gate(now=e.value.until + 1)  # allowed again after the reset
+
+
+def test_reset_time_in_the_message_is_used():
+    now = 1_800_000_000
+    assert L.rate_limit_reset("limit; resets 1800000600", now) == 1_800_000_600
+    assert L.rate_limit_reset("no time here", now) is None
+    assert L.rate_limit_reset("resets 1700000000", now) is None  # in the past
+
+
+def test_other_errors_do_not_pause(monkeypatch):
+    calls = fake_gh(monkeypatch, "HTTP 502")
+    for _ in range(2):
+        with pytest.raises(RuntimeError):
+            C.run_gh(["api", "x"])
+    assert len(calls) == 2
+
+
+def test_hourly_calls_are_counted_and_capped(monkeypatch):
+    monkeypatch.setattr(C, "GH_CALLS_PER_HOUR", 3)
+    for i in range(3):
+        C._gh_gate(now=1000 + i)
+    with pytest.raises(C.GitHubUnavailable) as e:
+        C._gh_gate(now=1003)
+    assert e.value.until == 1000 + 3600
+    C._gh_gate(now=1000 + 3601)  # the oldest call left the window
+
+
+def test_failed_refresh_serves_the_old_copy_with_age_reason_and_reset(monkeypatch):
+    now = time.time()
+    monkeypatch.setattr(C, "build_state", lambda p: state(now - 600))
+    assert C.get_state_served(P)["staleNote"] is None
+
+    def down(p):
+        raise C.GitHubUnavailable("GitHub rate limit reached", now + 900)
+    monkeypatch.setattr(C, "build_state", down)
+    S = C.get_state_served(P, fresh=True)
+    assert S["source"]["fetchedAt"] == now - 600  # the old data, not an error
+    n = S["staleNote"]
+    assert n["rate_limited"] and n["until"] == now + 900 and 590 <= n["age_s"] <= 620 and "rate limit" in n["error"]
+    monkeypatch.setattr(C, "build_state", lambda p: state(time.time()))
+    assert C.get_state_served(P, fresh=True)["staleNote"] is None  # a success removes the note
+
+
+def test_no_copy_at_all_raises_the_error(monkeypatch):
+    def down(p):
+        raise C.GitHubUnavailable("paused until 12:00", 1)
+    monkeypatch.setattr(C, "build_state", down)
+    with pytest.raises(C.GitHubUnavailable):
+        C.get_state_served(P)
+
+
+def test_restart_with_a_recent_disk_copy_makes_no_call(monkeypatch):
+    now = time.time()
+    monkeypatch.setattr(C, "build_state", lambda p: state(now))
+    C.get_state(p=P)  # writes the disk copy
+    C._cache.clear()  # a new process
+
+    def boom(p):
+        raise AssertionError("GitHub was called")
+    monkeypatch.setattr(C, "build_state", boom)
+    assert C.get_state(p=P)["source"]["fetchedAt"] == now
+    assert not C._refreshing
+
+
+def test_restart_with_an_old_disk_copy_serves_it_and_refreshes_behind(monkeypatch):
+    now = time.time()
+    monkeypatch.setattr(C, "build_state", lambda p: state(now - 5000))
+    C.get_state(p=P)
+    f = next(C.CACHE_DIR.glob("*state*.json"))
+    old = now - C.DISK_FRESH_S - 60
+    os.utime(f, (old, old))
+    C._cache.clear()
+    monkeypatch.setattr(C, "build_state", lambda p: state(now))
+    assert C.get_state(p=P)["source"]["fetchedAt"] == now - 5000
+    deadline = time.time() + 3
+    while time.time() < deadline and C._cache[C.pk(P, "state")][1]["source"]["fetchedAt"] != now:
+        time.sleep(0.02)
+    assert C._cache[C.pk(P, "state")][1]["source"]["fetchedAt"] == now
+
+
+def test_refresh_button_after_a_restart_keeps_the_disk_copy_when_github_fails(monkeypatch):
+    monkeypatch.setattr(C, "build_state", lambda p: state(123))
+    C.get_state(p=P)
+    C._cache.clear()
+
+    def down(p):
+        raise RuntimeError("API rate limit already exceeded")
+    monkeypatch.setattr(C, "build_state", down)
+    S = C.get_state_served(P, fresh=True)
+    assert S["source"]["fetchedAt"] == 123 and S["staleNote"]["rate_limited"]
+
+
+def test_task_queue_local_part_is_served_while_github_fails(monkeypatch):
+    d = C.DATA_DIR / "proj"
+    (d / "processing").mkdir(parents=True)
+    (d / "dispatcher-state.json").write_text(json.dumps(dict(workers=dict(worker2=dict(task_id="T-7", launched="2026-01-01T10:00:00", started=True)))))
+    (d / "processing" / "processing.jsonl").write_text("\n".join([json.dumps(dict(time="2026-01-01T10:00:00", task="T-7", state="launched", worker="worker2")), "{broken"]))
+
+    def down(*a, **k):
+        raise AssertionError("the Task Queue's local part called GitHub")
+    monkeypatch.setattr(C, "run_gh", down)
+    monkeypatch.setattr(C, "build_state", down)
+    q = C.get_queue(P)
+    assert q["workers"] == [dict(worker="worker2", task="T-7", launched="2026-01-01T10:00:00", started=True)]
+    assert q["log"][0]["state"] == "launched" and "values" in q["settings"]
+
+
+def test_task_queue_local_part_without_files_is_empty():
+    q = L.queue_local(None, None)
+    assert q == dict(workers=[], log=[])
+    assert L.queue_local("{not json", "x")["workers"] == []
