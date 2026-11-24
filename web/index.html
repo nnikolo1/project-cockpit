@@ -114,6 +114,7 @@ tr.blocked{background:var(--danger-tint)}tr.blocked td:first-child{box-shadow:in
 .wf .box,.wf .dia{fill:var(--surface);stroke:var(--edge);stroke-width:1.3}
 .wf .m{fill:var(--accent-tint);stroke:var(--accent)}.wf .w{fill:var(--p3);stroke:var(--p3-ink)}
 .meta .note{margin:6px 0;padding:6px 10px;border-left:3px solid var(--edge);font-size:13px}.meta .note ul{margin:4px 0 0;padding-left:18px}
+.wfhl .wfe,.wfhl path.ar{opacity:.28}.wfhl .wfe.hl{opacity:1}.wfhl .wfe.hl .box,.wfhl .wfe.hl .dia,.wfhl .wfe.hl .st{stroke:var(--accent);stroke-width:3.5}
 .wf .st{fill:var(--line);stroke:none}.wf .note{fill:none;stroke:var(--edge);stroke-dasharray:4 3}
 .wf path.ar{fill:none;stroke:var(--edge);stroke-width:1.5}.wf marker path{fill:var(--edge);stroke:none}
 .page .page{padding-top:0}
@@ -217,6 +218,7 @@ const NOMETA=()=>({footprint:{status:'missing'},churn:{status:'missing'},ambigui
 let Q={questions:[],counts:{},projects:[]};  /* open questions of every project: /api/questions, not tied to the selected project */
 let USE=null,SET=null,CSET=null,D=null,CODE={wired:false,modules:{}},FEED=[],ACT=[],MODULES=[],RULES={configured:false},META=NOMETA();
 const SVGC={};
+const MODDOC={};  /* module page content (/api/moduledoc) by project:id */
 const UI={route:'cockpit',filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',tlType:'all',setSec:'dispatcher',rulesGroup:'all',qProj:'all',codeMod:'unassigned',codeTab:'quality',fit:{deps:true,erd:true,js:true,flow:false},toast:'',err:'',armed:null};
 const ST=()=>!!(D&&D.source.steering);
 const SIM=()=>!!(D&&D.source.simulate);
@@ -251,6 +253,7 @@ async function reload(fresh){
   try{
     const [s,f,c,r,mt,se,cs,us]=await Promise.all([api('/api/state'+(fresh?'?fresh=1':'')),api('/api/timeline'),api('/api/code'),api('/api/rules').catch(e=>({configured:false,error:e.message})),api('/api/cardmeta').catch(e=>null),api('/api/settings').catch(e=>null),api('/api/cardsettings').catch(e=>null),api('/api/usage').catch(e=>null)]);SET=se;CSET=cs;USE=us;
     if(mine!==PROJ)return;  /* the user switched project while this was loading: drop the answer */
+    if(fresh)for(const k in MODDOC)delete MODDOC[k];
     D=s;TODAY=D.today;MODULES=D.modules;FEED=f.entries;ACT=f.activity||[];CODE=c;RULES=r;META=mt||NOMETA();UI.err='';
     if(!CODE.modules[UI.codeMod]&&!MODULES.some(m=>m.id===UI.codeMod&&m.parent)){const k=MODULES.find(m=>!m.virtual);UI.codeMod=CODE.modules[k&&k.id]?k.id:'unassigned';}
   }catch(e){if(mine!==PROJ)return;UI.err=String(e.message||e);}
@@ -261,7 +264,7 @@ async function pickProject(name){
   if(name===PROJ)return;
   PROJ=name;try{localStorage.setItem('cockpit-project',name);}catch(e){}
   D=null;FEED=[];ACT=[];MODULES=[];CODE={wired:false,modules:{}};RULES={configured:false};META=NOMETA();REV=null;  /* page caches of the old project */
-  for(const k in SVGC)delete SVGC[k];
+  for(const k in SVGC)delete SVGC[k];for(const k in MODDOC)delete MODDOC[k];
   Object.assign(UI,{filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',rulesGroup:'all',codeMod:'unassigned',err:''});
   render();await reload(false);
 }
@@ -429,6 +432,42 @@ function vQuestions(){
   return h+'</div>';
 }
 function runCount(){return D?D.tasks.filter(t=>t.running).length:0;}
+/* ---------- module page: what a module is, how it works, how it relates to the rest; its tasks follow (vBacklog) ---------- */
+const modPage=()=>UI.mod!=='all'&&MODULES.some(m=>m.id===UI.mod&&!m.virtual);
+const modDocKey=id=>(PROJ||'')+':'+id;
+async function loadModDoc(id){
+  const k=modDocKey(id);if(MODDOC[k])return;
+  MODDOC[k]={loading:true};
+  try{MODDOC[k]=await api('/api/moduledoc?id='+encodeURIComponent(id));}catch(e){MODDOC[k]={error:String(e.message||e)};}
+  if(UI.route==='backlog'&&UI.mod===id)render();
+}
+function wfHl(ids){return wfSvg().replace(/<g class="wfe" id="(wf-[a-z0-9-]+)">/g,(m,i)=>'<g class="wfe'+(ids.includes(i)?' hl':'')+'" id="'+i+'">');}
+function chgOne(id){
+  const c=META.churn;if(c.status!=='ok')return '';
+  const p=(c.view.changes||[]).find(x=>x.id===id);
+  return '<div style="display:flex;flex-direction:column;gap:6px"><div class="row spread"><span class="label">Weekly change, 52 weeks</span>'+asOf(c)+'</div>'
+   +'<div class="legend" role="note"><span><i class="chip" style="background:var(--accent)">&nbsp;</i> source</span><span><i class="chip" style="background:var(--s-embryo)">&nbsp;</i> tests</span><span><i class="chip" style="background:var(--muted)">&nbsp;</i> documents</span></div>'
+   +'<div class="chg"><div class="pn">'+(p&&p.weeks?chgBars(p)+'<span class="muted" style="font-size:12px">'+p.churn52+' lines in 52 weeks · '+p.commits90+' commits in 90 days</span>':'<span class="muted">no weekly data yet</span>')+'</div></div></div>';}
+function relList(title,rows){
+  return '<div><b>'+title+'</b>'+(rows.length?'<ul style="margin:4px 0 0;padding-left:18px">'+rows.map(r=>{const m=MODULES.find(x=>x.id===r.module);
+    return '<li>'+(m?'<button class="linkbtn" style="color:var(--accent)" data-act="mod" data-m="'+esc(r.module)+'">'+esc(modShort(r.module))+'</button>':esc(r.module))
+     +' <span class="muted">· '+r.count+(r.count===1?' import':' imports')+'</span><div class="mono muted" style="overflow-wrap:anywhere">'+r.examples.map(esc).join('<br>')+'</div></li>';}).join('')+'</ul>':' <span class="muted">none found</span>')+'</div>';}
+function vModPage(id){
+  const m=MODULES.find(x=>x.id===id),d=MODDOC[modDocKey(id)],sec=(t,x)=>'<div style="display:flex;flex-direction:column;gap:6px"><span class="label">'+t+'</span>'+x+'</div>';
+  let h='<div class="card" style="display:flex;flex-direction:column;gap:16px"><div><h1>'+esc(m.name)+'</h1><span class="muted">'+esc(modShort(id))+' · </span><span class="mono">'+esc(id)+'</span></div>';
+  if(!d||d.loading)return h+'<span class="muted">Loading…</span></div>';
+  if(d.error)return h+'<span class="warnline">could not load the module page: '+esc(d.error)+'</span>'+(m.desc?'<p style="margin:0">'+esc(m.desc)+'</p>':'')+'</div>';
+  const ps=d.paragraphs||[];
+  h+=ps.length?'<div style="max-width:75ch;display:flex;flex-direction:column;gap:8px"><p style="margin:0;font-size:15px"><b>'+esc(ps[0])+'</b></p>'+ps.slice(1).map(x=>'<p style="margin:0">'+esc(x)+'</p>').join('')+'</div>':'<span class="muted">No description yet.</span>';
+  if(d.hl&&d.hl.length)h+=sec('Workflow','<span class="muted" style="font-size:13px">the part of the Workflow that this module owns</span><div class="dg fit wfhl">'+wfHl(d.hl)+'</div>');
+  if(d.svg)h+=sec('Diagram','<div class="dg fit">'+d.svg+'</div>');
+  const r=d.relations;
+  h+=sec('How it relates to the rest',r?relList('Uses',r.uses)+relList('Used by',r.used_by)+'<span class="muted" style="font-size:13px">Python imports between files of different modules, computed from the code; imports inside the module are not shown.'+(d.hl&&d.hl.length?' The process view is the highlighted Workflow above.':'')+'</span>':'<span class="muted">no repository clone configured, so imports cannot be computed</span>');
+  h+=sec('Key files',d.files==null?'<span class="muted">no data (the project has no module map or no repository clone configured)</span>'
+    :d.files.length?'<ul style="margin:0;padding-left:18px">'+d.files.map(g=>'<li><span class="mono">'+esc(g.dir)+'/</span> <span class="muted">'+g.count+(g.count===1?' file':' files')+': '+esc(g.names.join(', '))+(g.count>g.names.length?' and '+(g.count-g.names.length)+' more':'')+'</span></li>').join('')+'</ul>':'<span class="muted">the module map assigns no files to it</span>');
+  h+=sec('Documents',d.docs==null?'<span class="muted">no data (no repository clone configured)</span>'
+    :d.docs.length?'<ul style="margin:0;padding-left:18px">'+d.docs.map(x=>'<li><a href="'+esc(x.url)+'" target="_blank" rel="noopener">'+esc(x.title)+'</a> <span class="mono muted">'+esc(x.path)+'</span></li>').join('')+'</ul>':'<span class="muted">no document names this module in its Modules line</span>');
+  return h+chgOne(id)+metaBlock(id)+'</div>';}
 function vBacklog(){
   const rq=ranked(D),nx=rq[0],run=D.tasks.filter(t=>t.running);
   const f=UI.filter;let ts=D.tasks.slice();
@@ -436,12 +475,13 @@ function vBacklog(){
   if(f==='blocked')ts=ts.filter(t=>isBlocked(D,t));else if(f!=='all')ts=ts.filter(t=>t.stage===f);
   ts.sort((a,b)=>sortKey(a)-sortKey(b)||((a.prio||9)-(b.prio||9))||((eff(D,a).d||'9').localeCompare(eff(D,b).d||'9'))||a.key.localeCompare(b.key,undefined,{numeric:true}));
   const fl=['all','embryo','released','wip','unmerged','failed','merged','cancelled','blocked'];
-  let h='<div class="page"><div class="card"><h2>Being processed now</h2>'+(run.length?run.map(t=>'<div class="row" style="gap:10px;margin-top:8px"><b class="mono">'+esc(t.key)+'</b><button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button><span class="muted">'+modCell(t.module)+'</span></div>').join(''):'<p class="muted" style="margin:8px 0 0">Nothing is running now.</p>')
+  const mp=modPage();
+  let h='<div class="page">'+(mp?modFilter(UI.mod,'modf','all modules','all of {}',true)+vModPage(UI.mod)+'<h2>Tasks</h2>':'')+'<div class="card"><h2>Being processed now</h2>'+(run.length?run.map(t=>'<div class="row" style="gap:10px;margin-top:8px"><b class="mono">'+esc(t.key)+'</b><button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button><span class="muted">'+modCell(t.module)+'</span></div>').join(''):'<p class="muted" style="margin:8px 0 0">Nothing is running now.</p>')
    +'<p style="margin:12px 0 0">'+(nx?'Next up: <button class="linkbtn" data-act="open" data-k="'+nx.key+'"><b>'+esc(nx.key)+'</b> '+esc(nx.title)+'</button> <span class="muted">'+(nx.prio?'P'+nx.prio:'no priority')+' · '+(eff(D,nx).d?'due '+eff(D,nx).d:'no deadline')+' · unblocks '+blocksCount(D,nx)+' · '+nx.cls+'</span> '+(SIM()?'<button class="btn small" data-act="take" data-k="'+nx.key+'">Simulate: Orchestrator takes it</button>':''):'<span class="muted">Nothing released and unblocked.</span>')+'</p>'
    +'<p class="muted" style="font-size:12px;margin:6px 0 0">Ranking (column #): your priority, then deadline, then tasks that unblock the most, then must before nice.</p></div>'
    +'<div class="row spread"><div><h1>Task Queue</h1><span class="muted">'+ts.length+' of '+D.tasks.length+' tasks</span></div>'+(ST()?'<button class="btn primary" data-act="new">New task</button>':'')+'</div>';
   h+='<div class="filters" role="group" aria-label="Stage filter">'+fl.map(x=>'<button class="f" data-act="filter" data-v="'+x+'" aria-pressed="'+(f===x)+'">'+(STAGE_LABEL[x]||x)+'</button>').join('')+'</div>';
-  h+=modFilter(UI.mod,'modf','all modules','all of {}',true);
+  if(!mp)h+=modFilter(UI.mod,'modf','all modules','all of {}',true);
   h+='<div class="row muted" style="font-size:13px;gap:8px">Priority <span class="chip p1">P1</span><span class="chip p2">P2</span><span class="chip p3">P3</span><span class="chip p0">none yet</span> &nbsp; Blockers <span class="chip blk">blocked by</span><span class="chip blocks">blocks n</span> &nbsp; <span class="inh">↳ italic = inherited deadline</span></div>';
   h+='<div class="tblbox"><table><thead><tr><th title="Rank in the Orchestrator queue">#</th><th>ID</th><th>Title</th><th>Module</th><th>Priority</th><th>Class</th><th>Deadline</th><th>Blockers</th><th>Stage</th>'+(ST()?'<th class="act-col">Submit</th><th class="act-col">Cancel</th>':'')+'</tr></thead><tbody>';
   ts.forEach(t=>{h+='<tr class="'+(isBlocked(D,t)?'blocked':'')+'"><td class="muted">'+(rq.indexOf(t)>=0?rq.indexOf(t)+1:'')+'</td><td class="mono">'+esc(t.key)+'</td><td><button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button> '+findingChip(t)+'</td><td>'+modCell(t.module)+'</td><td>'+prioChip(t)+'</td><td class="muted">'+t.cls+'</td><td>'+dlHtml(t)+'</td><td>'+blockHtml(t)+'</td><td>'+stageHtml(t)+'</td>'+(ST()?'<td class="act-col">'+(t.stage==='embryo'?armBtn('submit',t):'<span class="muted">—</span>')+'</td><td class="act-col">'+(isOpen(t)?armBtn('cancel',t):'<span class="muted">—</span>')+'</td>':'')+'</tr>';});
@@ -609,6 +649,7 @@ function vDiagram(k){
    +'<div class="dg'+(fit?' fit':'')+'" id="dgbox" data-k="'+k+'">'+(SVGC[k]||'<span class="muted">Loading…</span>')+'</div><p class="muted" style="font-size:13px;margin:0">Snapshot '+esc(CODE.commit)+', '+esc((CODE.generated_at||'').slice(0,10))+'. Regenerate the snapshot to refresh.</p>';
 }
 async function hydrate(){
+  if(UI.route==='backlog'&&modPage())loadModDoc(UI.mod);
   const b=document.getElementById('dgbox');if(!b||SVGC[b.dataset.k])return;
   const k=b.dataset.k;
   const mine=PROJ;
@@ -645,24 +686,25 @@ function wfSvg(){
   const box=(cx,cy,w,h,ls,c)=>'<rect class="box '+(c||'')+'" x="'+(cx-w/2)+'" y="'+(cy-h/2)+'" width="'+w+'" height="'+h+'" rx="8"/>'+L(cx,cy,ls);
   const pill=(cx,cy,w,t,k)=>'<rect class="st" x="'+(cx-w/2)+'" y="'+(cy-16)+'" width="'+w+'" height="32" rx="16"'+(k?' style="stroke:var(--s-'+k+');stroke-width:2.5"':'')+'/>'+L(cx,cy,[t]);
   const dia=(cx,cy,w,h,ls)=>'<polygon class="dia" points="'+cx+','+(cy-h/2)+' '+(cx+w/2)+','+cy+' '+cx+','+(cy+h/2)+' '+(cx-w/2)+','+cy+'"/>'+L(cx,cy,ls);
+  const G=(id,x)=>'<g class="wfe" id="wf-'+id+'">'+x+'</g>';  /* stable ids: a module page names them in its .hl file */
   const ar=d=>'<path class="ar" d="'+d+'" marker-end="url(#wa)"/>';
   const lab=(x,y,t)=>'<text class="sm" x="'+x+'" y="'+y+'">'+esc(t)+'</text>';
   const note=(cx,cy,w,ls)=>'<rect class="note" x="'+(cx-w/2)+'" y="'+(cy-ls.length*8-8)+'" width="'+w+'" height="'+(ls.length*16+16)+'" rx="8"/>'+L(cx,cy,ls,'sm');
   let s='<svg class="wf" viewBox="0 0 1100 1520" role="img" aria-label="Task workflow flowchart in four lanes: Owner, Interactive Session Agent, Dispatcher, Worker"><defs><marker id="wa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z"/></marker></defs>';
   [[10,'Owner',140],[280,'Interactive Session Agent',410],[550,'Dispatcher',680],[820,'Worker (AI agent)',950]].forEach(l=>{s+='<rect class="lane" x="'+l[0]+'" y="40" width="260" height="1470" rx="10"/><text class="lh" x="'+l[2]+'" y="28" text-anchor="middle">'+l[1]+'</text>';});
-  s+=box(140,86,200,46,['Owner files a task'],'m')+box(410,86,230,46,['Interactive Session Agent','files a task'])+box(140,160,230,46,['A scheduled job files','a task'])
-   +pill(140,240,120,'Embryo','embryo')+dia(140,322,170,76,['Released?'])+pill(140,414,120,'Released','released')
+  s+=G('owner-files',box(140,86,200,46,['Owner files a task'],'m'))+G('agent-files',box(410,86,230,46,['Interactive Session Agent','files a task']))+G('job-files',box(140,160,230,46,['A scheduled job files','a task']))
+   +G('embryo',pill(140,240,120,'Embryo','embryo'))+G('released-dec',dia(140,322,170,76,['Released?']))+G('released',pill(140,414,120,'Released','released'))
    +note(410,322,250,['Counts as released:','Owner’s task: at once','Interactive agent’s task: after','10 days','Scheduled job’s task: the Owner','releases it','Questions and decisions: never','automatically'])
-   +box(140,600,230,56,['Cancel at any time','before merged'],'m')+pill(140,690,120,'Cancelled')
-   +box(680,414,230,56,['Fires every 2 minutes','(a setting; can be disabled)'])+dia(680,510,170,80,['Disk below','10 GiB?'])
-   +box(680,600,230,56,['Start the proxy and the','container if not running'])+dia(680,700,190,80,['Egress check:','outside reachable?'])
-   +box(680,800,240,70,['Choose the task: priority,','deadline, what it unblocks,','must before nice'])+box(680,900,240,56,['Hand over the main bundle','and the task; start a Worker'])
-   +pill(680,990,120,'WIP','wip')+box(680,1100,240,56,['Each firing: kill a runaway','(40 min, 20 min idle, no start)'])
-   +dia(680,1250,230,100,['Bundle holds a commit','and the Worker did','not give up?'])+pill(410,1250,130,'Unmerged','unmerged')
-   +box(410,1340,240,64,['Mop-up: the Interactive Session','Agent merges and sets merged.','Out of scope for now'])+pill(410,1430,120,'Merged','merged')
-   +pill(680,1350,120,'Failed','failed')+note(680,1450,250,['Failed because of: no start,','over 40 minutes, no activity,','no note, an unusable note,','no commit, or the Worker gave up'])
-   +box(950,900,220,56,['Work in its own clone','(unprivileged user)'],'w')+box(950,990,220,44,['Write outbox/started'],'w')+box(950,1070,220,44,['Commit on worker/<task-id>'],'w')
-   +box(950,1150,220,56,['Write result.bundle and','goodbye.json'],'w')+dia(950,1250,230,100,['End check','passes?']);
+   +G('cancel',box(140,600,230,56,['Cancel at any time','before merged'],'m'))+G('cancelled',pill(140,690,120,'Cancelled'))
+   +G('fire',box(680,414,230,56,['Fires every 2 minutes','(a setting; can be disabled)']))+G('disk',dia(680,510,170,80,['Disk below','10 GiB?']))
+   +G('proxy',box(680,600,230,56,['Start the proxy and the','container if not running']))+G('egress',dia(680,700,190,80,['Egress check:','outside reachable?']))
+   +G('choose',box(680,800,240,70,['Choose the task: priority,','deadline, what it unblocks,','must before nice']))+G('handover',box(680,900,240,56,['Hand over the main bundle','and the task; start a Worker']))
+   +G('wip',pill(680,990,120,'WIP','wip'))+G('runaway',box(680,1100,240,56,['Each firing: kill a runaway','(40 min, 20 min idle, no start)']))
+   +G('bundle-dec',dia(680,1250,230,100,['Bundle holds a commit','and the Worker did','not give up?']))+G('unmerged',pill(410,1250,130,'Unmerged','unmerged'))
+   +G('mopup',box(410,1340,240,64,['Mop-up: the Interactive Session','Agent merges and sets merged.','Out of scope for now']))+G('merged',pill(410,1430,120,'Merged','merged'))
+   +G('failed',pill(680,1350,120,'Failed','failed'))+note(680,1450,250,['Failed because of: no start,','over 40 minutes, no activity,','no note, an unusable note,','no commit, or the Worker gave up'])
+   +G('clone',box(950,900,220,56,['Work in its own clone','(unprivileged user)'],'w'))+G('started',box(950,990,220,44,['Write outbox/started'],'w'))+G('commit',box(950,1070,220,44,['Commit on worker/<task-id>'],'w'))
+   +G('bundle-note',box(950,1150,220,56,['Write result.bundle and','goodbye.json'],'w'))+G('endcheck',dia(950,1250,230,100,['End check','passes?']));
   s+=ar('M40 86H25V240H80')+ar('M140 183V224')+ar('M410 109V240H200')+ar('M140 256V284')+ar('M140 360V398')+lab(150,382,'yes')
    +ar('M225 322H255V240H200')+lab(226,314,'no: wait')
    +ar('M200 414H565')+ar('M140 628V674')

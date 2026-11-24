@@ -224,6 +224,164 @@ def module_deadline(deadlines, mid):
     return next(((deadlines[i], i) for i in chain(mid) if deadlines.get(i)), (None, None))
 
 
+# ---------- module pages ----------
+MODID = re.compile(r"[a-z0-9-]+(/[a-z0-9-]+)*")
+HLID = re.compile(r"wf-[a-z0-9-]+")
+SVG_TAGS = {"svg", "defs", "marker", "path", "rect", "polygon", "text", "tspan", "g"}  # what the drawing helpers produce
+SVG_ATTRS = {"class", "x", "y", "width", "height", "rx", "d", "points", "viewBox", "role", "aria-label", "id", "refX", "refY",
+             "markerWidth", "markerHeight", "orient", "text-anchor", "dy", "marker-end", "marker-start", "style", "preserveAspectRatio"}
+SVG_MAX = 200_000
+_SAFE_VALUE = re.compile(r"[A-Za-z0-9 .,#:;()%_/<>'\u2019-]*")
+_SAFE_STYLE = re.compile(r"(?:[a-z-]+:[A-Za-z0-9 .,#()-]+;?)+")
+
+
+def module_stem(mid):
+    """Module id -> the base name of its content files in docs/modules/ ('a/b' -> 'a-b'); None for an id that is not a plain slash path."""
+    return mid.replace("/", "-") if isinstance(mid, str) and MODID.fullmatch(mid) else None
+
+
+def module_paragraphs(text, desc=None):
+    """The module's .txt (paragraphs separated by blank lines; the first is the short description), else its map `desc`, else []."""
+    paras = [re.sub(r"\s*\n\s*", " ", p.strip()) for p in re.split(r"\n\s*\n", text or "") if p.strip()]
+    return paras or ([desc] if desc else [])
+
+
+def hl_ids(text):
+    """The .hl file: one Workflow element id per line (blank lines and lines starting with # are skipped; anything else not an id is dropped)."""
+    return [l for l in (x.strip() for x in (text or "").splitlines()) if HLID.fullmatch(l)]
+
+
+def sanitise_svg(text):
+    """A static drawing -> the same drawing rebuilt from allowed elements and attributes only, or None when it is unusable.
+    No scripts, no external references (the only url() allowed is a marker in the same file), no DOCTYPE/entities."""
+    import xml.etree.ElementTree as ET
+    from xml.sax.saxutils import escape, quoteattr
+    if not isinstance(text, str) or len(text) > SVG_MAX or re.search(r"<!(DOCTYPE|ENTITY)", text, re.I):
+        return None
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return None
+    local = lambda t: t.rpartition("}")[2]
+    if local(root.tag) != "svg":
+        return None
+
+    def attr_ok(k, v):
+        if k not in SVG_ATTRS:
+            return False
+        if k in ("marker-end", "marker-start"):
+            return re.fullmatch(r"url\(#[A-Za-z0-9_-]+\)", v) is not None
+        if k == "style":
+            return _SAFE_STYLE.fullmatch(v) is not None and "url" not in v
+        return _SAFE_VALUE.fullmatch(v) is not None and "javascript" not in v.lower()
+
+    def out(e):
+        tag = local(e.tag)
+        if tag not in SVG_TAGS:
+            return ""
+        at = "".join(f" {k}={quoteattr(v)}" for k, v in ((local(k), v) for k, v in e.attrib.items()) if attr_ok(k, v))
+        if tag == "svg":
+            at = re.sub(r' class="[^"]*"', "", at) + ' class="wf"'
+        body = escape(e.text or "") if tag in ("text", "tspan") else ""
+        for c in e:
+            body += out(c) + (escape(c.tail or "") if tag in ("text", "tspan") else "")
+        return f"<{tag}{at}>{body}</{tag}>"
+
+    return out(root)
+
+
+def group_files(paths, limit=8):
+    """File paths -> [{dir, count, names}] one entry per folder (the repository root is '.'), sorted by folder; names are the first `limit`."""
+    g = {}
+    for p in sorted(paths):
+        d, _, n = p.rpartition("/")
+        g.setdefault(d or ".", []).append(n)
+    return [dict(dir=d, count=len(n), names=n[:limit]) for d, n in sorted(g.items())]
+
+
+def module_files(paths, assign, mid):
+    """The tracked files the module map assigns to the module or one of its sub-modules."""
+    return [p for p in paths if (m := map_path(p, assign)) == mid or m.startswith(mid + "/")]
+
+
+def doc_modules(text):
+    """The ids named by the `Modules:` line near the top of a document ([] when there is none)."""
+    for line in (text or "").splitlines()[:15]:
+        m = re.match(r"\s*\**Modules\**:\s*(.*)$", line, re.I)
+        if m:
+            return [x.strip().strip("`") for x in m.group(1).split(",") if x.strip()]
+    return []
+
+
+def doc_title(text, fallback=""):
+    for line in (text or "").splitlines()[:30]:
+        if line.startswith("# "):
+            return line[2:].strip()
+    return fallback
+
+
+def module_docs(heads, mid, base):
+    """{path: first text of the file} -> [{path, title, url}] of the documents whose Modules line names the module or a sub-module."""
+    return [dict(path=p, title=doc_title(t, p.rpartition("/")[2]), url=f"{base}/blob/main/{p}")
+            for p, t in sorted(heads.items()) if any(x == mid or x.startswith(mid + "/") for x in doc_modules(t))]
+
+
+def _py_targets(path, node):
+    """One entry per imported name: the dotted module paths (lists of parts) it may refer to, most specific first; the first that is a file wins."""
+    import ast
+    out = []
+    if isinstance(node, ast.Import):
+        out += [[a.name.split(".")[:n] for n in range(len(a.name.split(".")), 0, -1)] for a in node.names]
+    elif isinstance(node, ast.ImportFrom):
+        base = node.module.split(".") if node.module else []
+        if node.level:
+            pkg = path.split("/")[:-1]
+            pkg = pkg[:len(pkg) - (node.level - 1)] if node.level > 1 else pkg
+            base = pkg + base
+        out += [[base + [a.name], base] for a in node.names]
+    return out
+
+
+def import_edges(sources, assign):
+    """{path: Python source} -> [{src, dst, src_mod, dst_mod}]: one entry per (importing file, imported file) pair between two files of the
+    given set that the module map assigns to different modules. Files that do not parse are skipped. Standard-library and third-party imports are not files here."""
+    import ast
+    known = set(sources)
+    seen, out = set(), []
+    for path, text in sorted(sources.items()):
+        try:
+            tree = ast.parse(text)
+        except (SyntaxError, ValueError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Import, ast.ImportFrom)):
+                continue
+            for options in _py_targets(path, node):
+                dst = next((f for parts in options if parts for b in ["/".join(parts)] for f in (b + ".py", b + "/__init__.py") if f in known), None)
+                if not dst or dst == path or (path, dst) in seen:
+                    continue
+                seen.add((path, dst))
+                a, b = map_path(path, assign), map_path(dst, assign)
+                if a != b:
+                    out.append(dict(src=path, dst=dst, src_mod=a, dst_mod=b))
+    return out
+
+
+def module_relations(edges, mid, examples=3):
+    """-> {uses: [...], used_by: [...]}: the other modules this module's files import, and those that import its files. A module counts with its
+    sub-modules (imports inside that tree are not shown), so a sub-module shows its parent's and its siblings' links. One entry per neighbour:
+    {module, count (file pairs), examples (up to `examples` 'importer -> imported' pairs)}, most links first."""
+    inside = lambda m: m == mid or m.startswith(mid + "/")
+    res = {"uses": {}, "used_by": {}}
+    for e in edges:
+        a, b = inside(e["src_mod"]), inside(e["dst_mod"])
+        if a == b:
+            continue
+        key, other = ("uses", e["dst_mod"]) if a else ("used_by", e["src_mod"])
+        res[key].setdefault(other, []).append(f"{e['src']} -> {e['dst']}")
+    return {k: [dict(module=m, count=len(v), examples=v[:examples]) for m, v in sorted(d.items(), key=lambda kv: (-len(kv[1]), kv[0]))] for k, d in res.items()}
+
+
 # ---------- derivation ----------
 def _prefixed(labels, p):
     return next((l[len(p):] for l in labels if l.startswith(p)), "")

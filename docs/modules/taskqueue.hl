@@ -1,0 +1,16 @@
+wf-fire
+wf-disk
+wf-proxy
+wf-egress
+wf-choose
+wf-handover
+wf-wip
+wf-runaway
+wf-bundle-dec
+wf-unmerged
+wf-failed
+wf-clone
+wf-started
+wf-commit
+wf-bundle-note
+wf-endcheck
