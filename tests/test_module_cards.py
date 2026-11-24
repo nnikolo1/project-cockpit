@@ -17,5 +17,13 @@ def test_no_documents_or_open_gaps_line_on_module_cards():
     assert "Code files / lines" in src  # the other card facts are still there
 
 
+def test_snapshot_lines_are_hidden_without_a_configured_snapshot_and_show_its_age_otherwise():
+    """No snapshot configured: the card shows no snapshot lines (not "no data"); configured: the lines and the snapshot's age."""
+    src = cards_source()
+    assert src.count("Code files / lines") == 1 and "(CODE.configured?'<dl class=\"facts\"><dt>Code files / lines" in src
+    assert "<dt>Code snapshot</dt><dd>'+snapAge()" in src
+    assert "snapAge()" in PAGE[PAGE.index("function vQuality("):]
+
+
 def test_module_page_keeps_its_documents():
     assert "sec('Documents'" in PAGE

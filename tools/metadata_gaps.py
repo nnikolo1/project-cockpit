@@ -5,7 +5,7 @@
                                    [--tool-settings FILE] [--min-retention-days 3650] [--json]
 
 Reads what the Cockpit reads for the project: its entry in the projects file, the module map, the card files (footprint, churn, ambiguity),
-the code snapshot (`code`), the token-usage files under DATA_DIR/<project>/, with a local clone, `git ls-files` for the Policies, and the coding
+the code snapshot (`code`, its collector `code_collect` and the last refresh record), the token-usage files under DATA_DIR/<project>/, with a local clone, `git ls-files` for the Policies, and the coding
 tool's settings file for the transcript retention (checked only for a project whose transcripts are collected).
 Prints one line per gap (project | module | what | age) or, with --json, the report documented in docs/contracts/metadata-gaps.md.
 Exit code: 0 no gap, 1 at least one gap, 2 the project or a file argument cannot be used. The detection itself is logic.metadata_gaps.
@@ -80,7 +80,8 @@ def collect(p, data_dir, now):
     return dict(quality=quality, modules=modules, cards=cards, metrics=metrics if isinstance(metrics, dict) else None, usage=usage,
                 policies=dict(config=L.rules_config(cfgm), files=files), descs={m["id"]: m.get("desc") for m in (cfgm or {}).get("modules", [])},
                 tracked=files, assign=(cfgm or {}).get("assign") if cfgm else None, docs_heads=docs_heads, content=content,
-                data_root=str(d), data_entries=entries, backup=dict(text=_read(d / L.BACKUP_STATUS_FILE)))
+                data_root=str(d), data_entries=entries, backup=dict(text=_read(d / L.BACKUP_STATUS_FILE)),
+                snapshot=dict(configured=bool(p.get("code")), collector=bool(p.get("code_collect")), last=_json(d / C.SNAPSHOT_REFRESH_FILE)))
 
 
 TIMED = ("projects", "state", "questions", "timeline", "settings", "cardsettings", "usage", "rules", "code", "cardmeta")

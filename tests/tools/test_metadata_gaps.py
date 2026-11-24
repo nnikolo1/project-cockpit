@@ -95,3 +95,16 @@ def test_timing_check_against_a_local_server(tmp_path):
     finally:
         srv.shutdown()
     assert t["code"] is None and t["state"] < 3 and set(t) == set(G.TIMED)
+
+
+def test_snapshot_settings_and_last_refresh_record_are_read(tmp_path, capsys):
+    """No `code`: not configured; `code` without `code_collect`: never refreshed; a failed refresh record: reported with its reason."""
+    setup(tmp_path, with_data=True)
+    snaps = lambda: [g["what"] for g in json.loads(run(tmp_path, capsys, "--json")[1])["gaps"] if g["kind"] == "snapshot"]
+    assert any("not configured" in w for w in snaps())
+    pj = json.loads((tmp_path / "projects.json").read_text())
+    pj["projects"][0]["code"] = str(tmp_path / "snap")
+    (tmp_path / "projects.json").write_text(json.dumps(pj))
+    assert any("code_collect" in w for w in snaps())
+    (tmp_path / "demo" / "code-snapshot-refresh.json").write_text(json.dumps({"ts": STAMP, "ok": False, "reason": "boom"}))
+    assert any("boom" in w for w in snaps())

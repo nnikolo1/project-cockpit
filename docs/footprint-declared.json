@@ -352,6 +352,13 @@
      "written_by": "internal/metadata (the collectors)",
      "volume": true,
      "note": "footprint.json, churn.json, ambiguity.json: generated, overwritten at each run, never committed; names, counts and sizes only"
+    },
+    {
+     "path": "~/.local/share/project-cockpit/<project>/code-snapshot-refresh.json",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "internal/metadata (tools/code_snapshot_refresh.py)",
+     "note": "the last code snapshot refresh of the daily job (time, action, exit code, reason, snapshot age); replaced at every run, never committed; the collector's output goes to the log, not into this file"
     }
    ],
    "logging": [

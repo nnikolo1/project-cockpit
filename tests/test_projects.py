@@ -31,8 +31,24 @@ def flags(**kw):
 def test_single_project_flags_make_one_implicit_project_named_after_the_repo():
     ps, default = C.resolve(flags(repo="acme/widgets", project=3, git="/src/w"))
     assert default == "widgets" and len(ps) == 1
-    assert ps[0] == dict(name="widgets", repo="acme/widgets", manager="acme", project=3, git="/src/w", modules=None, phases=None, code=None)
+    assert ps[0] == dict(name="widgets", repo="acme/widgets", manager="acme", project=3, git="/src/w", modules=None, phases=None, code=None, code_collect=None)
     assert C.resolve(flags(repo="acme/widgets", manager="alice"))[0][0]["manager"] == "alice"
+    assert C.resolve(flags(repo="acme/widgets", code_collect="make snap"))[0][0]["code_collect"] == ["make", "snap"]
+
+
+def test_collector_command_of_the_projects_file_is_an_argument_list():
+    ps, _ = C.projects_from_file({"projects": [{"name": "a", "repo": "o/a", "code": "/s", "code_collect": ["python3", "snap.py"]}, {"name": "b", "repo": "o/b", "code_collect": "make snap"}]})
+    assert [p["code_collect"] for p in ps] == [["python3", "snap.py"], ["make", "snap"]]
+    with pytest.raises(ValueError, match="--projects: project 'a'"):
+        C.projects_from_file({"projects": [{"name": "a", "repo": "o/a", "code_collect": 3}]})
+
+
+def test_code_payload_carries_configured_age_and_stale(tmp_path):
+    (tmp_path / "metrics.json").write_text(json.dumps({"generated_at": "2020-01-01T00:00:00Z", "modules": {}}))
+    cs = C.code_snapshot(dict(name="synthetic", code=str(tmp_path)))
+    assert cs["wired"] and cs["configured"] and cs["stale"] and cs["age_h"] > 24 and cs["max_age_h"] == 24
+    assert C.code_snapshot(dict(name="synthetic", code=str(tmp_path / "none")))["configured"] is True
+    assert C.code_snapshot(dict(name="synthetic", code=None))["configured"] is False
 
 
 def test_projects_file_gives_the_same_shape_with_defaults(tmp_path):
