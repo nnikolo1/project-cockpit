@@ -30,7 +30,7 @@ log = logging.getLogger("dispatcher.core")
 GIB = 1024 ** 3
 MIN_FREE = 10 * GIB                 # 3n
 DEFAULTS = {                        # 6a: the spec's values, used when the file or a key is missing
-    "enabled": True, "interval_minutes": 2, "retries": 0, "workers": 3,
+    "enabled": True, "interval_minutes": 2, "retries": 0, "workers": 10,
     "runaway_minutes": 40, "idle_minutes": 20, "start_minutes": 1,
 }
 

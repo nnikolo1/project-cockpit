@@ -49,7 +49,7 @@ class Config:
     image: str = "cockpit-worker:latest"
     memory: str = "4G"                  # 4c: 4-6 GB
     cpus: str = "2"
-    image_workers: int = 6              # number of workerN users in the image (4a); keep equal to image/Containerfile
+    image_workers: int = 10             # number of workerN users in the image (4a); keep equal to image/Containerfile
     relay_port: int = 8089              # where the relay of 4f listens inside the container
     data_folder: str = os.path.expanduser("~/Library/Application Support/com.apple.container")  # size shown in the heartbeat
     runaway_minutes: int = 40           # 3i; the in-guest backstop is twice this (4e)

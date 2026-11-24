@@ -12,23 +12,23 @@ OK = dict(DEFAULTS)
 
 
 def test_validate_accepts_defaults_and_numeric_strings():
-    assert L.validate_settings(OK, DEFAULTS, 6) == OK
-    assert L.validate_settings({**OK, "workers": "4", "retries": "0"}, DEFAULTS, 6)["workers"] == 4
+    assert L.validate_settings(OK, DEFAULTS, 10) == OK
+    assert L.validate_settings({**OK, "workers": "4", "retries": "0"}, DEFAULTS, 10)["workers"] == 4
 
 
 @pytest.mark.parametrize("key,val,word", [("runaway_minutes", 29, "30"), ("idle_minutes", 9, "10"), ("start_minutes", 0, "1"),
-                                          ("workers", 7, "6"), ("workers", 0, "1"), ("retries", -1, "0"), ("interval_minutes", 0, "1"),
+                                          ("workers", 11, "10"), ("workers", 0, "1"), ("retries", -1, "0"), ("interval_minutes", 0, "1"),
                                           ("interval_minutes", 1.5, "whole"), ("retries", True, "whole"), ("enabled", "yes", "on or off")])
 def test_validate_refuses_with_a_clear_message(key, val, word):
     with pytest.raises(ValueError, match=word):
-        L.validate_settings({**OK, key: val}, DEFAULTS, 6)
+        L.validate_settings({**OK, key: val}, DEFAULTS, 10)
 
 
 def test_validate_missing_key_is_refused():
     form = dict(OK)
     del form["retries"]
     with pytest.raises(ValueError):
-        L.validate_settings(form, DEFAULTS, 6)
+        L.validate_settings(form, DEFAULTS, 10)
 
 
 def test_missing_file_shows_defaults_and_save_creates_it_private(tmp_path, monkeypatch):

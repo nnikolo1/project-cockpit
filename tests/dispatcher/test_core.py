@@ -327,8 +327,8 @@ def test_launch_timeout_skips(tmp_path):
 
 
 def test_workers_setting_is_capped_at_image(tmp_path):
-    w = World(tmp_path, [T(f"x-{i}") for i in range(10)], workers=99)
-    for _ in range(8):
+    w = World(tmp_path, [T(f"x-{i}") for i in range(12)], workers=99)
+    for _ in range(12):
         w.alive_pids = {4242}
         w.fire()
     assert len(w.runtime.launched) == w.runtime.cfg.image_workers

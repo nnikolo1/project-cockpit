@@ -48,7 +48,7 @@ Every requirement below is the owner's own statement or was approved by the owne
 
 **4. Workers**
 
-- 4a. Up to 3 Workers run at once; this can be changed via "Settings" in the Cockpit UI, up to the number of `workerN` users defined in the image.
+- 4a. Up to 10 Workers run at once (owner, 2026-11-24, raised from 3 for production); this can be changed via "Settings" in the Cockpit UI, up to the number of `workerN` users defined in the image.
 - 4b. All Workers run in one container, at any time.
 - 4c. The Workers run in one long-lived container with an init process, no network interface, a fixed memory (4-6 GB) and CPU limit, and one volume for the worker area; the container runtime sits behind one interface in the Dispatcher so that it can be replaced. The current runtime is Apple's native macOS `container` tool, using plain `container run` (not `container machine`) with `--init`, `--network none`, `--memory`, `--cpus`, and no `--ssh`.
 - 4d. The proxy runs as long as there is a released task that is not yet WIP, or a Worker is running (a running Worker needs it). The Dispatcher starts it when that is the case and stops it when it is not; while it runs it keeps the host from sleeping (on macOS: it is wrapped in `caffeinate -i`).
