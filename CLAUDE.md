@@ -1,6 +1,6 @@
 # Working rules
 
-Project cockpit is a light-weight, opinionated viewer over GitHub for agent-assisted projects. It is NOT another project management system. Besides viewing, it has a small element of continuous integration and delivery and of an artefact store for its projects (constitution, owner 2026-11-24).
+Project cockpit is a pocket-size Swiss Army knife for agent-assisted software development, in a nutshell and opinionated (constitution, Objective): a light-weight viewer over GitHub for agent-assisted projects. It is NOT another project management system. Besides viewing, it has a small element of continuous integration and delivery and of an artefact store for its projects (constitution, owner 2026-11-24).
 
 - Principles: Purity, Frugality, Brevity. Every line must be required by `docs/constitution.md` or the user's words; prefer deleting to generalising.
 - Stdlib only. No token storage: the app acts as the `gh` login.

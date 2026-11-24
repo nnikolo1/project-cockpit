@@ -1,6 +1,6 @@
 # Project cockpit
 
-A pocket-size Swiss Army knife for agent-assisted software development: a light-weight, opinionated viewer over GitHub for agent-assisted projects, with a small element of continuous integration and delivery and of an artefact store for the projects it serves ([ADR 0021](docs/adr/0021-ci-cd-and-artefact-store.md)). **Not** yet another project management system: no accounts, and the state of tasks stays in GitHub; what it generates (card data, code snapshots, reports, archives) are plain files in a known place with their age and version.
+A pocket-size Swiss Army knife for agent-assisted software development, in a nutshell and opinionated: a light-weight viewer over GitHub for agent-assisted projects, with a small element of continuous integration and delivery and of an artefact store for the projects it serves ([ADR 0021](docs/adr/0021-ci-cd-and-artefact-store.md)). **Not** yet another project management system: no accounts, and the state of tasks stays in GitHub; what it generates (card data, code snapshots, reports, archives) are plain files in a known place with their age and version.
 
 ![cockpit](docs/screens/cockpit.png)
 

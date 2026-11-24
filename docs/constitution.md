@@ -1,5 +1,9 @@
 # Project task system · Problem Statement
 
+## Objective: agent-assisted software development in a nutshell, opinionated (owner, 2026-11-24)
+
+A pocket-size Swiss Army knife for agent-assisted software development: **in a nutshell** and **opinionated**. It combines several tools at once (continuous integration, quality gates, a queue, an agent manager, an artefact store, policy checks), each at a minimal level, as plain files and small commands, with no heavy framework; the combination is the point. Where a choice has to be made, the Cockpit makes it and says so; it does not offer every option. Every rule below has an enforcing mechanism.
+
 Over the course of a few months the rate of code generation outran the ability of the human stake-holder to keep the project knowledge in his cognitive context window. Yet for the success of the project this is essential.
 
 The information exchange between the agent and the human was sub-optimal which impeded both parties:
@@ -41,8 +45,6 @@ It will also try to address the mismatch in information bandwidth and context wi
 The human behind this project management system is acutely aware that there are dozens, if not hundreds, of such project management systems. Thus there will be a preference towards "buy" (or adopt) vs. "build". Yet, there is no fear in threading new ground - the super-human power of the agents drastically lowers the cost of code generation. There will be no fear in yielding this super-power judiciously. The goal is to come up with a project-management system which is light-weight, as general (and generalizable) as possible,  and leverages as much of the pre-existing tooling and infrastructure, as practical.
 
 Scope (owner, 2026-11-24): besides viewing, the Project cockpit has an element of continuous integration and delivery and of an artefact store: it builds what its projects need (collectors, snapshots, reports, archives), checks it (the policy harness), delivers its own releases and managed files to the projects, and keeps the generated artefacts in a known place with their age and version; it stays small: plain folders and manifests before any registry.
-
-Objective (owner, 2026-11-24): a pocket-size Swiss Army knife for agent-assisted software development. Each blade (continuous integration, quality gates, queue, agent manager, artefact store, policy checks) is kept minimal, as plain files and small commands, and combining them is the point.
 
 The constitution is not aspirational (owner, 2026-11-24): every rule has an enforcing mechanism (a policy check, a gate in the Dispatcher or the merge step, or a generated artefact), and a rule without one is reported as a gap. The Cockpit is an opinionated combination of continuous integration, code quality gates, a queue and an agent manager.
 
