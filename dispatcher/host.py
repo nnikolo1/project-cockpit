@@ -20,6 +20,10 @@ class HostProbes(abc.ABC):
     def power_source(self) -> str:
         """"AC", "battery" or "unknown"."""
 
+    @abc.abstractmethod
+    def keep_awake_prefix(self) -> list:
+        """The command words that keep the host from sleeping while the command after them runs; [] if there are none."""
+
 
 class MacOSHostProbes(HostProbes):
     def __init__(self, cmd=_cmd):
@@ -33,6 +37,9 @@ class MacOSHostProbes(HostProbes):
         batt = self.cmd("pmset", "-g", "batt") or ""
         return "AC" if "AC Power" in batt else ("battery" if "Battery Power" in batt else "unknown")
 
+    def keep_awake_prefix(self) -> list:
+        return ["caffeinate", "-i"]
+
 
 class UnknownHostProbes(HostProbes):
     def memory_pressure(self) -> str:
@@ -40,6 +47,9 @@ class UnknownHostProbes(HostProbes):
 
     def power_source(self) -> str:
         return "unknown"
+
+    def keep_awake_prefix(self) -> list:
+        return []
 
 
 def default_probes() -> HostProbes:

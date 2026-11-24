@@ -28,3 +28,8 @@ def test_default_probes_by_platform(monkeypatch):
     assert isinstance(host.default_probes(), host.MacOSHostProbes)
     monkeypatch.setattr(sys, "platform", "linux")
     assert isinstance(host.default_probes(), host.UnknownHostProbes)
+
+
+def test_keep_awake_prefix_by_platform():
+    assert host.MacOSHostProbes().keep_awake_prefix() == ["caffeinate", "-i"]
+    assert host.UnknownHostProbes().keep_awake_prefix() == []
