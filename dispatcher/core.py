@@ -21,6 +21,7 @@ import time
 from dataclasses import dataclass, field
 
 from dispatcher import runtime as rt
+from dispatcher.host import _cmd, default_probes
 
 log = logging.getLogger("dispatcher.core")
 
@@ -270,23 +271,15 @@ class Dispatcher:
 
 
 # --- default probes (the host side; not exercised by the unit tests) ------------------------------------------
-def _cmd(*args):
-    try:
-        return subprocess.run(args, capture_output=True, text=True, timeout=10).stdout.strip()
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-
-
-def host_readings(volume, runtime):
+def host_readings(volume, runtime, host=None):
     """3g: memory pressure level, free disk, load average, power source, container data folder size, stats."""
-    lvl = _cmd("sysctl", "-n", "kern.memorystatus_vm_pressure_level")
-    batt = _cmd("pmset", "-g", "batt") or ""
+    host = host or default_probes()
     size = _cmd("du", "-sk", runtime.cfg.data_folder)
     return {
-        "memory_pressure": {"1": "normal", "2": "warn", "4": "critical"}.get(lvl, lvl or "unknown"),
+        "memory_pressure": host.memory_pressure(),
         "free_disk": f"{shutil.disk_usage(volume).free / GIB:.1f} GiB",
         "load": " ".join(f"{x:.2f}" for x in os.getloadavg()),
-        "power": "AC" if "AC Power" in batt else ("battery" if "Battery Power" in batt else "unknown"),
+        "power": host.power_source(),
         "data_size": f"{int(size.split()[0]) / 1024:.0f} MiB" if size else "unknown",
         "container": _stats_line(runtime),
     }
