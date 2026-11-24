@@ -61,7 +61,7 @@ Every requirement below is the owner's own statement or was approved by the owne
 - 4l. The Workers clone into a folder named after the task (`<task-id>/clone`) on the container's own disk or a named volume, so that clones of different tasks never overwrite each other; the bind mounts only hand work in and results out.
 - 4m. The CLI, python, pytest and git are baked into the image.
 - 4n. The Worker confirms that it has picked a task up by writing the file `outbox/started` (its content is ignored); the Dispatcher picks the file up and sets the status of the task to "WIP".
-- 4o. The Worker composes a good-bye note, `outbox/goodbye.json`, with: `outcome` ("done" or "gave_up"), `summary` (a report of the work done), `branch`, and `tokens` (the tokens consumed).
+- 4o. The Worker composes a good-bye note, `outbox/goodbye.json`, with: `outcome` ("done" or "gave_up": the Worker's own assessment; the Dispatcher does not use it, and the Interactive Session Agent that merges takes it into account but is not limited to it), `summary` (a report of the work done), `branch`, and `tokens` (the tokens consumed).
 - 4p. The Worker writes a git bundle of its branch, named in the note, into `outbox/result.bundle`.
 - 4q. Each task has a folder `<worker area>/<task-id>/` with two subfolders: (1) `inbox/`: `main.bundle` (the current main of the task's repository) and `task.md` (the task's title and text), written by the Dispatcher; (2) `outbox/`: `started`, `goodbye.json` and `result.bundle`, written by the Worker.
 - 4r. The Dispatcher launches each Worker with a fixed instruction: read `inbox/task.md`; work in your own clone; write `outbox/started` first; at the end write `outbox/goodbye.json` and `outbox/result.bundle`.
