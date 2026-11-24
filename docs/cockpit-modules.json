@@ -97,7 +97,7 @@
   {"path": "docs/research/agent-os-dependence-2026.11.24.md", "module": "taskqueue", "basis": "its Modules line names only taskqueue; a document clearly about one module stays with it (owner rule, 2026-11-20)"},
   {"path": "docs/research/container-seam-review-2026.11.24.md", "module": "taskqueue", "basis": "its Modules line names only taskqueue; a document clearly about one module stays with it (owner rule, 2026-11-20)"},
   {"path": "docs/memos/2026.11.24-refactoring-for-agent-and-os-independence.md", "module": "taskqueue", "basis": "its Modules line names only taskqueue; a document clearly about one module stays with it (owner rule, 2026-11-20)"},
-  {"path": "docs/adr/0019-boot-filling-never-twice.md", "module": "taskqueue", "basis": "its Modules line names taskqueue and internal/cockpit; internal/cockpit is not a module of this map, so the one existing module, taskqueue, is its main user"},
+  {"path": "docs/adr/0019-boot-filling-never-twice.md", "module": "taskqueue", "basis": "its Modules line names taskqueue (the line named a second, non-existent module until 2026-11-24, fixed by the owner's decision)"},
   {"path": "docs/specs/dispatcher-and-workers.md", "module": "taskqueue", "basis": "specification of the unattended-worker dispatcher, the redesign of the boot-filling job (owner, 2026-11-23): a document clearly about one module stays with it"},
   {"path": ".claude/", "module": "internal/agents", "basis": "agent policies and skills (owner, 2026-11-23: the agent-brief skill)"},
   {"path": "tools/e2e_failure_paths.py", "module": "taskqueue/e2e", "basis": "failure-path test driver of the task queue; its test is tests/tools/test_e2e_failure_paths.py"},
