@@ -1289,7 +1289,8 @@ def _period(t, anchor):
 
 def _periods(reads):
     """Readings (oldest first) aggregated in the graded periods of _period(): the count and, per window, first, last, lowest and highest
-    percentage, and the windows' reset times (of the last reading)."""
+    percentage, and the windows' reset times (of the last reading). Only periods with readings get a row: an hour without a recorded
+    change has none, and nothing is carried forward into it (owner, 2026-11-24, reversing F-680)."""
     out = {}
     anchor = reads[-1]["t"] if reads else 0
     for r in reads:
@@ -1305,31 +1306,30 @@ def _periods(reads):
                 s = h[k]
                 s.update(first=s.get("first", v), last=v, low=min(s.get("low", v), v), high=max(s.get("high", v), v))
         h["reset5"], h["reset7"] = r["reset5"] or h["reset5"], r["reset7"] or h["reset7"]
-    return _fill_hours(out, reads, anchor) if reads else []
+    return list(out.values())
 
 
-def _fill_hours(out, reads, anchor):
-    """The graded rows, with a row for every hour of the current day up to the newest reading's hour: an hour without a recorded change
-    has readings 0 and shows the value carried forward; hours still to come get no row; hours before the very first reading stay empty."""
-    utc = dt.timezone.utc
-    last = dt.datetime.fromtimestamp(anchor, utc).replace(minute=0, second=0, microsecond=0)
-    day0 = last.replace(hour=0)
-    rows = [v for k, v in out.items() if k[0] != "hour"]
-    hours = {k[1]: v for k, v in out.items() if k[0] == "hour"}
-    before = next((r for r in reversed(reads) if r["t"] < day0.timestamp()), None)
-    carry = dict(five_hour=before["five_hour"], seven_day=before["seven_day"], reset5=before["reset5"], reset7=before["reset7"]) if before else {}
-    for i in range(last.hour + 1):
-        key = (day0 + dt.timedelta(hours=i)).strftime("%Y-%m-%dT%H:00")
-        row = hours.get(key)
-        if row is None:
-            held = {k: ({} if carry.get(k) is None else dict(first=carry[k], last=carry[k], low=carry[k], high=carry[k])) for k in ("five_hour", "seven_day")}
-            row = dict(level="hour", key=key, label=key.replace("T", " "), readings=0, reset5=carry.get("reset5"), reset7=carry.get("reset7"), **held)
+def _held_peaks(periods):
+    """{(level, key): {window: highest}} of the quota periods (oldest first, as _periods() lists them), with an hour of the current day that
+    has no reading holding the last value before it (from the previous hour with readings, else the newest earlier period); the quota rows
+    themselves list only the hours with readings."""
+    w = ("five_hour", "seven_day")
+    out, carry, hours = {}, {}, {}
+    for p in periods:
+        out[(p["level"], p["key"])] = {k: p[k].get("high") for k in w}
+        if p["level"] == "hour":
+            hours[p["key"]] = p
         else:
-            for k in ("five_hour", "seven_day"):
-                carry[k] = row[k].get("last", carry.get(k))
-            carry["reset5"], carry["reset7"] = row["reset5"], row["reset7"]
-        rows.append(row)
-    return rows
+            carry = {k: p[k].get("last", carry.get(k)) for k in w}
+    if hours:
+        day, last = min(hours)[:10], int(max(hours)[11:13])
+        for h in range(last + 1):
+            key = "%sT%02d:00" % (day, h)
+            if key in hours:
+                carry = {k: hours[key][k].get("last", carry.get(k)) for k in w}
+            else:
+                out[("hour", key)] = dict(carry)
+    return out
 
 
 def _quota(quota_text, end_day):
@@ -1414,7 +1414,7 @@ def transcript_report(text, quota=None, aggregate=None):
             days[d] = days.get(d, 0) + n
     anchor = (quota or {}).get("anchor") or max([m[0] for m in msgs] + [_epoch(f"{d}T00:00:00+00:00") for d in days], default=None)
     empty = lambda: {k: 0 for k in ("messages", *USAGE_FIELDS, "total")}
-    peaks = {(p["level"], p["key"]): p for p in (quota or {}).get("periods", [])}
+    peaks = _held_peaks((quota or {}).get("periods", []))
     rows = {p[:2]: dict(level=p[0], key=p[1], label=p[2], aggregate=0, **empty()) for p in (_period_skeleton(anchor) if anchor is not None else [])}
     sources, sessions = {}, {}
     since = anchor - HISTORY_DAYS * 86400 if anchor is not None else None
@@ -1433,7 +1433,7 @@ def transcript_report(text, quota=None, aggregate=None):
             rows[p[:2]]["total"] += n
     for k, row in rows.items():
         q = peaks.get(k, {})
-        row["five_hour"], row["seven_day"] = (q.get(w, {}).get("high") for w in ("five_hour", "seven_day"))
+        row["five_hour"], row["seven_day"] = q.get("five_hour"), q.get("seven_day")
     top = sorted(sessions.items(), key=lambda kv: (-kv[1]["total"], kv[0]))[:SESSIONS_SHOWN]
     return dict(periods=list(rows.values()), sources=[dict(key=k, **v) for k, v in sorted(sources.items(), key=lambda kv: (-kv[1]["total"], kv[0]))],
                 sessions=[dict(v, key=k[1]) for k, v in top], aggregate_days=dict(sorted(days.items())))
