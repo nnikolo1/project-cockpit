@@ -147,7 +147,8 @@ class Dispatcher:
     # -- bookkeeping --
     def _fail(self, st, user, w, reason):
         tid = w["task_id"]
-        log.error("task %s failed: %s", tid, reason)
+        tail = getattr(self.runtime, "worker_output_tail", lambda t: "")(tid)
+        log.error("task %s failed: %s%s", tid, reason, f" | Worker output: {tail}" if tail else "")
         self.tasks.set_state(tid, "failed")
         self.plog.failure(tid, w["folder"], reason)
         st["workers"].pop(user, None)

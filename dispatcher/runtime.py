@@ -248,7 +248,20 @@ class Runtime:
             cmd += ["--env", f"{k}={v}"]
         cmd += [self.cfg.name, "timeout", str(backstop), *agent.command(prompt)]
         log.info("launching %s for task %s in %s", user, task_id, clone)
-        return self._spawn(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        os.makedirs(self.task_dir(task_id), exist_ok=True)
+        out = os.open(os.path.join(self.task_dir(task_id), "worker.log"), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        try:  # the Worker's own output (error messages of the agent) is kept: without it a Worker that ends without a note is a mystery
+            return self._spawn(cmd, stdout=out, stderr=out)
+        finally:
+            os.close(out)
+
+    def worker_output_tail(self, task_id, n=600):
+        """The last n characters of the Worker's output (worker.log in its task folder), '' if there is none."""
+        try:
+            with open(os.path.join(self.task_dir(task_id), "worker.log"), errors="replace") as f:
+                return f.read()[-n:].strip()
+        except OSError:
+            return ""
 
     # --- the Worker's host-side process (3i/3j): whether it has ended, and kill ---------------------------
     def alive(self, pid):

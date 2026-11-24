@@ -1,3 +1,4 @@
+import os
 import json
 import pathlib
 import re
@@ -300,3 +301,13 @@ def test_launch_uses_the_given_agent(tmp_path):
     line = " ".join(cmd)
     assert "OTHER_URL=http://127.0.0.1:8089" in line and "ANTHROPIC" not in line and "claude" not in cmd[-2:]
     assert cmd[-2] == "other"
+
+
+def test_worker_output_is_kept_and_its_tail_readable(tmp_path):
+    r, _ = make(tmp_path)
+    assert r.worker_output_tail("T-9") == ""
+    r.launch("worker1", "T-9")
+    with open(os.path.join(r.task_dir("T-9"), "worker.log"), "a") as f:
+        f.write("x" * 700 + "API Error: 429")
+    tail = r.worker_output_tail("T-9", 100)
+    assert tail.endswith("API Error: 429") and len(tail) == 100
