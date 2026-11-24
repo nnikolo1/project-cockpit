@@ -760,7 +760,47 @@ def churn_view(data):
                 bands = rank_bands({i: f(mods[i]["windows"][k]) for i in ids if k in mods[i]["windows"]})
                 for i, b in bands.items():
                     mods[i]["windows"][k]["band_" + mode] = b
-    return dict(windows=wins, modules=mods, unassigned=data.get("unassigned"), excluded=data.get("excluded"), mapping_check=data.get("mapping_check"))
+    return dict(windows=wins, modules=mods, unassigned=data.get("unassigned"), excluded=data.get("excluded"), mapping_check=data.get("mapping_check"),
+                changes=changes_view(data.get("modules")))
+
+
+def _weeks(rows):
+    """One series list from churn.json -> up to 52 clean weeks {w, commits, added, removed, tests, docs, src}; None when it is not a list.
+    src = added + removed - tests - docs (never below 0)."""
+    if not isinstance(rows, list):
+        return None
+    out = []
+    for r in rows[-52:]:
+        if not isinstance(r, dict):
+            continue
+        n = {k: _num(r.get(k)) or 0 for k in ("commits", "added", "removed", "tests", "docs")}
+        out.append(dict(n, w=str(r.get("w", "")), src=max(n["added"] + n["removed"] - n["tests"] - n["docs"], 0)))
+    return out
+
+
+def changes_view(modules):
+    """Panels of the Code > Changes tab from the modules of churn.json (the optional `series.weekly` key).
+    Top-level modules show `total`, sub-modules `own`. Order: top-level by churn of the last 30 days (descending, id breaks ties), each
+    followed by its sub-modules in the same order. A module without usable series is flagged missing. -> [{id, level, weeks|None, churn30, churn52, commits90}]."""
+    def panel(mid, m):
+        sub = "/" in mid
+        wk = ((m.get("series") or {}).get("weekly") or {}) if isinstance(m.get("series"), dict) else {}
+        weeks = _weeks(wk.get("own" if sub else "total"))
+        e = (m.get("own" if sub else "total") or m.get("own") or {}).get("30")
+        c30 = _num(e.get("churn")) if isinstance(e, dict) else None
+        if c30 is None and weeks:
+            c30 = sum(x["added"] + x["removed"] for x in weeks[-4:])
+        return dict(id=mid, level=int(sub), weeks=weeks or None, churn30=c30 or 0,
+                    churn52=sum(x["added"] + x["removed"] for x in weeks) if weeks else None,
+                    commits90=sum(x["commits"] for x in weeks[-13:]) if weeks else None)
+    ps = {mid: panel(mid, m) for mid, m in (modules or {}).items() if isinstance(m, dict)}
+    key = lambda i: (-ps[i]["churn30"], i)
+    out = []
+    for t in sorted((i for i in ps if "/" not in i), key=key):
+        out.append(ps[t])
+        out += [ps[i] for i in sorted((i for i in ps if i.startswith(t + "/")), key=key)]
+    out += [ps[i] for i in sorted((i for i in ps if "/" in i and i.split("/")[0] not in ps), key=key)]  # orphan sub-modules: still shown
+    return out
 
 
 def file_location(path):
