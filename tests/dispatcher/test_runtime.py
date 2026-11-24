@@ -232,8 +232,9 @@ def test_read_outbox_unusable(tmp_path, repo, note):
 def test_clone_without_hardlinks(tmp_path):
     r, f = make(tmp_path)
     assert r.clone_main("worker2", "T-4") == "/home/worker2/T-4/clone"
-    assert "rm" in f.calls[0][0] and "-rf" in f.calls[0][0] and "/home/worker2/T-4" in f.calls[0][0]  # a stale clone goes first
-    args = f.calls[1][0]
+    assert "chmod" in f.calls[0][0] and "700" in f.calls[0][0] and "/home/worker2" in f.calls[0][0]  # the home is private to its Worker
+    assert "rm" in f.calls[1][0] and "-rf" in f.calls[1][0] and "/home/worker2/T-4" in f.calls[1][0]  # a stale clone goes first
+    args = f.calls[2][0]
     assert "--no-hardlinks" in args and "/area/T-4/inbox/main.bundle" in args and "worker2" in args
     r, _ = make(tmp_path, ("clone", (1, "bad")))
     with pytest.raises(rt.ContainerError):
@@ -327,3 +328,12 @@ def test_discard_task_removes_the_folder(tmp_path):
     os.makedirs(os.path.join(r.task_dir("T-3"), "inbox"))
     r.discard_task("T-3")
     assert not os.path.exists(r.task_dir("T-3"))
+
+
+def test_worker_runs_in_a_private_mount_namespace_with_only_its_task(tmp_path):
+    r, _ = make(tmp_path)
+    _, cmd = r.launch("worker1", "T-8")
+    i = cmd.index("unshare")
+    assert cmd[i:i + 3] == ["unshare", "-Urm", "sh"] and cmd[i + 4] == rt.PRIVATE_AREA and cmd[i + 6] == "T-8"
+    assert cmd[cmd.index("timeout") + 1].isdigit()  # the time limit stays outermost
+    assert 'mount -t tmpfs none /area' in rt.PRIVATE_AREA and '"/area/$1"' in rt.PRIVATE_AREA

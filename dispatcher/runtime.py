@@ -88,6 +88,13 @@ def check_task_id(task_id):
     return task_id
 
 
+# The Worker's own view of the shared task mount: a private user and mount namespace in which /area holds only this task's folder.
+# The mount itself ignores file modes and ownership between the Workers' users (tested), so the namespace is what separates them;
+# the Worker (an unprivileged user) cannot leave it.
+PRIVATE_AREA = ('own="/tmp/own-$1"; mkdir -p "$own" && mount --bind "/area/$1" "$own" && mount -t tmpfs none /area && '
+                'mkdir "/area/$1" && mount --bind "$own" "/area/$1" && shift && exec "$@"')
+
+
 class Runtime:
     def __init__(self, cfg, run=default_run, spawn=subprocess.Popen):
         self.cfg, self._run, self._spawn = cfg, run, spawn
@@ -232,6 +239,7 @@ class Runtime:
         """Clone main.bundle into <task-id>/clone on the container's own disk, no hardlinks (4k, 4l)."""
         check_task_id(task_id)
         home = f"/home/{user}/{task_id}"
+        self.exec(user, "chmod", "700", f"/home/{user}", timeout=30)  # the clones of one Worker are private to it (the container's own disk enforces modes)
         self.exec(user, "rm", "-rf", home, timeout=60)  # a clone left by an earlier aborted launch of this task would block the new one
         rc, out = self.exec(user, "git", "clone", "--no-hardlinks", f"/area/{task_id}/inbox/main.bundle",
                             f"{home}/clone", timeout=120)
@@ -252,7 +260,7 @@ class Runtime:
         cmd = [self.cfg.container, "exec", "--user", user, "--workdir", clone]
         for k, v in env.items():
             cmd += ["--env", f"{k}={v}"]
-        cmd += [self.cfg.name, "timeout", str(backstop), *agent.command(prompt)]
+        cmd += [self.cfg.name, "timeout", str(backstop), "unshare", "-Urm", "sh", "-c", PRIVATE_AREA, "sh", task_id, *agent.command(prompt)]
         log.info("launching %s for task %s in %s", user, task_id, clone)
         os.makedirs(self.task_dir(task_id), exist_ok=True)
         out = os.open(os.path.join(self.task_dir(task_id), "worker.log"), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
