@@ -45,7 +45,7 @@ def write_task_md(task, path):
 
 def _unblock_counts(tasks):
     """key -> number of open tasks that name it as a blocker."""
-    open_ = {t["key"] for t in tasks if t["stage"] in ("embryo", "released", "in_progress")}
+    open_ = {t["key"] for t in tasks if t["stage"] in ("embryo", "released", "wip")}
     out = {}
     for t in tasks:
         if t["key"] in open_:
@@ -55,7 +55,7 @@ def _unblock_counts(tasks):
 
 
 def _rank_inputs(task, by_key, unblocks):
-    """-> dict(deadline, blocked, unblocks): the task's own deadline, else its parent chain's; blocked while a blocker is not completed."""
+    """-> dict(deadline, blocked, unblocks): the task's own deadline, else its parent chain's; blocked while a blocker is not merged."""
     seen, t, deadline = set(), task, None
     while t and t["key"] not in seen:
         seen.add(t["key"])
@@ -63,7 +63,7 @@ def _rank_inputs(task, by_key, unblocks):
             deadline = t["deadline"]
             break
         t = by_key.get(t.get("parent"))
-    return dict(deadline=deadline, blocked=any(by_key[b]["stage"] != "completed" for b in task["blockedBy"] if b in by_key),
+    return dict(deadline=deadline, blocked=any(by_key[b]["stage"] != "merged" for b in task["blockedBy"] if b in by_key),
                 unblocks=unblocks.get(task["key"], 0))
 
 

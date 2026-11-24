@@ -24,7 +24,7 @@ def state(issues, events, mods=("alpha",), deadlines=None, proposals=()):
     return dict(tasks=tasks, modules=modules, modDeadline=deadlines or {}, proposals=list(proposals))
 
 
-# 1 embryo, 2 released P2 + due, 3 in progress, 4 closed, 5 embryo with a FORGED released label, 6 plain embryo
+# 1 embryo, 2 released P2 + due, 3 WIP, 4 closed, 5 embryo with a FORGED released label, 6 plain embryo
 S = state([iss(1), iss(2, ["released", "P2", "due:2026-12-01"]), iss(3, ["released", "P1"], assignees=["w"]), iss(4, state="closed", state_reason="completed"),
            iss(5, ["released"]), iss(6, ["module:alpha"], blocked_by=[1])],
           [ev(2, "released"), ev(2, "P2"), ev(2, "due:2026-12-01"), ev(3, "released"), ev(3, "P1"), ev(5, "released", "eve")],
@@ -118,11 +118,11 @@ def test_simulation_actions_need_the_flag_and_the_right_stage():
     assert ops[0] == ["issue", "edit", "2", "-R", R, "--add-assignee", "@me"] and ops[1][1] == "comment"
     assert plan(dict(action="complete", n=3), simulate=True)[0][0] == ["issue", "close", "3", "-R", R, "--reason", "completed"]
     with pytest.raises(ValueError):
-        plan(dict(action="take", n=3), simulate=True)       # already in progress
+        plan(dict(action="take", n=3), simulate=True)       # already WIP
     with pytest.raises(ValueError):
         plan(dict(action="take", n=6), simulate=True)       # embryo
     with pytest.raises(ValueError):
-        plan(dict(action="complete", n=2), simulate=True)   # not in progress
+        plan(dict(action="complete", n=2), simulate=True)   # not WIP
 
 
 def test_due_labels_are_created_first():

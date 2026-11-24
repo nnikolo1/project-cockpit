@@ -7,7 +7,7 @@ A light-weight, opinionated viewer over GitHub for agent-assisted projects. **No
 More: [task queue](docs/screens/backlog.png), [timeline](docs/screens/timeline.png).
 
 ## The opinion
-- Stages: embryo, released, in progress, completed, cancelled.
+- States: embryo, released, WIP, unmerged, failed, merged (the last four are labels the Dispatcher sets); cancelled is a separate marker.
 - Only the Manager releases, prioritises, sets deadlines or cancels.
 - Deadlines are optional: set by the Manager, or inherited from the parent or module.
 - Priority is P1-P3.
