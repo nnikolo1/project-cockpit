@@ -49,10 +49,10 @@ Every requirement below is the owner's own statement or was approved by the owne
 
 - 4a. Up to 3 Workers run at once; this can be changed via "Settings" in the Cockpit UI, up to the number of `workerN` users defined in the image.
 - 4b. All Workers run in one container, at any time.
-- 4c. The container is Apple's native macOS `container` tool, using plain `container run` (not `container machine`): one long-lived container with `--init`, no network interface (`--network none`), a fixed `--memory` (4-6 GB) and `--cpus`, one volume for the worker area, and no `--ssh`.
+- 4c. The Workers run in one long-lived container with an init process, no network interface, a fixed memory (4-6 GB) and CPU limit, and one volume for the worker area; the container runtime sits behind one interface in the Dispatcher so that it can be replaced. The current runtime is Apple's native macOS `container` tool, using plain `container run` (not `container machine`) with `--init`, `--network none`, `--memory`, `--cpus`, and no `--ssh`.
 - 4d. A LaunchAgent in the owner's logged-in session keeps the proxy running and holds `caffeinate -i` for as long as it does.
-- 4e. The image has no sudo; the Dispatcher starts each Worker with `container exec --user workerN`, using a `workerN` that no running Worker is using, under an in-guest `timeout` of twice the runaway limit (80 minutes by default) as a backstop if the Dispatcher is down.
-- 4f. A host Unix socket (its path shorter than 104 bytes) is mounted into the container (the runtime relays it over vsock); inside, a tiny relay exposes it on `127.0.0.1`, and the Workers' Claude Code points `ANTHROPIC_BASE_URL` there.
+- 4e. The image has no sudo; the Dispatcher starts each Worker through the runtime as user `workerN` (with Apple's tool: `container exec --user workerN`), using a `workerN` that no running Worker is using, under an in-guest `timeout` of twice the runaway limit (80 minutes by default) as a backstop if the Dispatcher is down. The runtime also tells whether a Worker's process has ended and kills it (3e, 3i, 3j).
+- 4f. A host Unix socket (its path shorter than 104 bytes) is made reachable inside the container by the runtime (with Apple's tool: mounted with `-v`, relayed over vsock); inside, a tiny relay exposes it on `127.0.0.1`, and the Workers' Claude Code points `ANTHROPIC_BASE_URL` there.
 - 4g. On the host, a small reverse proxy listens only on that socket, forwards only `POST /v1/messages` (and `count_tokens`) to the model API, strips any client credential and adds the credentials corresponding to the owner's subscription; each Worker holds its own dummy token, so that the proxy can tell the Workers apart.
 - 4h. The token usage can be inferred from the proxy, and this shall be done.
 - 4i. The Workers' environment switches off non-essential traffic: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `DISABLE_TELEMETRY=1`, `DISABLE_ERROR_REPORTING=1`, `skipWebFetchPreflight: true` or the WebFetch tool denied, `ENABLE_CLAUDEAI_MCP_SERVERS=false`, `CLAUDE_CODE_DISABLE_ARTIFACT=1`, `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1`, and a per-Worker `CLAUDE_CONFIG_DIR`.
@@ -82,7 +82,7 @@ Every requirement below is the owner's own statement or was approved by the owne
 
 ## Approach
 
-1. The first step was done on 2026-11-23: on macOS 15.3.1 a container started with no network interface reaches the host proxy through the socket relay (4f). The Workers have no other way out, so no egress policy is needed beyond 4s.
+1. The first step was done on 2026-11-23 with Apple's `container` tool 1.7.1 on macOS 15.3.1, a macOS version the tool does not support (it supports macOS 26): a container started with no network interface reaches the host proxy through the socket relay (4f). The Workers have no other way out, so no egress policy is needed beyond 4s. A replacement runtime, or the same tool on macOS 26, repeats this check before use.
 2. If feasible, this would be a major re-work of the codebase of Project Cockpit.
 3. Eliminate anything from the codebase which contradicts a specification set in this document.
 4. When implementing, follow the philosophy of minimalism ("less is more").
