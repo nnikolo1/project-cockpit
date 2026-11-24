@@ -391,6 +391,7 @@ def main(argv=None):
     ap.add_argument("--usage-file", required=True, help="the proxy's JSONL usage file")
     ap.add_argument("--relay-path", default="/opt/relay.py", help="the relay script inside the image")
     ap.add_argument("--container-tool", default="container")
+    ap.add_argument("--image", default="cockpit-worker:latest", help="the Workers' image (the test runs a stub image)")
     ap.add_argument("--repo", required=True, help="the task repository, owner/name")
     ap.add_argument("--repo-dir", required=True, help="the task repository's clone on the host")
     ap.add_argument("--data-dir", required=True, help="the processing log's data folder (outside any git repository)")
@@ -404,7 +405,7 @@ def main(argv=None):
     from dispatcher.tasks import GitHubTasks
 
     s = load_settings(a.settings)
-    cfg = rt.Config(area=a.area, socket=a.socket, container=a.container_tool, runaway_minutes=s["runaway_minutes"])
+    cfg = rt.Config(area=a.area, socket=a.socket, container=a.container_tool, image=a.image, runaway_minutes=s["runaway_minutes"])
     runtime = rt.Runtime(cfg)
     probes = Probes(
         free_disk=lambda: shutil.disk_usage(a.area).free,
