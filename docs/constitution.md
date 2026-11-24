@@ -58,6 +58,10 @@ The "task" is the most basic entity in the project management system. It can be 
 
 There can be relations between tasks. It could be a "vertical" 1:n relationship ("composed of") or "horizontal" m:n relationships ("blocked by", "related to"). Example of the latter: a bug may be related to a discrete feature (which itself sis a task).
 
+### Context management
+
+Managing the context of the agents' sessions is part of task management (owner, 2026-11-24): what a Worker knows when it starts is as much a part of a task as its description. A Worker session is attached to its project (its working directory, its project memory and settings) and receives, besides the task, a short dated synopsis of the latest interactive session of that project, which is kept outside every repository; the synopsis and the project memory are written without secrets or personal data, are never copied into commits, and go stale visibly. What the Interactive Session Agent learns in a session that binds later work (decisions, standing rules, open questions) is handed on this way, not left in the conversation.
+
 ## The Life Stages of a Task
 
 Much like a human, a task begins its life as an embryo: it has been conceived by a human or an agent. An embryo created by the Interactive Session Agent counts as released once 10 days have passed since its creation; an embryo created by the Owner counts as released at once. A Worker does not create tasks: it may suggest one in its good-bye note, and the Interactive Session Agent that mops up decides whether to file tasks from it. A released task can be assigned by the Dispatcher to a Worker, and while the Worker works on it the task is WIP. When the Worker has finished, the task is unmerged, or failed if the Worker gave up or left no usable result. Once the Interactive Session Agent has merged its branch into the main branch, the task is merged. Only the Owner or an interactive agent can change the status of a task once it is merged or failed. A task filed by an agent because it found a file that contradicts a standing policy counts as released at once; the agent that found the contradiction does not work on that task.
