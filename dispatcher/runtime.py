@@ -239,7 +239,7 @@ class Runtime:
         """Clone main.bundle into <task-id>/clone on the container's own disk, no hardlinks (4k, 4l)."""
         check_task_id(task_id)
         home = f"/home/{user}/{task_id}"
-        self.exec(user, "chmod", "700", f"/home/{user}", timeout=30)  # the clones of one Worker are private to it (the container's own disk enforces modes)
+        self.exec(user, "sh", "-c", f"chmod 700 /home/{user} && mkdir -p -m 700 /home/{user}/.tmp", timeout=30)  # the clones of one Worker are private to it (the container's own disk enforces modes)
         self.exec(user, "rm", "-rf", home, timeout=60)  # a clone left by an earlier aborted launch of this task would block the new one
         rc, out = self.exec(user, "git", "clone", "--no-hardlinks", f"/area/{task_id}/inbox/main.bundle",
                             f"{home}/clone", timeout=120)

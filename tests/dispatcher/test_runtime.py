@@ -232,7 +232,8 @@ def test_read_outbox_unusable(tmp_path, repo, note):
 def test_clone_without_hardlinks(tmp_path):
     r, f = make(tmp_path)
     assert r.clone_main("worker2", "T-4") == "/home/worker2/T-4/clone"
-    assert "chmod" in f.calls[0][0] and "700" in f.calls[0][0] and "/home/worker2" in f.calls[0][0]  # the home is private to its Worker
+    home_step = " ".join(f.calls[0][0])
+    assert "chmod 700 /home/worker2" in home_step and "mkdir -p -m 700 /home/worker2/.tmp" in home_step  # private home and temp folder
     assert "rm" in f.calls[1][0] and "-rf" in f.calls[1][0] and "/home/worker2/T-4" in f.calls[1][0]  # a stale clone goes first
     args = f.calls[2][0]
     assert "--no-hardlinks" in args and "/area/T-4/inbox/main.bundle" in args and "worker2" in args

@@ -30,7 +30,10 @@ class ClaudeCode(Agent):
 
     def env(self, user, base_url, token):
         return dict(self.SWITCHES, ANTHROPIC_BASE_URL=base_url, ANTHROPIC_AUTH_TOKEN=token,
-                    CLAUDE_CONFIG_DIR=f"/home/{user}/.claude")
+                    CLAUDE_CONFIG_DIR=f"/home/{user}/.claude",
+                    # inside the private user namespace every Worker is uid 0 to the agent, whose default /tmp/claude-0 would be shared
+                    # (and refused as foreign-owned): a temp folder in the Worker's own home instead
+                    CLAUDE_CODE_TMPDIR=f"/home/{user}/.tmp")
 
     def activity_glob(self, user):
         return f"/home/{user}/.claude/projects/**/*.jsonl"
