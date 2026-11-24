@@ -108,6 +108,13 @@
      "note": "the vendor's quota percentages over time, one JSON line per change (every 30 seconds at most); append-only, kept, backed up; percentages and reset times only"
     },
     {
+     "path": "~/.local/share/project-cockpit/<project>/transcript-usage.jsonl",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "taskqueue/dispatcher (tools/transcript_usage.py)",
+     "note": "the exact token counts of the owner's interactive sessions, one JSON line per message (time, source label, session id, message id, model, four counts); mode 0600; numbers only, no text or paths; rewritten atomically on each run, not backed up on purpose (rebuildable from the transcripts)"
+    },
+    {
      "path": "~/.local/share/project-cockpit/<project>/proxy.sock",
      "kind": "file",
      "personal_data": false,
@@ -170,14 +177,19 @@
      "rotation": "none in the code"
     },
     {
+     "logger": "transcript_usage",
+     "file": null,
+     "rotation": "none: one summary line per run on standard error (sources, files, messages, skipped); no message text is ever logged"
+    },
+    {
      "logger": "proxy",
      "file": null,
      "rotation": "none: the proxy is started detached with its output discarded (start_proxy), so it keeps no log file; usage goes to proxy-usage.jsonl; the token is never logged"
     }
    ],
    "policy": {
-    "backup": "code: the git repository and its remote; the processing log: once a day to GDrive (5e); settings, state, proxy usage, logs, rendered LaunchAgent files and socket are not backed up on purpose; the token file is a secret and is not backed up",
-    "retention": "processing log: kept, no rotation in the code; task folders: not torn down by the Dispatcher, old ones are mopped up later (3m); settings, state and token: kept until the owner changes or deletes them; no database tables"
+    "backup": "code: the git repository and its remote; the processing log: once a day to GDrive (5e); settings, state, proxy usage, the transcript usage file (rebuildable), logs, rendered LaunchAgent files and socket are not backed up on purpose; the token file is a secret and is not backed up",
+    "retention": "processing log: kept, no rotation in the code; task folders: not torn down by the Dispatcher, old ones are mopped up later (3m); settings, state and token: kept until the owner changes or deletes them; transcript-usage.jsonl: rewritten on each run; no database tables"
    }
   },
   "taskqueue/worker": {
