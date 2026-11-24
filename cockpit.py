@@ -852,6 +852,8 @@ def get_state_served(p, fresh=False):
     S = get_state(fresh=fresh, p=p)
     if OFFLINE:  # the copy was taken from a steering instance: steering is off here whatever the cached state says
         S = dict(S, source=dict(S.get("source", {}), steering=False, simulate=False))
+    if "modules" in S:
+        S = dict(S, modules=ordered(p, S["modules"]))
     return dict(S, stale=refreshing(pk(p, "state")), staleNote=stale_note(p), refreshAfter=S.get("source", {}).get("fetchedAt", 0) + GH_REFRESH_S)
 
 
@@ -889,13 +891,38 @@ def line_counts(p, tracked):
     return out
 
 
+def clone_sizes(p):
+    """(tracked files, {path: physical lines}) of the clone, read once per two minutes for the Size tile and the module order."""
+    def build():
+        tracked = [x for x in run_git(p, ["ls-files", "-z"]).split("\0") if x]
+        return tracked, line_counts(p, tracked)
+    return cached(pk(p, "sizes"), build, 120, swr=True)
+
+
+def module_lines(p, ids):
+    """{module id: code lines} that orders the modules: from the clone with the module map, else from the code snapshot, else {}."""
+    try:
+        cfgm = load_modules(p)
+        if p.get("git") and cfgm:
+            return L.code_lines(clone_sizes(p)[1], cfgm.get("assign", []), ids)
+        if p.get("code"):
+            return L.snapshot_lines(json.load(open(pathlib.Path(p["code"]).expanduser() / "metrics.json")))
+    except Exception as ex:  # the module lists must not break because the sizes could not be read; they keep the map order
+        log.info("module sizes of %s unavailable (%s)", p.get("name", ""), str(ex)[:100])
+    return {}
+
+
+def ordered(p, mods):
+    """The module list in the one order of every list (logic.order_modules), each module with the `lines` it was ordered by."""
+    return L.order_modules(mods, module_lines(p, [m["id"] for m in mods if not m.get("virtual")]))
+
+
 def biggest_by_module(p, ids):
     """{module id: its biggest files (logic.biggest_files)} from the clone and the module map; {} without --git or a map."""
     cfgm = load_modules(p)
     if not (p.get("git") and cfgm):
         return {}
-    tracked = [x for x in run_git(p, ["ls-files", "-z"]).split("\0") if x]
-    sizes = line_counts(p, tracked)
+    tracked, sizes = clone_sizes(p)
     assign = cfgm.get("assign", [])
     base = f"https://github.com/{p['repo']}/blob/main/"
     return {mid: [dict(r, url=base + quote(r["path"])) for r in L.biggest_files({x: sizes[x] for x in L.module_files(tracked, assign, mid) if x in sizes})]
@@ -926,7 +953,7 @@ def local_modules_of(p):
     except (OSError, ValueError) as ex:
         log.warning("module map of %s unreadable: %s", p.get("name", ""), ex)
         cfgm = None
-    return L.local_modules((cfgm or {}).get("modules", []))
+    return ordered(p, L.local_modules((cfgm or {}).get("modules", [])))
 
 
 def card_metadata(p=None, now=None):

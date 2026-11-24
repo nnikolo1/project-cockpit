@@ -233,12 +233,15 @@ const modCell=id=>{const m=MODULES.find(x=>x.id===id);return m&&m.parent?esc(mod
 function stageBar(r){const n=STAGES.reduce((a,s)=>a+r[s],0);if(!n)return '';
   const col={embryo:'var(--s-embryo)',released:'var(--s-released)',wip:'var(--s-wip)',unmerged:'var(--s-unmerged)',failed:'var(--s-failed)',merged:'var(--s-merged)'};
   return STAGES.slice(0,6).map(s=>r[s]?'<i style="width:'+(r[s]/n*100)+'%;background:'+col[s]+'"></i>':'').join('');}
+/* The size every module list is ordered by (logic.order_modules on the server: biggest first, ties by name, unsized after, Unassigned last). */
+const lines=m=>m.lines.toLocaleString('en-US')+' lines';
+const sizeNote=m=>m.lines!=null?' · '+lines(m):'';
 /* Two chip rows: the top-level modules, then (indented) the sub-modules of the selected one. ex = only tasks at the module level itself. */
 function modFilter(cur,act,first,allOf,unsorted,extra){
   const top=cur.split('/')[0];
   const b=(v,l,on,x)=>'<button class="f" data-act="'+act+'" data-v="'+v+'"'+(x?' data-x="1"':'')+' aria-pressed="'+on+'">'+l+'</button>';
   const tops=MODULES.filter(m=>!m.parent).concat((extra||[]).filter(e=>!MODULES.some(m=>m.id===e.id)));
-  let h='<div class="filters" role="group" aria-label="Module filter">'+(first?b('all',first,cur==='all'):'')+tops.map(m=>b(m.id,esc(m.short),cur!=='all'&&top===m.id)).join('')+'</div>';
+  let h='<div class="filters" role="group" aria-label="Module filter">'+(first?b('all',first,cur==='all'):'')+tops.map(m=>b(m.id,esc(m.short)+(m.lines!=null?' <span class="muted" style="font-size:11px">'+lines(m)+'</span>':''),cur!=='all'&&top===m.id)).join('')+'</div>';
   const tm=MODULES.find(m=>m.id===top);
   if(cur!=='all'&&tm&&tm.children.length){const ex=UI.ex&&act==='modf';
     h+='<div class="filters sub" role="group" aria-label="Sub-module filter">'+b(top,allOf.replace('{}',esc(tm.short)),cur===top&&!ex)
@@ -426,7 +429,7 @@ function vCockpit(){
     const txt=n?STAGES.filter(s=>cnt[s]).map(s=>cnt[s]+' '+STAGE_LABEL[s]).join(' · '):'Nothing filed yet';
     const md=D.modDeadline[m.id]||'';
     const feed=FEED.filter(f=>inMod(f.mod,m.id)).slice(0,3);
-    h+='<div class="card" style="display:flex;flex-direction:column;gap:12px"><div class="row spread"><button class="linkbtn" data-act="mod" data-m="'+m.id+'"><h2>'+esc(m.name)+'</h2></button><span class="muted">'+(n?n+' tasks':'no tasks')+'</span></div>'
+    h+='<div class="card" style="display:flex;flex-direction:column;gap:12px"><div class="row spread"><button class="linkbtn" data-act="mod" data-m="'+m.id+'"><h2>'+esc(m.name)+'</h2></button><span class="muted">'+(n?n+' tasks':'no tasks')+sizeNote(m)+'</span></div>'
      +'<div class="bar" aria-hidden="true">'+bar+'</div><span class="muted" style="font-size:13px">'+txt+'</span>'
      +subBlock(m)
      +(CODE.configured?'<dl class="facts"><dt>Code files / lines</dt><dd>'+(c.code==null?'<span class="muted">no data</span>':(c.codeFiles||0).toLocaleString('en-US')+' / '+c.code.toLocaleString('en-US'))+'</dd><dt>Worst complexity</dt><dd>'+nd(c.cc)+'</dd><dt>Import cycles</dt><dd>'+nd(c.cyc,x=>x+' files')+'</dd><dt>Code snapshot</dt><dd>'+snapAge()+'</dd></dl>':'')
