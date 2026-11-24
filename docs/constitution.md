@@ -60,23 +60,27 @@ There can be relations between tasks. It could be a "vertical" 1:n relationship 
 
 ## The Life Stages of a Task
 
-Much like a human, a task begins its life as an embryo - it has conceived either by a human or an agent. The "embryo" is merely recorded as "conceived" in the Event Log of the project management system. It springs to life once it is "released" by the Manager. Once it is released it can be assigned by the Orchestator to a Worker. Once it is assigned to a Worker it starts its (usually brief) "in progress" stage. Then it will be "completed".
+Much like a human, a task begins its life as an embryo: it has been conceived by a human or an agent. At the moment all embryos (apart from questions and decisions) are regarded as released. A released task is assigned by the Dispatcher to a Worker, and while the Worker works on it the task is WIP. When the Worker has finished, the task is unmerged, or failed if the Worker gave up or left no usable result. Once the Interactive Session Agent has merged its branch into the main branch, the task is merged. Only the Owner or an interactive agent can change the status of a task once it is merged or failed.
 
 ## The Roles
 
-We have already mentioned the 3 main roles:
+The roles are the Owner, the Dispatcher, the Workers and the Interactive Session Agent.
 
-### The Manager
+### The Owner
 
-This is the human. It is only him/her who can "release" tasks.
+This is the human, acting via the Cockpit GUI.
 
-### The Orchestrator
+### The Dispatcher
 
-This is an AI agent which is, essentially, a middleman between the Manager and the Workers. It assigns tasks to workers, and receives (and, potentially, validates) the output. The Orchestrator is the one merging and pushing from work-trees into the main branch of the git repo. It can create tasks and change their attributes. It is the only agent able to write to the Event Log. However, certain type of events can be entered into the Event Log only by the Manager or need to be approved by him/her: the release of the task, the change of priority, the setting or change of a deadline. The write rules related to the Event Log are enforced by a IAM, not by a LLM policy.
+This is a deterministic procedure, not an AI agent. It runs on the host and assigns released tasks to Workers, following priority and taking deadlines and blockers into account. When a Worker has ended, it decides from the Worker's good-bye note whether the task is unmerged or failed.
+
+### The Interactive Session Agent
+
+This is an AI agent working with the Owner in an interactive session. It merges the Workers' results into the main branch and then sets the task to merged.
 
 ### A Worker
 
-This is an AI agent. It may be a specialised one or not. Multiple Workers may be active at any given time. Each worker will write to a separate work tree in the git repo.
+This is a headless AI agent that works on one task, in its own clone, as an unprivileged user in a container. Multiple Workers may be active at any given time.
 
 ## The Event Log
 
