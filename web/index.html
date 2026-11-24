@@ -621,9 +621,13 @@ function vSettings(){
    +(ro?'<span class="muted">'+(OFF?'This is an offline copy from a backup':'This Cockpit was started with --read-only')+': the values cannot be changed here.</span>':'<div><button class="btn primary">Save</button></div>')+'</form></div>';
 }
 const USEF=[['input_tokens','Input'],['output_tokens','Output'],['cache_creation_input_tokens','Cache write'],['cache_read_input_tokens','Cache read'],['total','Sum']];
-function usageTable(title,rows){
+/* Every period table of the Token Usage page: the most recent period at the top, a period without data has no row (owner, 2026-11-24).
+   rows: as the server lists them, oldest first; has(r): whether the row has data. */
+function recentRows(rows,has){return (rows||[]).filter(has||(()=>true)).reverse();}
+function usageTable(title,rows,periods){
   const nf=x=>x.toLocaleString('en-US');
   if(!rows)return '<div class="card"><h2>'+title+'</h2><span class="muted">no data</span></div>';
+  if(periods)rows=recentRows(rows,r=>r.total>0);
   const mx=Math.max(1,...rows.map(r=>r.total));
   return '<div class="card"><h2>'+title+'</h2><div class="tblbox narrow"><table><thead><tr><th>'+title.split(' ').pop()+'</th>'+USEF.map(f=>'<th>'+f[1]+'</th>').join('')+'<th></th></tr></thead><tbody>'
    +rows.map(r=>'<tr><td class="mono">'+esc(r.key)+'</td>'+USEF.map(f=>'<td class="mono">'+nf(r[f[0]])+'</td>').join('')+'<td style="width:120px"><div class="bar" aria-hidden="true"><i style="width:'+(100*r.total/mx)+'%;background:var(--accent)"></i></div></td></tr>').join('')
@@ -633,9 +637,10 @@ function quotaCard(q){
   const T='Vendor quota used';
   if(!q)return '<div class="card"><h2>'+T+'</h2><span class="muted">no data</span></div>';
   const pc=x=>x==null?'':x+' %',bar=x=>'<div class="bar" aria-hidden="true"><i style="width:'+Math.min(100,x||0)+'%;background:var(--accent)"></i></div>';
+  const rs=recentRows(q.days,d=>d.five_hour!=null||d.seven_day!=null);
   return '<div class="card"><h2>'+T+' per day (highest reading)</h2><div class="tblbox narrow"><table><thead><tr><th>Day</th><th>5-hour</th><th></th><th>Weekly</th><th></th></tr></thead><tbody>'
-   +q.days.map(d=>'<tr><td class="mono">'+esc(d.key)+'</td><td class="mono">'+pc(d.five_hour)+'</td><td style="width:120px">'+bar(d.five_hour)+'</td><td class="mono">'+pc(d.seven_day)+'</td><td style="width:120px">'+bar(d.seven_day)+'</td></tr>').join('')
-   +'</tbody></table></div></div>';
+   +rs.map(d=>'<tr><td class="mono">'+esc(d.key)+'</td><td class="mono">'+pc(d.five_hour)+'</td><td style="width:120px">'+bar(d.five_hour)+'</td><td class="mono">'+pc(d.seven_day)+'</td><td style="width:120px">'+bar(d.seven_day)+'</td></tr>').join('')
+   +(rs.length?'':'<tr><td class="muted" colspan="5">no quota readings in the last 90 days</td></tr>')+'</tbody></table></div></div>';
 }
 function latestCard(q,today){
   /* "Today's readings": the hours of today (UTC) with readings, newest first; "Earlier readings": every other graded row (owner, 2026-11-24) */
@@ -643,7 +648,7 @@ function latestCard(q,today){
   if(!q)return '<div class="card"><h2>Today’s readings</h2><span class="muted">no data</span></div>';
   today=today||new Date().toISOString().slice(0,10);
   const rng=s=>s&&s.first!=null?pc(s.first)+(s.last!==s.first?' → '+pc(s.last):'')+(s.high>Math.max(s.first,s.last)?' <span class="muted">(peak '+pc(s.high)+')</span>':''):'';
-  const isToday=r=>r.level==='hour'&&r.key.slice(0,10)===today,rows=q.periods.slice().reverse();
+  const isToday=r=>r.level==='hour'&&r.key.slice(0,10)===today,rows=recentRows(q.periods,r=>r.readings>0);
   const card=(title,note,rs,none)=>'<div class="card"><h2>'+title+'</h2><span class="muted">'+note+'</span><div class="tblbox narrow"><table><thead><tr><th>Period (UTC)</th><th>Per</th><th>Readings</th><th>5-hour</th><th>5-hour resets</th><th>Weekly</th><th>Weekly resets</th></tr></thead><tbody>'
    +rs.map(r=>'<tr><td class="mono">'+esc(r.label)+'</td><td>'+r.level+'</td><td class="mono">'+r.readings+'</td><td class="mono">'+rng(r.five_hour)+'</td><td class="mono">'+hhmm(r.reset5)+'</td><td class="mono">'+rng(r.seven_day)+'</td><td class="mono">'+hhmm(r.reset7)+'</td></tr>').join('')
    +(rs.length?'':'<tr><td class="muted" colspan="7">'+none+'</td></tr>')+'</tbody></table></div></div>';
@@ -657,7 +662,7 @@ function sessionCards(T){
   const card=(title,note,head,rows,row,n)=>'<div class="card"><h2>'+title+'</h2><span class="muted">'+note+'</span><div class="tblbox narrow"><table><thead><tr>'+head+'<th>Messages</th>'+cols+(n?'<th>5-hour peak</th><th>Weekly peak</th>':'')+'</tr></thead><tbody>'
     +rows.map(row).join('')+(rows.length?'':'<tr><td class="muted" colspan="9">no data</td></tr>')+'</tbody></table></div></div>';
   if(!T)return '<div class="card"><h2>Interactive sessions</h2><span class="muted">no data</span></div>';
-  return card('Interactive sessions per period','Exact token counts of the interactive Claude Code sessions, in the periods of “Today’s readings” and “Earlier readings” (UTC), every hour of the current day included, with the highest quota percentage of the same period. Days before the transcripts exist come from the tool’s statistics cache as a daily aggregate without a split: counted in the sum only, marked “daily aggregate, no split”.','<th>Period (UTC)</th><th>Per</th>',T.periods.slice().reverse(),
+  return card('Interactive sessions per period','Exact token counts of the interactive Claude Code sessions, in the periods of “Today’s readings” and “Earlier readings” (UTC), newest first, only the periods with use, with the highest quota percentage of the same period. Days before the transcripts exist come from the tool’s statistics cache as a daily aggregate without a split: counted in the sum only, marked “daily aggregate, no split”.','<th>Period (UTC)</th><th>Per</th>',recentRows(T.periods,r=>r.messages>0||r.total>0),
       r=>'<tr><td class="mono">'+esc(r.label)+(r.aggregate?' <span class="muted" title="'+nf(r.aggregate)+' tokens of the tool’s statistics cache, counted in the sum only">incl. daily aggregate, no split</span>':'')+'</td><td>'+r.level+'</td>'+cells(r)+'<td class="mono">'+pc(r.five_hour)+'</td><td class="mono">'+pc(r.seven_day)+'</td></tr>',true)
    +card('Interactive sessions per source','Last 90 days.','<th>Source</th>',T.sources,r=>'<tr><td class="mono">'+esc(r.key)+'</td>'+cells(r)+'</tr>')
    +card('Sessions with the most tokens','Last 90 days, at most 20.','<th>Session</th><th>Source</th>',T.sessions,r=>'<tr><td class="mono">'+esc(r.key)+'</td><td class="mono">'+esc(r.source)+'</td>'+cells(r)+'</tr>');
@@ -677,9 +682,9 @@ function vUsage(){
   const tk=USE.tasks;
   const dv={},fh={},ag=(USE.sessions&&USE.sessions.aggregate_days)||{};(USE.days||[]).forEach(r=>{dv[r.key]=r.total;});Object.keys(ag).forEach(d=>{dv[d]=(dv[d]||0)+ag[d];});((USE.quota&&USE.quota.days)||[]).forEach(r=>{if(r.five_hour!=null)fh[r.key]=r.five_hour;});
   const hm='<div class="card"><h2>Tokens per day</h2>'+heatmap(dv,(d,n)=>nf(n)+' tokens on '+d+(ag[d]!=null?'\nincl. '+nf(ag[d])+' daily aggregate, no split':'')+(fh[d]!=null?'\nhighest 5-hour reading '+fh[d]+' %':''),'Sum of the four token counts per day (UTC), as in the per-day table below; the proxy file keeps '+((USE.days||[]).length)+' days. Days before the interactive transcripts add the statistics cache’s daily total (daily aggregate, no split).')+'</div>';
-  return head+latestCard(USE.quota)+sessionCards(USE.sessions)+hm+projectsCard()+usageTable('Usage per day',USE.days)+usageTable('Usage per 5-hour window',USE.windows&&USE.windows.map(r=>Object.assign({},r,{key:r.key+' ('+r.kind+')'})))+quotaCard(USE.quota)+usageTable('Usage per Worker',USE.workers)
+  return head+latestCard(USE.quota)+sessionCards(USE.sessions)+hm+projectsCard()+usageTable('Usage per day',USE.days,true)+quotaCard(USE.quota)+usageTable('Usage per 5-hour window',USE.windows&&USE.windows.map(r=>Object.assign({},r,{key:r.key+' ('+r.kind+')'})),true)+usageTable('Usage per Worker',USE.workers)
    +'<div class="card"><h2>Per task</h2><div class="tblbox narrow"><table><thead><tr><th>Task</th><th>Worker</th><th>Launched (UTC)</th><th>Proxy sum</th><th>Good-bye note</th><th>Difference</th></tr></thead><tbody>'
-   +(tk?tk.map(t=>'<tr><td class="mono">'+esc(t.task)+'</td><td class="mono">'+esc(t.worker||'')+'</td><td class="mono">'+esc(t.start)+'</td><td class="mono">'+nf(t.proxy)+(t.overlap?' <span class="muted" title="Another task ran at the same time; the sum may include its requests">overlap</span>':'')+'</td><td class="mono">'+nf(t.note)+'</td><td class="mono">'+nf(t.diff)+'</td></tr>').join(''):'')
+   +(tk?recentRows(tk).map(t=>'<tr><td class="mono">'+esc(t.task)+'</td><td class="mono">'+esc(t.worker||'')+'</td><td class="mono">'+esc(t.start)+'</td><td class="mono">'+nf(t.proxy)+(t.overlap?' <span class="muted" title="Another task ran at the same time; the sum may include its requests">overlap</span>':'')+'</td><td class="mono">'+nf(t.note)+'</td><td class="mono">'+nf(t.diff)+'</td></tr>').join(''):'')
    +(tk&&tk.length?'':'<tr><td class="muted" colspan="6">no data</td></tr>')+'</tbody></table></div><p class="muted" style="font-size:13px;margin:8px 0 0">The proxy sum counts the requests of the task’s Worker between the task’s launch and its last log entry. Older tasks, launched before the log named the Worker, count all Workers’ requests in that span (marked overlap when another task ran then).</p></div></div>';
 }
 function vRules(){

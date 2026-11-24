@@ -27,6 +27,7 @@ def quota(*ts):
 def cards(qrep, today):
     """The HTML of latestCard() for the quota report, split per card: {title: html}."""
     esc = re.search(r"^function esc\(s\).*$", PAGE, re.M).group(0)
+    esc += re.search(r"^function recentRows\(rows,has\).*$", PAGE, re.M).group(0)
     fn = PAGE[PAGE.index("function latestCard(q,today){"):PAGE.index("function sessionCards(T){")]
     r = subprocess.run(["node", "-e", esc + fn + "process.stdout.write(latestCard(%s,%s))" % (json.dumps(qrep), json.dumps(today))],
                        capture_output=True, text=True)
