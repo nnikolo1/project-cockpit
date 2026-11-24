@@ -41,7 +41,7 @@ Every requirement below is the owner's own statement or was approved by the owne
 - 3k. At each firing the Dispatcher starts the proxy on its host socket if it is not listening, then starts the container if it is not running and starts the relay inside it if it is not running. If any of them cannot be started, it skips the firing and records the reason.
 - 3l. The start check (3j) is made at each firing, so a Worker that has not written "started" is killed within one firing interval after the 1-minute limit.
 - 3m. The Dispatcher does not tear down the Workers' workspaces. Old task folders are mopped up later.
-- 3n. If the free disk space on the data volume is below 10 GiB, the Dispatcher skips the firing and records the reason.
+- 3n. If the free disk space on the data volume is below 10 GiB, the Dispatcher skips the firing and records the reason. A skipped firing starts no new Worker; finished Workers are still collected and runaway Workers are still stopped.
 - 3o. The Dispatcher stores the launch time of each Worker. A Worker's last record is the time of its last request through the proxy; if the proxy cannot tell, it is the last-modified time of the Worker's session transcript. The runaway checks (3i) are made at each firing, so a Worker may exceed its limits by up to one firing interval.
 - 3p. Every call the Dispatcher makes to the container tool has a time limit. If a call exceeds it, the Dispatcher skips the firing and records the reason.
 
