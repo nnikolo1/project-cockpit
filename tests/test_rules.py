@@ -38,6 +38,14 @@ def test_agent_and_manager_detection():
     assert not L.is_manager("Bob", "bob@x", RC["managers"])
 
 
+def test_bots_default_and_custom():
+    assert RC["bots"] == list(L.BOT)
+    custom = L.rules_config({"rules": {**CFG["rules"], "bots": ["MyAgent"]}})
+    assert custom["bots"] == ["myagent"]
+    assert L.is_agent_assisted("", "MyAgent", "m@x", custom["bots"])
+    assert not L.is_agent_assisted("", "dependabot[bot]", "d@x", custom["bots"])
+
+
 def test_numstat_and_diff_excerpt():
     assert L.parse_numstat("3\t1\tCLAUDE.md\n-\t-\tdocs/adr/1.md\n5\t5\tsrc/a.py\n", G) == [
         {"path": "CLAUDE.md", "group": "Instructions", "add": 3, "del": 1}, {"path": "docs/adr/1.md", "group": "Decisions", "add": 0, "del": 0}]

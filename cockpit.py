@@ -521,7 +521,7 @@ def build_rules(p=None):
         return dict(configured=False)
     t0, gs, spec = time.time(), rc["groups"], L.rule_pathspecs(rc["groups"])
     fmt = ["log", "--no-renames", f"--format={L.LOG_FMT}"]
-    changes = L.parse_rule_changes(run_git(p, fmt + ["--since=90.days.ago", "--numstat", "--", *spec]), run_git(p, fmt + ["--since=90.days.ago", "-p", "-U0", "--", *spec]), gs, rc["managers"])
+    changes = L.parse_rule_changes(run_git(p, fmt + ["--since=90.days.ago", "--numstat", "--", *spec]), run_git(p, fmt + ["--since=90.days.ago", "-p", "-U0", "--", *spec]), gs, rc["managers"], rc["bots"])
     last = L.parse_last_changes(run_git(p, fmt + ["--name-only", "--", *spec]), gs)
     files = L.rule_files([p for p in run_git(p, ["ls-files", "-z", "--", *spec]).split("\0") if p], last, gs)
     try:
