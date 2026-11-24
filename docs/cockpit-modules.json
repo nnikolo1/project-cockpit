@@ -3,7 +3,7 @@
  "modules": [
   {"id": "githubclient", "name": "GitHub client", "desc": "the Cockpit app as a client of GitHub: logic.py (pure rules, parsing, ranking, card views, settings and token-usage views) and cockpit.py (HTTP server, gh calls, caching, actions)"},
   {"id": "web", "name": "Cockpit webpage", "desc": "web/index.html: the single-page user interface"},
-  {"id": "docs", "name": "Documentation and contracts", "desc": "docs/: constitution, ADRs, memos, contracts, deployment, screenshots, owner defaults, footprint declarations and this map"},
+  {"id": "docs", "name": "Documentation", "desc": "docs/: constitution, ADRs, memos, contracts, deployment, screenshots, owner defaults, footprint declarations and this map"},
   {"id": "internal", "name": "Internal", "desc": "what keeps the project and its assistants running, as opposed to the product (template default for every project)"},
   {"id": "taskqueue", "name": "Task Queue", "desc": "the Dispatcher and the Workers that work the task queue, with their specification (docs/specs/dispatcher-and-workers.md)"},
   {"id": "taskqueue/dispatcher", "name": "Dispatcher", "desc": "the host-side procedure that assigns released tasks to Workers, collects their results, and runs the proxy and the processing log"},
