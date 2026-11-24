@@ -1,0 +1,406 @@
+import json
+import pathlib
+import sys
+from dataclasses import dataclass
+
+import pytest
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+from dispatcher import core, runtime as rt  # noqa: E402
+
+NOW = 1_000_000.0
+
+
+@dataclass
+class T:
+    id: str
+    priority: int = 2
+    due: str = None
+    blocked: bool = False
+    unblocks: int = 0
+    must: bool = False
+    repo: str = "/repo"
+    title: str = "title"
+    text: str = "text"
+    number: int = 1
+
+
+class FakeTasks:
+    def __init__(self, tasks=()):
+        self.tasks, self.states, self.fetched, self.fail_fetch = list(tasks), [], [], False
+
+    def released(self):
+        return self.tasks
+
+    def set_state(self, tid, state):
+        self.states.append((tid, state))
+
+    def fetch_branch(self, tid, path, branch):
+        if self.fail_fetch:
+            raise RuntimeError("bad bundle")
+        self.fetched.append((tid, path, branch))
+
+
+class FakeLog:
+    def __init__(self):
+        self.events, self.failures, self.beats = [], [], []
+
+    def event(self, tid, folder, state, reason=None):
+        self.events.append((tid, state))
+
+    def failure(self, tid, folder, reason):
+        self.failures.append((tid, reason))
+
+    def heartbeat(self, line):
+        self.beats.append(line)
+
+
+class FakeProc:
+    pid = 4242
+
+
+class FakeRuntime:
+    def __init__(self, area):
+        self.cfg = rt.Config(area=str(area), socket="/s")
+        self.outbox = {}                 # task id -> (started, note, reason)
+        self.launched, self.prepared = [], []
+        self.egress, self.container_error, self.prepare_error = True, None, None
+
+    def ensure_container(self):
+        if self.container_error:
+            raise self.container_error
+
+    def egress_blocked(self, user):
+        return self.egress
+
+    def prepare_task(self, tid, repo, text):
+        if self.prepare_error:
+            raise self.prepare_error
+        self.prepared.append((tid, repo, text))
+        return f"{self.cfg.area}/{tid}"
+
+    def launch(self, user, tid):
+        self.launched.append((user, tid))
+        return FakeProc()
+
+    def read_outbox(self, tid):
+        return self.outbox.get(tid, (False, None, "no note"))
+
+    def bundle_path(self, tid):
+        return f"/b/{tid}"
+
+    def stats(self):
+        return None
+
+
+class World:
+    def __init__(self, tmp_path, tasks=(), **settings):
+        self.now, self.free, self.counts, self.mtime = NOW, 50 * core.GIB, {}, None
+        self.alive_pids, self.killed, self.ahead = set(), [], 1
+        self.runtime, self.tasks, self.plog = FakeRuntime(tmp_path), FakeTasks(tasks), FakeLog()
+        self.state = str(tmp_path / "state.json")
+        self.settings = dict(core.DEFAULTS, **settings)
+
+    def dispatcher(self):
+        p = core.Probes(
+            now=lambda: self.now, free_disk=lambda: self.free, proxy_counts=lambda: dict(self.counts),
+            transcript_mtime=lambda u: self.mtime, alive=lambda pid: pid in self.alive_pids,
+            kill=self.killed.append, ensure_proxy=lambda: None, ensure_relay=lambda: None,
+            commits_ahead=lambda repo, tid: self.ahead, heartbeat_parts=lambda: {"memory_pressure": "normal"})
+        return core.Dispatcher(self.settings, self.state, self.runtime, self.tasks, self.plog, p)
+
+    def fire(self):
+        return self.dispatcher().fire()
+
+    def worker(self, user="worker1"):
+        return core.load_state(self.state)["workers"][user]
+
+
+# --- settings ---
+def test_settings_defaults_when_file_missing(tmp_path):
+    assert core.load_settings(str(tmp_path / "none.json")) == core.DEFAULTS
+
+
+def test_settings_keys_override_and_bad_values_fall_back(tmp_path):
+    p = tmp_path / "s.json"
+    p.write_text(json.dumps({"enabled": False, "workers": 2, "runaway_minutes": "x", "retries": 0, "idle_minutes": 0}))
+    s = core.load_settings(str(p))
+    assert s["enabled"] is False and s["workers"] == 2
+    assert s["runaway_minutes"] == 40 and s["idle_minutes"] == 10
+
+
+def test_settings_garbage_file(tmp_path):
+    p = tmp_path / "s.json"
+    p.write_text("[1]")
+    assert core.load_settings(str(p)) == core.DEFAULTS
+    p.write_text("{nope")
+    assert core.load_settings(str(p)) == core.DEFAULTS
+
+
+# --- ranking ---
+def test_ranking_order():
+    p1, p2, late = T("a", priority=1), T("b"), T("c", due="2027-01-02")
+    early, many, must = T("d", due="2027-01-01"), T("e", unblocks=3), T("f", must=True)
+    assert core.choose_task([p2, p1], set()).id == "a"
+    assert core.choose_task([late, early, p2], set()).id == "d"      # a deadline beats none
+    assert core.choose_task([p2, many], set()).id == "e"
+    assert core.choose_task([p2, must], set()).id == "f"
+
+
+def test_blocked_and_active_tasks_are_skipped():
+    assert core.choose_task([T("a", blocked=True), T("b")], {"b"}) is None
+
+
+# --- starting ---
+def test_starts_one_worker_per_firing(tmp_path):
+    w = World(tmp_path, [T("x-1"), T("x-2", priority=3)])
+    assert w.fire() == "started worker1 on x-1"
+    assert w.runtime.launched == [("worker1", "x-1")]
+    assert w.runtime.prepared[0][2].startswith("# title")
+    assert w.worker()["launched"] == NOW and ("x-1", "launched") in w.plog.events
+    assert "started worker1 on x-1" in w.plog.beats[0]
+
+
+def test_second_firing_uses_next_worker_and_task(tmp_path):
+    w = World(tmp_path, [T("x-1"), T("x-2")])
+    w.fire()
+    w.alive_pids = {4242}
+    w.now += 30
+    assert w.fire() == "started worker2 on x-2"
+
+
+def test_no_free_worker_and_no_task(tmp_path):
+    w = World(tmp_path, [T("x-1")], workers=1)
+    w.fire()
+    w.alive_pids = {4242}
+    assert "all Workers busy" in w.fire()
+    (tmp_path / "b").mkdir()
+    assert "no released task" in World(tmp_path / "b").fire()
+
+
+def test_switched_off_starts_nothing(tmp_path):
+    w = World(tmp_path, [T("x-1")], enabled=False)
+    assert "switched off" in w.fire()
+    assert w.runtime.launched == []
+
+
+def test_skip_low_disk(tmp_path):
+    w = World(tmp_path, [T("x-1")])
+    w.free = 5 * core.GIB
+    assert w.fire().startswith("skipped: free disk below 10 GiB")
+    assert w.runtime.launched == [] and "skipped" in w.plog.beats[0]
+
+
+def test_skip_when_container_cannot_start_or_times_out(tmp_path):
+    w = World(tmp_path, [T("x-1")])
+    w.runtime.container_error = rt.ContainerError("boom")
+    assert "cannot start proxy, container or relay" in w.fire()
+    w.runtime.container_error = rt.ContainerTimeout("slow")
+    assert "over its time limit" in w.fire()
+    assert w.runtime.launched == []
+
+
+def test_skip_when_proxy_cannot_start(tmp_path):
+    w = World(tmp_path, [T("x-1")])
+    d = w.dispatcher()
+    d.probes.ensure_proxy = lambda: (_ for _ in ()).throw(core.Skip("proxy down"))
+    assert d.fire() == "skipped: cannot start proxy, container or relay: proxy down"
+
+
+def test_skip_when_egress_open(tmp_path):
+    w = World(tmp_path, [T("x-1")])
+    w.runtime.egress = False
+    assert "egress check failed" in w.fire()
+    assert w.runtime.launched == []
+
+
+def test_unpreparable_task_fails_instead_of_looping(tmp_path):
+    w = World(tmp_path, [T("x-1")])
+    w.runtime.prepare_error = FileExistsError("taken")
+    assert "failed" in w.fire()
+    assert ("x-1", "failed") in w.tasks.states and w.plog.failures[0][0] == "x-1"
+
+
+def test_launch_timeout_skips(tmp_path):
+    w = World(tmp_path, [T("x-1")])
+    w.runtime.launch = lambda u, t: (_ for _ in ()).throw(rt.ContainerTimeout("t"))
+    assert "over its time limit" in w.fire()
+
+
+def test_workers_setting_is_capped_at_image(tmp_path):
+    w = World(tmp_path, [T(f"x-{i}") for i in range(10)], workers=99)
+    for _ in range(8):
+        w.alive_pids = {4242}
+        w.fire()
+    assert len(w.runtime.launched) == w.runtime.cfg.image_workers
+
+
+# --- running Workers ---
+def start_one(tmp_path, **kw):
+    w = World(tmp_path, [T("x-1")], **kw)
+    w.fire()
+    w.alive_pids = {4242}
+    w.tasks.tasks = []
+    return w
+
+
+def test_started_file_sets_wip(tmp_path):
+    w = start_one(tmp_path)
+    w.runtime.outbox["x-1"] = (True, None, "no note")
+    w.now += 120
+    w.counts = {"worker1": 1}
+    w.fire()
+    assert ("x-1", "wip") in w.tasks.states and w.worker()["started"]
+    w.fire()
+    assert w.tasks.states.count(("x-1", "wip")) == 1
+
+
+def test_no_start_within_a_minute_kills(tmp_path):
+    w = start_one(tmp_path)
+    w.now += 59
+    w.fire()
+    assert w.killed == []
+    w.now += 2
+    w.fire()
+    assert w.killed == [4242] and ("x-1", "no start") in w.plog.failures
+    assert ("x-1", "failed") in w.tasks.states
+    assert core.load_state(w.state)["workers"] == {}
+
+
+def started(w):
+    w.runtime.outbox["x-1"] = (True, None, "no note")
+    w.now += 30
+    w.counts = {"worker1": 1}
+    w.fire()                                   # WIP, the proxy saw a request at NOW+30
+
+
+def test_over_limit_kills(tmp_path):
+    w = start_one(tmp_path)
+    started(w)
+    for _ in range(40):                        # keep it busy with requests
+        w.now += 60
+        w.counts["worker1"] += 1
+        w.fire()
+    assert w.killed == [4242] and ("x-1", "over 40 minutes") in w.plog.failures
+
+
+def test_no_activity_kills_by_proxy_time(tmp_path):
+    w = start_one(tmp_path)
+    started(w)
+    w.now += 10 * 60
+    w.fire()
+    assert w.killed == []                      # exactly at the limit
+    w.now += 1
+    w.fire()
+    assert w.killed == [4242] and ("x-1", "no activity") in w.plog.failures
+
+
+def test_transcript_mtime_is_the_fallback_record(tmp_path):
+    w = start_one(tmp_path)
+    w.runtime.outbox["x-1"] = (True, None, "no note")
+    w.now += 30
+    w.fire()                                   # no proxy counts at all
+    w.now += 15 * 60
+    w.mtime = w.now - 60                       # transcript touched a minute ago
+    w.fire()
+    assert w.killed == []
+    w.mtime = w.now - 11 * 60
+    w.fire()
+    assert w.killed == [4242]
+
+
+def test_limits_come_from_settings(tmp_path):
+    w = start_one(tmp_path, runaway_minutes=5, idle_minutes=2)
+    started(w)
+    w.now += 3 * 60
+    w.fire()
+    assert ("x-1", "no activity") in w.plog.failures
+
+
+def finish(w, note, ahead=1):
+    w.runtime.outbox["x-1"] = (True, note, None if note else "no note")
+    w.alive_pids = set()
+    w.ahead = ahead
+    w.now += 100
+    w.fire()
+
+
+def test_done_with_commit_is_unmerged_and_branch_fetched(tmp_path):
+    w = start_one(tmp_path)
+    finish(w, {"outcome": "done", "branch": "b", "summary": "s", "tokens": 5})
+    assert w.tasks.fetched == [("x-1", "/b/x-1", "b")]
+    assert ("x-1", "unmerged") in w.tasks.states and core.load_state(w.state)["workers"] == {}
+
+
+def test_done_without_commit_fails(tmp_path):
+    w = start_one(tmp_path)
+    finish(w, {"outcome": "done", "branch": "b", "summary": "s", "tokens": 5}, ahead=0)
+    assert w.plog.failures == [("x-1", "no commit")]
+
+
+def test_gave_up_fails(tmp_path):
+    w = start_one(tmp_path)
+    finish(w, {"outcome": "gave_up", "branch": "b", "summary": "s", "tokens": 5})
+    assert ("x-1", "failed") in w.tasks.states and w.tasks.fetched == []
+
+
+def test_no_note_and_unusable_note_fail_with_reason(tmp_path):
+    w = start_one(tmp_path)
+    finish(w, None)
+    assert w.plog.failures == [("x-1", "no note")]
+    (tmp_path / "2").mkdir()
+    w2 = start_one(tmp_path / "2")
+    w2.runtime.outbox["x-1"] = (True, None, "unusable note")
+    w2.alive_pids = set()
+    w2.fire()
+    assert w2.plog.failures == [("x-1", "unusable note")]
+
+
+def test_fetch_failure_fails_the_task_not_the_firing(tmp_path):
+    w = start_one(tmp_path)
+    w.tasks.fail_fetch = True
+    finish(w, {"outcome": "done", "branch": "b", "summary": "s", "tokens": 5})
+    assert w.plog.failures[0][1].startswith("unusable bundle")
+
+
+def test_workspace_is_not_torn_down(tmp_path):
+    w = start_one(tmp_path)
+    (tmp_path / "x-1").mkdir()
+    finish(w, None)
+    assert (tmp_path / "x-1").exists()
+
+
+# --- heartbeat ---
+def test_heartbeat_line_contents(tmp_path):
+    w = start_one(tmp_path)
+    d = w.dispatcher()
+    d.probes.heartbeat_parts = lambda: {"memory_pressure": "warn", "free_disk": "40.0 GiB", "load": "1.00 2.00 3.00",
+                                        "power": "AC", "data_size": "10 MiB", "container": "mem 1G/4G"}
+    line = d.heartbeat(core.load_state(w.state), "nothing to do")
+    for part in ("worker1=x-1", "nothing to do", "warn", "40.0 GiB", "1.00 2.00 3.00", "AC", "10 MiB", "mem 1G/4G"):
+        assert part in line
+
+
+def test_heartbeat_without_container_report(tmp_path):
+    w = World(tmp_path)
+    assert "not reported" in w.dispatcher().heartbeat({"workers": {}}, "nothing to do")
+
+
+# --- default probes ---
+def test_read_proxy_counts(tmp_path):
+    f = tmp_path / "u.jsonl"
+    f.write_text('{"worker":"worker1"}\nbad\n{"worker":"worker1"}\n{"worker":"worker2"}\n')
+    assert core.read_proxy_counts(str(f)) == {"worker1": 2, "worker2": 1}
+    assert core.read_proxy_counts(str(tmp_path / "none")) == {}
+
+
+def test_state_roundtrip_and_missing(tmp_path):
+    assert core.load_state(str(tmp_path / "nope")) == {"workers": {}}
+    core.save_state(str(tmp_path / "s"), {"workers": {"worker1": {"a": 1}}})
+    assert core.load_state(str(tmp_path / "s"))["workers"]["worker1"] == {"a": 1}
+
+
+def test_pid_alive_for_self_and_dead():
+    import os
+    assert core.pid_alive(os.getpid())
+    assert not core.pid_alive(2 ** 22 + 12345)
