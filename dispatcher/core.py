@@ -73,9 +73,15 @@ def rank_key(t):
     return (t.priority, t.due or "9999-99-99", -t.unblocks, not t.must)
 
 
-def choose_task(tasks, active_ids):
-    """The best released task that is not blocked and not already being worked on, or None."""
-    ready = [t for t in tasks if not t.blocked and t.id not in active_ids]
+def filed_by_worker(task, worker_id):
+    """2b: a finding is never worked on by the agent that filed it. A Worker's id is its user name (and the id of the task it works on, which is never the finding's own); an interactive
+    session is bound by the policy text, not by this check."""
+    return bool(task.filed_by) and worker_id is not None and task.filed_by == worker_id
+
+
+def choose_task(tasks, active_ids, worker_id=None):
+    """The best released task that is not blocked, not already being worked on and not filed by this Worker, or None."""
+    ready = [t for t in tasks if not t.blocked and t.id not in active_ids and not filed_by_worker(t, worker_id)]
     return min(ready, key=rank_key) if ready else None
 
 
@@ -238,10 +244,10 @@ class Dispatcher:
             if t.id not in active and os.path.exists(os.path.join(self.runtime.cfg.area, t.id)):
                 log.info("task %s skipped: its folder already exists in the Workers' area", t.id)
                 active.add(t.id)
-        task = choose_task(released, active)
+        user = free[0]
+        task = choose_task(released, active, user)
         if task is None:
             return "nothing to do (no released task)"
-        user = free[0]
         try:
             if not self.runtime.egress_blocked(user):
                 raise Skip(f"egress check failed for {user}")

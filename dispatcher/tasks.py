@@ -35,6 +35,7 @@ class Task:
     blocked: bool = False
     unblocks: int = 0
     must: bool = False
+    filed_by: str = None
 
 
 def write_task_md(task, path):
@@ -91,7 +92,7 @@ class GitHubTasks:
 
     def released(self):
         """Open, unassigned tasks without a state label, except questions and decisions, that count as released (2b), as Tasks: any task
-        labelled `released`; an embryo with no author label or `author:owner`; an `author:interactive` embryo 10 days after its creation."""
+        labelled `released` or `policy-finding` (a finding, released at once; its stage is set in logic.stage); an embryo with no author label or `author:owner`; an `author:interactive` embryo 10 days after its creation."""
         issues, events = self._issues()
         tasks, _ = L.derive(issues, events, {}, self.manager, [], False)
         by_key = {t["key"]: t for t in tasks}
@@ -109,7 +110,8 @@ class GitHubTasks:
                 continue
             r = _rank_inputs(t, by_key, unblocks)
             out.append(Task(id=f"{self.short}-{t['number']}", repo=self.repo, number=t["number"], title=t["title"], text=body[t["number"]],
-                            priority=t["prio"] or 2, due=r["deadline"], blocked=r["blocked"], unblocks=r["unblocks"], must=t["cls"] == "must"))
+                            priority=t["prio"] or 2, due=r["deadline"], blocked=r["blocked"], unblocks=r["unblocks"], must=t["cls"] == "must",
+                            filed_by=t["filed_by"]))
         log.info("%s: %d released task(s)", self.repo, len(out))
         return out
 

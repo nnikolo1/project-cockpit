@@ -24,6 +24,7 @@ class T:
     title: str = "title"
     text: str = "text"
     number: int = 1
+    filed_by: str = None
 
 
 class FakeTasks:
@@ -780,3 +781,15 @@ def test_transcript_mtime_reads_the_agents_glob():
     assert core.transcript_mtime(Rt(), "w1", A()) == 12.5 and "/g/w1/*.log" in seen[0]
     core.transcript_mtime(Rt(), "w1")
     assert "/home/w1/.claude/projects/**/*.jsonl" in seen[1]
+
+
+def test_a_finding_is_not_chosen_by_the_agent_that_filed_it():
+    f = T("cockpit-9")
+    f.filed_by = "worker1"
+    g = T("cockpit-8", priority=3)
+    assert core.choose_task([f, g], set(), "worker1").id == "cockpit-8"      # filed by this Worker's user name
+    assert core.choose_task([f, g], set(), "worker2").id == "cockpit-9"
+    assert core.choose_task([f], set(), "worker1") is None
+    f.filed_by = "cockpit-3"
+    assert core.choose_task([f], set(), "cockpit-3") is None                 # the Worker's id may also be the task id it worked on
+    assert core.choose_task([f, g], set()).id == "cockpit-9"                 # no Worker id: no check

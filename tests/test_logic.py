@@ -269,3 +269,21 @@ def test_usage_days_feed_the_heatmap_with_their_totals():
     r = L.usage_report(line, None, lambda f: None)
     vals = {d["key"]: d["total"] for d in r["days"]}
     assert vals["2026-11-20"] == 10 and L.shade_level(vals["2026-11-20"], max(vals.values())) == 4 and L.shade_level(vals["2026-11-19"], 10) == 0
+
+
+def test_finding_is_released_at_once_unless_question_or_decision():
+    t, _ = derive([iss(1, ["policy-finding"]), iss(2, ["policy-finding", "question"]), iss(3, ["policy-finding", "type:decision"]),
+                   iss(4, ["policy-finding"], assignees=["w"]), iss(5, ["policy-finding", "merged"]), iss(6)])
+    got = {x["number"]: (x["stage"], x["finding"]) for x in t}
+    assert got == {1: ("released", True), 2: ("embryo", False), 3: ("embryo", False), 4: ("wip", True), 5: ("merged", True), 6: ("embryo", False)}
+
+
+def test_parse_filed_by():
+    assert L.parse_filed_by("x\n<!-- filed-by: worker1 -->\ny") == "worker1"
+    assert L.parse_filed_by("<!--filed-by:agent-9-->") == "agent-9"
+    assert L.parse_filed_by("no marker") is None and L.parse_filed_by(None) is None
+
+
+def test_derive_keeps_filed_by():
+    t, _ = derive([iss(1, ["policy-finding"], body="<!-- filed-by: a1 -->")])
+    assert t[0]["filed_by"] == "a1"
