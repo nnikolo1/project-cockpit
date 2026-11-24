@@ -1451,14 +1451,14 @@ def usage_summary(rep):
     row = {}
     for k in (*USAGE_FIELDS, "total"):
         row[k] = sum(d[k] for d in rep["days"])
-    used = [d["key"] for d in rep["days"] if d["total"]]
-    return dict(row, tasks=len(rep["tasks"] or []), last_day=used[-1] if used else None)
+    return dict(row, tasks=len(rep["tasks"] or []), last_day=max((d["key"] for d in rep["days"]), default=None))
 
 
 def usage_report(usage_text, plog_text, goodbye_tokens, quota_text=None):
     """The Usage tab. usage_text / plog_text / quota_text: the file contents or None when missing; goodbye_tokens(folder) -> the `tokens` of the
     task's good-bye note or None. -> dict(days, windows, workers (each a list of {key, counts}), tasks, quota) or None parts where there is no data.
-    days: the last 90 UTC days counted back from the latest day of use, a day without use as zeros. Windows are the vendor's 5-hour windows (from
+    days: the days with usage (a sum above zero) among the last 90 UTC days counted back from the latest day of use, newest first; windows: the
+    5-hour windows with usage, newest first. Windows are the vendor's 5-hour windows (from
     the quota readings' `resets_at`, kind "vendor") and, for requests outside them or without readings, fixed 5-hour blocks counted from the
     epoch (kind "fixed"). A task launched with a Worker name counts only that Worker's requests between its launch and its last log entry; an
     older task counts all Workers' requests in that span (`overlap` marks spans that overlap another task's)."""
@@ -1484,8 +1484,10 @@ def usage_report(usage_text, plog_text, goodbye_tokens, quota_text=None):
             key = dict(key=dt.datetime.fromtimestamp(t - t % WINDOW_SECONDS, dt.timezone.utc).strftime("%Y-%m-%d %H:%M"), kind="fixed")
         _add(groups["windows"].setdefault((key["key"], key["kind"]), {}), c)
         _add(groups["workers"].setdefault(w, {}), c)
-    rep = {k: None if usage_text is None else [dict(key=key, **v) for key, v in sorted(g.items())] for k, g in groups.items() if k != "windows"}
-    rep["windows"] = None if usage_text is None else [dict(key=k[0], kind=k[1], **v) for k, v in sorted(groups["windows"].items())]
+    rep = {"workers": None if usage_text is None else [dict(key=key, **v) for key, v in sorted(groups["workers"].items())]}
+    rep["days"] = None if usage_text is None else [dict(key=key, **v) for key, v in sorted(groups["days"].items(), reverse=True) if v["total"]]
+    rep["windows"] = None if usage_text is None else [dict(key=k[0], kind=k[1], **v) for k, v in sorted(groups["windows"].items(), reverse=True)
+                                                      if v["total"]]
     rep["quota"] = quota
     spans = {}
     for rec in _json_lines(plog_text) or []:

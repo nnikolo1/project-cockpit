@@ -21,12 +21,12 @@ PLOG = "\n".join([p("2026-11-20T00:50:00+00:00", "T-1", "launched"), p("2026-11-
 
 def test_report_groups_by_day_window_and_worker_and_skips_bad_lines():
     r = L.usage_report(USAGE, PLOG, lambda f: None)
-    assert len(r["days"]) == 90 and r["days"][-1]["key"] == "2026-11-21" and r["days"][0]["key"] == "2026-08-24"
+    assert [x["key"] for x in r["days"]] == ["2026-11-21", "2026-11-20"]
     d = {x["key"]: x for x in r["days"]}
-    assert d["2026-11-20"]["total"] == 30 and d["2026-11-20"]["input_tokens"] == 3 and d["2026-11-19"]["total"] == 0
-    assert [x["key"] for x in r["windows"]] == ["2026-11-19 21:00", "2026-11-20 02:00", "2026-11-20 22:00"]
+    assert d["2026-11-20"]["total"] == 30 and d["2026-11-20"]["input_tokens"] == 3
+    assert [x["key"] for x in r["windows"]] == ["2026-11-20 22:00", "2026-11-20 02:00", "2026-11-19 21:00"]
     assert {x["kind"] for x in r["windows"]} == {"fixed"} and r["quota"] is None
-    assert r["windows"][0]["total"] == 10 and r["windows"][1]["total"] == 20
+    assert r["windows"][2]["total"] == 10 and r["windows"][1]["total"] == 20
     assert {x["key"]: x["total"] for x in r["workers"]} == {"w1": 30, "w2": 10}
 
 

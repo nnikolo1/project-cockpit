@@ -266,7 +266,7 @@ def test_usage_days_feed_the_heatmap_with_their_totals():
     line = json.dumps(dict(ts="2026-11-20T01:00:00+00:00", worker="w", input_tokens=1, output_tokens=2, cache_creation_input_tokens=3, cache_read_input_tokens=4))
     r = L.usage_report(line, None, lambda f: None)
     vals = {d["key"]: d["total"] for d in r["days"]}
-    assert vals["2026-11-20"] == 10 and L.shade_level(vals["2026-11-20"], max(vals.values())) == 4 and L.shade_level(vals["2026-11-19"], 10) == 0
+    assert vals["2026-11-20"] == 10 and L.shade_level(vals["2026-11-20"], max(vals.values())) == 4 and L.shade_level(vals.get("2026-11-19", 0), 10) == 0
 
 
 def test_finding_is_released_at_once_unless_question_or_decision():
