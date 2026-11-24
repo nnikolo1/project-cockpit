@@ -30,7 +30,6 @@ DEFAULTS = {                        # 6a: the spec's values, used when the file 
     "enabled": True, "interval_minutes": 2, "retries": 0, "workers": 3,
     "runaway_minutes": 40, "idle_minutes": 20, "start_minutes": 1,
 }
-MINIMUMS = {"runaway_minutes": 30, "idle_minutes": 10, "start_minutes": 1}   # 3i, 3j
 
 
 class Skip(Exception):
@@ -58,9 +57,6 @@ def load_settings(path):
             ok = isinstance(v, bool)
         else:
             ok = isinstance(v, int) and not isinstance(v, bool) and v >= (0 if k == "retries" else 1)
-        if ok and k in MINIMUMS and v < MINIMUMS[k]:
-            log.warning("settings key %s=%r is below its minimum; raised to %d", k, v, MINIMUMS[k])
-            v = MINIMUMS[k]
         if ok:
             s[k] = v
         else:

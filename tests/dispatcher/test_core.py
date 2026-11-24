@@ -151,12 +151,11 @@ def test_settings_keys_override_and_bad_values_fall_back(tmp_path):
     assert s["runaway_minutes"] == 40 and s["idle_minutes"] == 20
 
 
-def test_settings_below_minimum_raised(tmp_path, caplog):
+def test_settings_minimums_are_not_enforced_in_code(tmp_path):
     p = tmp_path / "s.json"
     p.write_text(json.dumps({"runaway_minutes": 5, "idle_minutes": 3, "start_minutes": 1}))
     s = core.load_settings(str(p))
-    assert (s["runaway_minutes"], s["idle_minutes"], s["start_minutes"]) == (30, 10, 1)
-    assert "below its minimum" in caplog.text
+    assert (s["runaway_minutes"], s["idle_minutes"], s["start_minutes"]) == (5, 3, 1)
 
 
 def test_settings_garbage_file(tmp_path):
