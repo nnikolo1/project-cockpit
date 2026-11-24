@@ -4,6 +4,7 @@ import os
 import sys
 import pathlib
 import time
+import threading
 import types
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 import pytest
@@ -159,3 +160,111 @@ def test_task_queue_local_part_without_files_is_empty():
     q = L.queue_local(None, None)
     assert q == dict(workers=[], log=[])
     assert L.queue_local("{not json", "x")["workers"] == []
+
+
+def test_within_the_hour_no_call_and_the_page_gets_the_refresh_time(monkeypatch):
+    now = time.time()
+    monkeypatch.setattr(C, "build_state", lambda p: state(now - 1800))
+    C.get_state(p=P)
+
+    def boom(p):
+        raise AssertionError("GitHub was called")
+    monkeypatch.setattr(C, "build_state", boom)
+    S = C.get_state_served(P)
+    assert S["refreshAfter"] == now - 1800 + C.GH_REFRESH_S and not S["stale"]
+
+
+def test_older_than_the_hour_is_served_at_once_and_one_refresh_is_queued(monkeypatch):
+    now = time.time()
+    monkeypatch.setattr(C, "build_state", lambda p: state(now - 7200))
+    C.get_state(p=P)
+    C._cache[C.pk(P, "state")] = (now - C.GH_REFRESH_S - 5, C._cache[C.pk(P, "state")][1])
+    n, gate = [], threading.Event()
+
+    def slow(p):
+        n.append(1)
+        gate.wait(3)
+        return state(now)
+    monkeypatch.setattr(C, "build_state", slow)
+    for _ in range(3):
+        assert C.get_state_served(P)["source"]["fetchedAt"] == now - 7200
+    gate.set()
+    deadline = time.time() + 3
+    while time.time() < deadline and C._refreshing:
+        time.sleep(0.02)
+    assert len(n) == 1  # three requests, one queued refresh
+
+
+def test_refreshes_of_different_projects_never_run_in_parallel():
+    live, peak = [], []
+
+    def work(key):
+        def fn():
+            live.append(key)
+            peak.append(len(live))
+            time.sleep(0.05)
+            live.remove(key)
+            return key
+        return fn
+    ts = [threading.Thread(target=C.cached, args=(k, work(k), 60), kwargs=dict(queue=True)) for k in "abc"]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert max(peak) == 1
+
+
+def test_owner_refresh_still_fetches_inside_the_hour(monkeypatch):
+    now = time.time()
+    monkeypatch.setattr(C, "build_state", lambda p: state(now - 60))
+    C.get_state(p=P)
+    monkeypatch.setattr(C, "build_state", lambda p: state(now))
+    assert C.get_state_served(P, fresh=True)["source"]["fetchedAt"] == now
+
+
+@pytest.mark.parametrize("minutes,calls", [(59, 0), (61, 1)])
+def test_restart_uses_a_copy_up_to_an_hour_old_and_queues_one_refresh_for_an_older_one(monkeypatch, minutes, calls):
+    now = time.time()
+    monkeypatch.setattr(C, "build_state", lambda p: state(now - minutes * 60))
+    C.get_state(p=P)
+    f = next(C.CACHE_DIR.glob("*state*.json"))
+    os.utime(f, (now - minutes * 60, now - minutes * 60))
+    C._cache.clear()  # restart
+    n = []
+    monkeypatch.setattr(C, "build_state", lambda p: n.append(1) or state(now))
+    assert C.get_state(p=P)["source"]["fetchedAt"] == now - minutes * 60  # served at once either way
+    deadline = time.time() + 3
+    while time.time() < deadline and (C._refreshing or (calls and not n)):
+        time.sleep(0.02)
+    assert len(n) == calls
+
+
+def test_only_the_owners_pane_refresh_bypasses_the_hour_and_only_for_that_panes_request(monkeypatch):
+    now = time.time()
+    P2 = dict(P, phases=None)
+    monkeypatch.setattr(C, "build_state", lambda p: dict(state(now - 60), tasks=[], events=[], modules=[]))
+    C.get_state(p=P2)
+    calls = []
+    monkeypatch.setattr(C, "run_gh", lambda args: calls.append(args[:2]) or json.dumps([]))
+    monkeypatch.setattr(C, "load_modules", lambda p: None)
+
+    def no_state(p):
+        raise AssertionError("the state was fetched")
+    monkeypatch.setattr(C, "build_state", no_state)
+    C.get_timeline(P2)  # first build: no commits copy yet, one call is unavoidable
+    calls.clear()
+    C.get_timeline(P2)
+    C.get_state_served(P2)
+    C.get_rules(P2)
+    assert calls == []  # within the hour: timers, page loads and the like fetch nothing
+    C.get_timeline(P2, fresh=True)  # the owner's Refresh on the Timeline pane: its commits request, not the state
+    assert len(calls) == 1 and "commits" in calls[0][1]
+
+
+def test_an_action_does_not_fetch_or_drop_the_state(monkeypatch):
+    now = time.time()
+    monkeypatch.setattr(C, "build_state", lambda p: state(now - 60))
+    C.get_state(p=P)
+    monkeypatch.setattr(C, "build_state", lambda p: (_ for _ in ()).throw(AssertionError("fetched")))
+    monkeypatch.setitem(C.CFG, "steer", True)
+    monkeypatch.setattr(C, "plan_action", lambda *a: ([], "done"))
+    assert C.do_act(dict(action="x"), run=lambda a: "", p=P)[0] == 200
+    assert C.get_state(p=P)["source"]["fetchedAt"] == now - 60

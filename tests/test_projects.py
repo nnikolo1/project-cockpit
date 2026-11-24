@@ -126,15 +126,6 @@ def test_steering_unknown_project_is_404_and_read_only_stays_global(two, monkeyp
     assert C.do_act(dict(action="release", n=1, p="1", project="alpha"), run=ran.append, state={})[0] == 403 and ran == []
 
 
-def test_an_action_drops_only_that_projects_cache(two):
-    a, b = C.proj("alpha"), C.proj("beta")
-    C.cached(C.pk(a, "state"), lambda: "A", 60)
-    C.cached(C.pk(b, "state"), lambda: "B", 60)
-    S = dict(tasks=[dict(number=1, key="T1", stage="embryo", labels=[], bad=[], blockedBy=[], title="t")], modules=[], modDeadline={}, proposals=[])
-    C.do_act(dict(action="release", n=1, p="1", project="alpha"), run=lambda op: "", state=S)
-    assert C.pk(a, "state") not in C._cache and C.pk(b, "state") in C._cache
-
-
 def test_path_helpers_use_the_projects_own_paths(two, tmp_path):
     snap = tmp_path / "snap"
     (snap / "report").mkdir(parents=True)
@@ -177,7 +168,7 @@ def test_api_unknown_project_is_404_with_a_clear_error(two):
 
 def test_api_picks_the_project_from_the_query(two, monkeypatch):
     monkeypatch.setattr(C, "build_state", lambda p: dict(of=p["name"]))
-    assert get("/api/state?project=alpha") == (200, dict(of="alpha", stale=False, staleNote=None)) and get("/api/state") == (200, dict(of="beta", stale=False, staleNote=None))
+    assert get("/api/state?project=alpha") == (200, dict(of="alpha", stale=False, staleNote=None, refreshAfter=3600)) and get("/api/state") == (200, dict(of="beta", stale=False, staleNote=None, refreshAfter=3600))
 
 
 def test_report_without_a_query_follows_the_referer(two, tmp_path):
@@ -192,7 +183,7 @@ def test_timeline_is_rebuilt_when_the_state_it_came_from_was_replaced(two, monke
     monkeypatch.setattr(C, "CACHE_DIR", None)
     p = C.proj("alpha")
     built = []
-    monkeypatch.setattr(C, "build_timeline", lambda S, p=None: built.append(S["source"]["fetchedAt"]) or dict(entries=[]))
+    monkeypatch.setattr(C, "build_timeline", lambda S, p=None, fresh=False: built.append(S["source"]["fetchedAt"]) or dict(entries=[]))
     state = dict(source=dict(fetchedAt=1))
     monkeypatch.setattr(C, "get_state", lambda fresh=False, p=None: state)
     assert C.get_timeline(p)["stateAt"] == 1

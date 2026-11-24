@@ -247,16 +247,20 @@ function modFilter(cur,act,first,allOf,unsorted,extra){
   return h;}
 const pq=p=>PROJ?p+(p.includes('?')?'&':'?')+'project='+encodeURIComponent(PROJ):p;
 async function api(path,opt){const r=await fetch(pq(path),opt);let j={};try{j=await r.json();}catch(e){}if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j;}
-async function loadQuestions(fresh){
+async function loadQuestions(fresh){  /* fresh: only the owner's Refresh click on the Open questions pane */
   try{Q=await fetch('/api/questions'+(fresh?'?fresh=1':'')).then(async r=>{const j=await r.json();if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j;});}
   catch(e){Q=Object.assign({},Q,{projects:[{name:'all',error:String(e.message||e)}]});}
 }
-async function reload(fresh){
-  const mine=PROJ;
-  const qp=loadQuestions(fresh);
+/* reload(pane): pane is the pane whose Refresh the owner clicked, else nothing is forced (timers, page loads, actions never bypass the hour).
+   The pane decides which GitHub-sourced request is fetched now: the task state (Cockpit, Task Queue, Timeline, Code), the commit and rule inputs
+   of the Timeline, the rules' pull requests (Settings, Policies), every project's state (Open questions). */
+const PANE_STATE=['cockpit','backlog','timeline','code'];
+async function reload(pane){
+  const mine=PROJ,fresh=PANE_STATE.includes(pane),ft=pane==='timeline',fr=pane==='settings',fq=pane==='questions';
+  const qp=loadQuestions(fq);
   try{
     const errs=[],soft=(pr,d,w)=>pr.catch(e=>{errs.push(w+': '+e.message);return d;});  /* one failing part must not blank the others */
-    const [s,f,c,r,mt,se,cs,us,ql]=await Promise.all([soft(api('/api/state'+(fresh?'?fresh=1':'')),null,'state'),soft(api('/api/timeline'),{entries:[],activity:[]},'timeline'),soft(api('/api/code'),{wired:false,modules:{},diagrams:[]},'code'),api('/api/rules').catch(e=>({configured:false,error:e.message})),api('/api/cardmeta').catch(e=>null),api('/api/settings').catch(e=>null),api('/api/cardsettings').catch(e=>null),api('/api/usage').catch(e=>null),api('/api/queue').catch(e=>null)]);SET=se;CSET=cs;USE=us;QL=ql;  /* local parts first: they never wait for or depend on GitHub */
+    const [s,f,c,r,mt,se,cs,us,ql]=await Promise.all([soft(api('/api/state'+(fresh?'?fresh=1':'')),null,'state'),soft(api('/api/timeline'+(ft?'?fresh=1':'')),{entries:[],activity:[]},'timeline'),soft(api('/api/code'),{wired:false,modules:{},diagrams:[]},'code'),api('/api/rules'+(fr?'?fresh=1':'')).catch(e=>({configured:false,error:e.message})),api('/api/cardmeta').catch(e=>null),api('/api/settings').catch(e=>null),api('/api/cardsettings').catch(e=>null),api('/api/usage').catch(e=>null),api('/api/queue').catch(e=>null)]);SET=se;CSET=cs;USE=us;QL=ql;  /* local parts first: they never wait for or depend on GitHub */
     if(mine!==PROJ)return;  /* the user switched project while this was loading: drop the answer */
     if(fresh)for(const k in MODDOC)delete MODDOC[k];
     if(s){D=s;TODAY=D.today;MODULES=D.modules;FEED=f.entries;ACT=f.activity||[];}  /* a failed state keeps the copy the page already has */
@@ -286,7 +290,7 @@ async function boot(){
 }
 async function post(body){
   try{const j=await api('/api/act',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({project:PROJ},body))});
-    await reload(true);say(j.msg);return true;}
+    await reload(false);say(j.msg+'. The page shows GitHub data as of the last refresh; press Refresh on the pane to see the change.',7000);return true;}
   catch(e){say('Refused: '+e.message,6000);return false;}
 }
 
@@ -425,6 +429,17 @@ function vCockpit(){
   return h+'</div></div>';
 }
 
+function hm(t){return new Date(t*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}
+function paneBar(R){
+  /* every pane that shows GitHub-sourced data says how old it is and has its own Refresh (the only thing that bypasses the hourly refresh) */
+  let at=null,after=null;
+  if(PANE_STATE.includes(R)&&D){at=D.source.fetchedAt;after=D.refreshAfter;}
+  else if(R==='questions'){const a=Q.projects.filter(p=>p.age_s!=null).map(p=>Date.now()/1000-p.age_s);if(a.length){at=Math.min(...a);after=at+3600;}}
+  else if(R==='settings'&&UI.setSec==='policies'&&RULES&&RULES.prsAt){at=RULES.prsAt;after=at+3600;}
+  else if(!(R==='cockpit'||R==='backlog'||R==='timeline'||R==='code'||R==='questions'||R==='settings'))return '';
+  else if(R==='settings'&&UI.setSec!=='policies')return '';
+  return '<div class="page" style="padding-bottom:0"><div class="row" style="gap:10px"><span class="muted" style="font-size:13px" title="GitHub data is refreshed lazily, at most once an hour; Refresh fetches this pane\'s data now">'+(at?'data from '+hm(at)+(after?', next refresh after '+hm(after):''):'no data yet')+'</span><button class="btn small" data-act="refresh" data-pane="'+R+'">Refresh</button></div></div>';
+}
 function ageMin(s){return s<90?s+' s':s<5400?Math.round(s/60)+' min':Math.round(s/3600)+' h';}
 function ageText(d){return d<1?'today':d===1?'1 day':d<60?d+' days':Math.round(d/30)+' months';}
 function vQuestions(){
@@ -843,8 +858,9 @@ function render(){
   if(D){const s=D.source;
     h+='<div class="proto"><span class="pill'+(s.steering?' on':'')+'">'+esc(s.repo)+', '+(s.steering?'steering on':'read-only')+'</span>'
      +(s.steering&&s.user&&s.user!==s.manager?'<span class="pill bad">acting as '+esc(s.user)+', not the Manager ('+esc(s.manager)+')</span>':'')
-     +'<span class="muted">fetched '+esc(s.fetched)+'</span><button class="btn small" data-act="refresh">Refresh</button></div>';}
+     +'</div>';}
   h+='</div>';
+  h+=paneBar(R);
   const LOCAL=R==='settings'||R==='usage'||R==='questions'||R==='backlog';  /* tabs with a local part: shown without the GitHub state */
   if(D&&D.staleNote){const n=D.staleNote;h+='<div class="page" style="padding-bottom:0"><div class="card" style="border-color:var(--warn,var(--danger))"><b class="warnline">GitHub data is old.</b> <span class="muted">Showing the copy from '+esc(D.source.fetched)+' ('+ageMin(n.age_s)+' old). '+(n.rate_limited?'GitHub rate limit reached; ':'GitHub could not be read ('+esc(n.error)+'); ')+(n.until?'next try at '+esc(new Date(n.until*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}))+'. ':'next try within a minute. ')+'</span> <button class="btn small" data-act="refresh">Retry</button></div></div>';}
   if(UI.err&&!D)h+='<div class="page" style="padding-bottom:0"><div class="card" style="border-color:var(--danger)"><b class="warnline">Could not load from GitHub, and no earlier copy exists.</b> <span class="muted">'+esc(UI.err)+'</span> <button class="btn small" data-act="refresh">Retry</button></div></div>';
@@ -885,7 +901,7 @@ function act(a,ds){
    case 'revall':ruleChanges().forEach(r=>revSet(r.sha,true));render();break;
    case 'open':UI.drawer={mode:'task',key:ds.k};render();break;
    case 'close':UI.drawer=null;render();break;
-   case 'refresh':reload(true);break;
+   case 'refresh':reload(ds.pane||UI.route);break;
    case 'new':UI.drawer={mode:'new'};render();break;
    case 'subtask':UI.drawer={mode:'new',prefill:{parent:t.number,module:t.module,title:'',type:'feature'}};render();break;
    case 'followup':UI.drawer={mode:'new',prefill:{module:t.module,title:'Follow up on '+t.key,desc:'Follow-up to '+t.key+' ('+t.title+').',type:t.type}};render();break;
