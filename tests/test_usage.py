@@ -19,7 +19,7 @@ PLOG = "\n".join([p("2026-11-20T00:50:00+00:00", "T-1", "launched"), p("2026-11-
                   p("2026-11-21T00:00:00+00:00", "T-2", "launched")])
 
 
-def test_report_groups_by_day_window_and_worker_and_skips_bad_lines():
+def test_report_groups_by_day_and_window_and_skips_bad_lines():
     r = L.usage_report(USAGE, PLOG, lambda f: None)
     assert len(r["days"]) == 90 and r["days"][-1]["key"] == "2026-11-21" and r["days"][0]["key"] == "2026-08-24"
     d = {x["key"]: x for x in r["days"]}
@@ -27,7 +27,7 @@ def test_report_groups_by_day_window_and_worker_and_skips_bad_lines():
     assert [x["key"] for x in r["windows"]] == ["2026-11-19 21:00", "2026-11-20 02:00", "2026-11-20 22:00"]
     assert {x["kind"] for x in r["windows"]} == {"fixed"} and r["quota"] is None
     assert r["windows"][0]["total"] == 10 and r["windows"][1]["total"] == 20
-    assert {x["key"]: x["total"] for x in r["workers"]} == {"w1": 30, "w2": 10}
+    assert "workers" not in r  # no per-Worker part in the payload (PC-83)
 
 
 def test_tasks_compare_proxy_sum_with_goodbye_tokens():
@@ -40,7 +40,7 @@ def test_tasks_compare_proxy_sum_with_goodbye_tokens():
 
 def test_missing_files_are_no_data():
     r = L.usage_report(None, None, lambda f: None)
-    assert r == dict(days=None, windows=None, workers=None, tasks=None, quota=None)
+    assert r == dict(days=None, windows=None, tasks=None, quota=None)
 
 
 def test_overlapping_tasks_are_marked():

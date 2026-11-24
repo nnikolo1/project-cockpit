@@ -43,8 +43,9 @@ def test_page_has_both_cards_and_keeps_the_others():
     assert "no readings today" in PAGE and "One row per hour of today (UTC) that has recorded readings" in PAGE
     v = PAGE[PAGE.index("function vUsage(){"):PAGE.index("function vRules(){")]
     for part in ("latestCard(USE.quota)", "sessionCards(USE.sessions)", "heatmap(dv", "projectsCard()", "usageTable('Usage per day'",
-                 "quotaCard(USE.quota)", "usageTable('Usage per Worker'", "<h2>Per task</h2>"):
+                 "quotaCard(USE.quota)", "<h2>Per task</h2>"):
         assert part in v, part
+    assert "Usage per Worker" not in PAGE and "USE.workers" not in PAGE  # the per-Worker card is gone (PC-83)
 
 
 def test_payload_has_no_rows_for_hours_without_readings():
