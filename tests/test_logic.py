@@ -31,6 +31,19 @@ def test_stage_derivation():
     assert L.stage(iss(1), {"cancelled"}) == "cancelled"
 
 
+def test_is_running_in_progress_or_wip_label():
+    assert L.is_running("in_progress", [])
+    assert L.is_running("released", ["wip"])
+    assert not L.is_running("released", [])
+    assert not L.is_running("completed", ["wip"])
+    assert not L.is_running("cancelled", ["wip"])
+
+
+def test_derive_marks_running_tasks():
+    t, _ = derive([iss(1, ["released", "wip"]), iss(2, ["released"]), iss(3, ["released"], assignees=["w"])])
+    assert [x["running"] for x in t] == [True, False, True]
+
+
 def test_policy_manager_release_counts():
     eff, bad = L.policy([iss(1, ["released", "P1", "must"])], [ev(1, "released", "labeled", M), ev(1, "P1", "labeled", M)], M)[1]
     assert eff == {"released", "P1", "must"} and bad == {}

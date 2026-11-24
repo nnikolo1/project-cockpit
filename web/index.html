@@ -370,21 +370,13 @@ function vCockpit(){
   const emb=D.tasks.filter(t=>t.stage==='embryo').length;
   const od=D.tasks.filter(t=>overdue(D,t)).length;
   const blocked=D.tasks.filter(t=>isBlocked(D,t)).length;
-  const r=ranked(D);const nx=r[0];
-  const running=D.tasks.filter(t=>t.stage==='in_progress');
   let h='<div class="page"><div class="card strip"><span class="label" style="color:var(--accent)">Needs you</span>'
    +'<span><b>'+emb+'</b> embryos waiting for release</span><span><b>'+open.length+'</b> change proposals</span>'
    +'<span><b>'+od+'</b> overdue</span>'+(RULES.configured?'<span><b>'+(unreviewed().length+pendingPrs().length)+'</b> rule changes to review</span>':'')+'<span><button class="linkbtn" data-act="go" data-r="questions"><b>'+Q.questions.length+'</b> open questions</button></span><span><b>'+blocked+'</b> blocked</span><span class="'+(D.unauthorised?'warnline':'muted')+'"><b>'+D.unauthorised+'</b> unauthorised changes</span>'
-   +'<button class="btn primary" data-act="go" data-r="backlog" style="margin-left:auto">Open backlog</button></div>';
+   +'<button class="btn primary" data-act="go" data-r="backlog" style="margin-left:auto">Open task queue</button></div>';
   if(RULES.configured)h+='<div class="card" style="border-color:var(--warn-ink)"><div class="row spread"><h2>Rules changed</h2><button class="btn small" data-act="go" data-r="rules">Review rule changes</button></div><div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">'
    +(ruleChanges().slice(0,3).map(r=>'<div class="row" style="gap:10px"><span class="mono muted" style="width:86px">'+r.date+'</span><span class="chip rc">rule change</span><span><b class="mono">'+esc(r.files.map(f=>f.path).slice(0,2).join(', '))+'</b> '+esc(r.subject)+'</span>'+(isUn(r)?'<span class="chip blocks">to review</span>':'<span class="muted" style="font-size:12px">reviewed</span>')+'</div>').join('')||'<span class="muted">No rule changes in the last 90 days.</span>')
    +'</div><p class="muted" style="font-size:12px;margin:10px 0 0">Instructions and decisions steer every agent, so changes to them are tracked here, not only in git.</p></div>';
-  h+='<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))"><div class="card"><div class="row spread"><h2>Orchestrator queue</h2><span class="muted">running: '+running.length+'</span></div>';
-  h+=nx?'<p style="margin:10px 0 6px">Next: <button class="linkbtn" data-act="open" data-k="'+nx.key+'"><b>'+esc(nx.key)+'</b> '+esc(nx.title)+'</button></p><p class="muted" style="margin:0 0 10px;font-size:13px">'
-    +(nx.prio?'P'+nx.prio:'no priority')+' · '+(eff(D,nx).d?'due '+eff(D,nx).d:'no deadline')+' · unblocks '+blocksCount(D,nx)+' · '+nx.cls+'</p>'+(SIM()?'<button class="btn small" data-act="take" data-k="'+nx.key+'">Simulate: Orchestrator takes it</button>':'')
-    :'<p class="muted" style="margin:10px 0 0">Nothing released and unblocked. Release a task in the backlog.</p>';
-  h+='<p class="muted" style="font-size:12px;margin:12px 0 0">Ranking: your priority, then deadline, then tasks that unblock the most, then must before nice.</p></div>';
-  h+='</div>';
   h+=metaLegend()+moduleLevelAmb();
   h+='<div class="grid">';
   MODULES.filter(m=>!m.virtual&&!m.parent).forEach(m=>{
@@ -427,19 +419,24 @@ function vQuestions(){
    :(bad.length?'':'<p class="muted">No open questions.</p>');
   return h+'</div>';
 }
+function runCount(){return D?D.tasks.filter(t=>t.running).length:0;}
 function vBacklog(){
+  const rq=ranked(D),nx=rq[0],run=D.tasks.filter(t=>t.running);
   const f=UI.filter;let ts=D.tasks.slice();
   if(UI.mod!=='all')ts=ts.filter(t=>UI.ex?t.module===UI.mod:inMod(t.module,UI.mod));
   if(f==='blocked')ts=ts.filter(t=>isBlocked(D,t));else if(f!=='all')ts=ts.filter(t=>t.stage===f);
   ts.sort((a,b)=>sortKey(a)-sortKey(b)||((a.prio||9)-(b.prio||9))||((eff(D,a).d||'9').localeCompare(eff(D,b).d||'9'))||a.key.localeCompare(b.key,undefined,{numeric:true}));
   const fl=['all','embryo','released','in_progress','completed','cancelled','blocked'];
-  let h='<div class="page"><div class="row spread"><div><h1>Backlog</h1><span class="muted">'+ts.length+' of '+D.tasks.length+' tasks</span></div>'+(ST()?'<button class="btn primary" data-act="new">New task</button>':'')+'</div>';
+  let h='<div class="page"><div class="card"><h2>Being processed now</h2>'+(run.length?run.map(t=>'<div class="row" style="gap:10px;margin-top:8px"><b class="mono">'+esc(t.key)+'</b><button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button><span class="muted">'+modCell(t.module)+'</span></div>').join(''):'<p class="muted" style="margin:8px 0 0">Nothing is running now.</p>')
+   +'<p style="margin:12px 0 0">'+(nx?'Next up: <button class="linkbtn" data-act="open" data-k="'+nx.key+'"><b>'+esc(nx.key)+'</b> '+esc(nx.title)+'</button> <span class="muted">'+(nx.prio?'P'+nx.prio:'no priority')+' · '+(eff(D,nx).d?'due '+eff(D,nx).d:'no deadline')+' · unblocks '+blocksCount(D,nx)+' · '+nx.cls+'</span> '+(SIM()?'<button class="btn small" data-act="take" data-k="'+nx.key+'">Simulate: Orchestrator takes it</button>':''):'<span class="muted">Nothing released and unblocked.</span>')+'</p>'
+   +'<p class="muted" style="font-size:12px;margin:6px 0 0">Ranking (column #): your priority, then deadline, then tasks that unblock the most, then must before nice.</p></div>'
+   +'<div class="row spread"><div><h1>Task Queue</h1><span class="muted">'+ts.length+' of '+D.tasks.length+' tasks</span></div>'+(ST()?'<button class="btn primary" data-act="new">New task</button>':'')+'</div>';
   h+='<div class="filters" role="group" aria-label="Stage filter">'+fl.map(x=>'<button class="f" data-act="filter" data-v="'+x+'" aria-pressed="'+(f===x)+'">'+(x==='in_progress'?'in progress':x)+'</button>').join('')+'</div>';
   h+=modFilter(UI.mod,'modf','all modules','all of {}',true);
   h+='<div class="row muted" style="font-size:13px;gap:8px">Priority <span class="chip p1">P1</span><span class="chip p2">P2</span><span class="chip p3">P3</span><span class="chip p0">none yet</span> &nbsp; Blockers <span class="chip blk">blocked by</span><span class="chip blocks">blocks n</span> &nbsp; <span class="inh">↳ italic = inherited deadline</span></div>';
-  h+='<div class="tblbox"><table><thead><tr><th>ID</th><th>Title</th><th>Module</th><th>Priority</th><th>Class</th><th>Deadline</th><th>Blockers</th><th>Stage</th>'+(ST()?'<th class="act-col">Submit</th><th class="act-col">Cancel</th>':'')+'</tr></thead><tbody>';
-  ts.forEach(t=>{h+='<tr class="'+(isBlocked(D,t)?'blocked':'')+'"><td class="mono">'+esc(t.key)+'</td><td><button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button></td><td>'+modCell(t.module)+'</td><td>'+prioChip(t)+'</td><td class="muted">'+t.cls+'</td><td>'+dlHtml(t)+'</td><td>'+blockHtml(t)+'</td><td>'+stageHtml(t)+'</td>'+(ST()?'<td class="act-col">'+(t.stage==='embryo'?armBtn('submit',t):'<span class="muted">—</span>')+'</td><td class="act-col">'+(isOpen(t)?armBtn('cancel',t):'<span class="muted">—</span>')+'</td>':'')+'</tr>';});
-  if(!ts.length)h+='<tr><td colspan="'+(ST()?10:8)+'" class="muted">Nothing matches this filter.</td></tr>';
+  h+='<div class="tblbox"><table><thead><tr><th title="Rank in the Orchestrator queue">#</th><th>ID</th><th>Title</th><th>Module</th><th>Priority</th><th>Class</th><th>Deadline</th><th>Blockers</th><th>Stage</th>'+(ST()?'<th class="act-col">Submit</th><th class="act-col">Cancel</th>':'')+'</tr></thead><tbody>';
+  ts.forEach(t=>{h+='<tr class="'+(isBlocked(D,t)?'blocked':'')+'"><td class="muted">'+(rq.indexOf(t)>=0?rq.indexOf(t)+1:'')+'</td><td class="mono">'+esc(t.key)+'</td><td><button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button></td><td>'+modCell(t.module)+'</td><td>'+prioChip(t)+'</td><td class="muted">'+t.cls+'</td><td>'+dlHtml(t)+'</td><td>'+blockHtml(t)+'</td><td>'+stageHtml(t)+'</td>'+(ST()?'<td class="act-col">'+(t.stage==='embryo'?armBtn('submit',t):'<span class="muted">—</span>')+'</td><td class="act-col">'+(isOpen(t)?armBtn('cancel',t):'<span class="muted">—</span>')+'</td>':'')+'</tr>';});
+  if(!ts.length)h+='<tr><td colspan="'+(ST()?11:9)+'" class="muted">Nothing matches this filter.</td></tr>';
   return h+'</tbody></table></div><p class="muted" style="font-size:13px;margin:0">'+(ST()?'Submit releases an embryo as P2 without a deadline (use the task view for another priority or a deadline). Both buttons ask once more before they act. ':'')+'Only you set or move a deadline. A task without one inherits its parent’s, then its sub-module’s or module’s.</p></div>';
 }
 
@@ -695,8 +692,8 @@ function drawerNew(p){
 /* ---------- render and actions ---------- */
 function render(){
   const R=UI.route;
-  const nav=[['cockpit','Cockpit'],['backlog','Backlog'],['questions','Open questions'],['timeline','Timeline'],['rules','Rules'],['settings','Settings'],['usage','Token Usage'],['code','Code'],['how','How it works']];
-  let h='<div class="top"><span class="brand">Project cockpit</span><nav class="nav" aria-label="Main">'+nav.map(n=>'<button data-act="go" data-r="'+n[0]+'"'+(R===n[0]?' aria-current="page"':'')+'>'+n[1]+(n[0]==='questions'?' <span class="chip" aria-label="'+Q.questions.length+' open">'+Q.questions.length+'</span>':'')+'</button>').join('')+'</nav>';
+  const nav=[['cockpit','Cockpit'],['backlog','Task Queue'],['questions','Open questions'],['timeline','Timeline'],['rules','Rules'],['settings','Settings'],['usage','Token Usage'],['code','Code'],['how','How it works']];
+  let h='<div class="top"><span class="brand">Project cockpit</span><nav class="nav" aria-label="Main">'+nav.map(n=>'<button data-act="go" data-r="'+n[0]+'"'+(R===n[0]?' aria-current="page"':'')+'>'+n[1]+(n[0]==='questions'?' <span class="chip" aria-label="'+Q.questions.length+' open">'+Q.questions.length+'</span>':n[0]==='backlog'&&runCount()?' <span class="chip" aria-label="'+runCount()+' running">'+runCount()+'</span>':'')+'</button>').join('')+'</nav>';
   if(PROJS.length>1)h=h.replace('</span><nav','</span><select class="psel" id="psel" aria-label="Project">'+PROJS.map(p=>'<option value="'+esc(p.name)+'"'+(p.name===PROJ?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select><nav');
   if(D){const s=D.source;
     h+='<div class="proto"><span class="pill'+(s.steering?' on':'')+'">'+esc(s.repo)+', '+(s.steering?'steering on':'read-only')+'</span>'

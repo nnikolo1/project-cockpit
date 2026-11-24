@@ -118,6 +118,11 @@ def stage(issue, eff):
     return "released" if "released" in eff else "embryo"
 
 
+def is_running(stage_, labels):
+    """A job runs now: the task is in progress, or carries the Dispatcher's `wip` state label (and is not finished)."""
+    return stage_ == "in_progress" or (stage_ in ("embryo", "released") and "wip" in labels)
+
+
 def swap_priority(current, new):
     """-> (labels to add, labels to remove) so exactly `new` remains."""
     return ([new] if new not in current else []), [p for p in PRIO if p in current and p != new]
@@ -232,7 +237,7 @@ def derive(issues, events, project, manager, mods, grow):
             stage=stage(i, eff), assignee=(i.get("assignees") or [None])[0], hint=hint, est=p.get("est"), used=p.get("used"),
             status=p.get("status", ""), created=i["created_at"], closed=i.get("closed_at"), author=i.get("author"),
             desc=body.split("**Evidence**")[0].strip()[:700], evidence=[dict(text=t, url=u) for t, u in LINK.findall(body)][:6],
-            labels=i["labels"], flags=[f"unauthorised: {n} set by {a}" for n, a in sorted(bad.items())], bad=sorted(bad)))
+            labels=i["labels"], running=is_running(stage(i, eff), i["labels"]), flags=[f"unauthorised: {n} set by {a}" for n, a in sorted(bad.items())], bad=sorted(bad)))
     with_parents(mods)
     for m in mods:
         m["short"] = pnames.get(m["id"]) or short_name(m["name"])
