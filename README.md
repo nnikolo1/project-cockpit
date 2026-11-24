@@ -71,3 +71,11 @@ Running it as a service and separating Manager, Orchestrator and Worker, with wh
 
 ## Licence
 [0BSD](LICENSE), (c) 2026 nnikolo1. Clone: `git clone https://github.com/nnikolo1/project-cockpit`.
+
+## Assumptions
+
+- **The agent is Claude (Claude Code).** The Workers, the Dispatcher's launch command, the Stop hook, the skill format and the proxy's credential handling assume it.
+- **The host is macOS.** The Dispatcher runs under launchd, the Workers' container uses Apple's `container` tool, and the host probes (memory pressure, power source) use macOS commands.
+
+These are assumptions, not goals. The code is kept as agnostic about the agent and the operating system as is practical: what depends on one of them stays in a small, named place (for example the container runtime adapter, the launch command, the image, the host probes), so that replacing it is a local change.
+
