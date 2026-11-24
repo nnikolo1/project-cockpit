@@ -475,7 +475,7 @@ function usageTable(title,rows){
    +(rows.length?'':'<tr><td class="muted" colspan="7">no data</td></tr>')+'</tbody></table></div></div>';
 }
 function vUsage(){
-  const head='<div class="page"><div><h1>Usage</h1><span class="muted">Tokens the Workers used, counted by the proxy. Windows are fixed 5-hour blocks counted from the epoch (UTC). No share of your quota is shown: the proxy cannot know it.</span></div>';
+  const head='<div class="page"><div><h1>Token Usage</h1><span class="muted">Tokens the Workers used, counted by the proxy. Windows are fixed 5-hour blocks counted from the epoch (UTC). No share of your quota is shown: the proxy cannot know it.</span></div>';
   if(!USE)return head+'<div class="card"><span class="muted">no data</span></div></div>';
   const nf=x=>x==null?'no data':x.toLocaleString('en-US');
   const tk=USE.tasks;
@@ -647,7 +647,7 @@ function drawerNew(p){
 /* ---------- render and actions ---------- */
 function render(){
   const R=UI.route;
-  const nav=[['cockpit','Cockpit'],['backlog','Backlog'],['questions','Open questions'],['timeline','Timeline'],['rules','Rules'],['settings','Settings'],['usage','Usage'],['code','Code'],['how','How it works']];
+  const nav=[['cockpit','Cockpit'],['backlog','Backlog'],['questions','Open questions'],['timeline','Timeline'],['rules','Rules'],['settings','Settings'],['usage','Token Usage'],['code','Code'],['how','How it works']];
   let h='<div class="top"><span class="brand">Project cockpit</span><nav class="nav" aria-label="Main">'+nav.map(n=>'<button data-act="go" data-r="'+n[0]+'"'+(R===n[0]?' aria-current="page"':'')+'>'+n[1]+(n[0]==='questions'?' <span class="chip" aria-label="'+Q.questions.length+' open">'+Q.questions.length+'</span>':'')+'</button>').join('')+'</nav>';
   if(PROJS.length>1)h=h.replace('</span><nav','</span><select class="psel" id="psel" aria-label="Project">'+PROJS.map(p=>'<option value="'+esc(p.name)+'"'+(p.name===PROJ?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select><nav');
   if(D){const s=D.source;

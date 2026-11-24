@@ -443,7 +443,7 @@ def get_settings(p):
                 workers_cap=RuntimeConfig.image_workers, steering=CFG["steer"])
 
 
-# The Usage tab's files, under DATA_DIR/<project name>/ (the folder the Settings page uses)
+# The Token Usage tab's files, under DATA_DIR/<project name>/ (the folder the Settings page uses)
 USAGE_FILE, PLOG_FILE, AREA_DIR = "proxy-usage.jsonl", "processing/processing.jsonl", "area"
 
 

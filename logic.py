@@ -817,7 +817,7 @@ def validate_settings(form, defaults, workers_cap):
     return out
 
 
-# -- Usage tab: the proxy's token counts (spec dispatcher-and-workers 3h, 4h) --
+# -- Token Usage tab: the proxy's token counts (spec dispatcher-and-workers 3h, 4h) --
 USAGE_FIELDS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
 WINDOW_SECONDS = 5 * 3600
 
