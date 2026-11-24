@@ -37,6 +37,7 @@
   {"path": "dispatcher/tasks.py", "module": "internal/bootfilling/dispatcher", "basis": "the Dispatcher's task source (GitHub); its test follows it"},
   {"path": "dispatcher/plog.py", "module": "internal/bootfilling/dispatcher", "basis": "the Dispatcher's processing log; its test follows it"},
   {"path": "dispatcher/launchd.py", "module": "internal/bootfilling/dispatcher", "basis": "renders the LaunchAgent files that start the Dispatcher and the proxy; its test is tests/dispatcher/test_launchd.py"},
+  {"path": "dispatcher/quota.py", "module": "internal/bootfilling/dispatcher", "basis": "collects the vendor quota history the Dispatcher side keeps; its test is tests/dispatcher/test_quota.py"},
   {"path": "dispatcher/note.py", "module": "internal/bootfilling", "candidates": ["internal/bootfilling/dispatcher", "internal/bootfilling/worker"], "basis": "the good-bye note format is read by the Dispatcher and written by the Workers; its test tests/dispatcher/test_note.py follows it"},
   {"path": "dispatcher/relay.py", "module": "internal/bootfilling/worker", "basis": "the relay runs inside the Workers' container; its test is tests/dispatcher/test_relay.py"},
   {"path": "dispatcher/image/", "module": "internal/bootfilling/worker", "basis": "the Workers' image: Containerfile, Stop hook and note skill"},

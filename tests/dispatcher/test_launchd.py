@@ -42,6 +42,15 @@ def test_proxy_plist_caffeinate_and_workers():
     assert workers == [f"worker{i}=dummy-worker{i}" for i in range(1, rt.Config.image_workers + 1)]
 
 
+def test_quota_plist():
+    d = _roundtrip(L.quota_plist("demo", data_dir="/data", cockpit_dir="/cp"))
+    assert d["Label"] == "com.project-cockpit.quota.demo"
+    assert d["StartInterval"] == 30
+    a = d["ProgramArguments"]
+    assert a[:3] == ["python3", "-m", "dispatcher.quota"]
+    assert a[a.index("--history") + 1] == "/data/demo/quota-history.jsonl"
+
+
 def test_socket_limit():
     with pytest.raises(ValueError):
         L.dispatcher_plist(**{**ARGS, "data_dir": "/d" * 60})
@@ -53,8 +62,9 @@ def test_render_writes_files_and_installs_nothing(tmp_path, capsys):
     L.render(["--project", "demo", "--repo", "o/n", "--repo-dir", str(tmp_path), "--token-file", str(tmp_path / "tok"), "--out", str(tmp_path / "o")])
     out = capsys.readouterr().out
     files = sorted((tmp_path / "o").glob("*.plist"))
-    assert [f.name for f in files] == ["com.project-cockpit.dispatcher.demo.plist", "com.project-cockpit.proxy.demo.plist"]
-    assert out.count("launchctl bootstrap") == 2 and all(str(f) in out for f in files)
+    assert [f.name for f in files] == ["com.project-cockpit.dispatcher.demo.plist", "com.project-cockpit.proxy.demo.plist",
+                                       "com.project-cockpit.quota.demo.plist"]
+    assert out.count("launchctl bootstrap") == 3 and all(str(f) in out for f in files)
     for f in files:
         assert plistlib.loads(f.read_bytes())["WorkingDirectory"].startswith("/")
 

@@ -72,6 +72,14 @@
      "note": "4h: token usage per Worker, one JSON line per request; counts only"
     },
     {
+     "path": "~/.local/share/project-cockpit/<project>/quota-history.jsonl",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "internal/bootfilling/dispatcher (quota)",
+     "volume": true,
+     "note": "the vendor's quota percentages over time, one JSON line per change (every 30 seconds at most); append-only, kept, backed up; percentages and reset times only"
+    },
+    {
      "path": "~/.local/share/project-cockpit/<project>/proxy.sock",
      "kind": "file",
      "personal_data": false,

@@ -80,14 +80,20 @@ class Usage:
         self.totals = {}
         self._lock = threading.Lock()
 
-    def add(self, label, usage):
+    def add(self, label, usage, ratelimit=None):
         with self._lock:
             t = self.totals.setdefault(label, dict.fromkeys(USAGE_FIELDS, 0))
             for k in USAGE_FIELDS:
                 t[k] += usage.get(k) or 0
             if self.path:
                 with open(self.path, "a") as f:
-                    f.write(json.dumps({"ts": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "worker": label, **{k: usage.get(k) or 0 for k in USAGE_FIELDS}}) + "\n")
+                    f.write(json.dumps({"ts": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "worker": label, **{k: usage.get(k) or 0 for k in USAGE_FIELDS},
+                                        **({"ratelimit": ratelimit} if ratelimit else {})}) + "\n")
+
+
+def ratelimit_headers(headers):
+    """Only the response headers whose name contains 'ratelimit' (case-insensitive), as {name: value}; nothing else is recorded."""
+    return {k: v for k, v in headers if "ratelimit" in k.lower()}
 
 
 def make_handler(token, workers, usage, upstream):
@@ -140,7 +146,7 @@ def make_handler(token, workers, usage, upstream):
             if status == 200 and path == "/v1/messages":
                 u = extract_usage(bytes(seen))
                 if u:
-                    usage.add(label, u)
+                    usage.add(label, u, ratelimit_headers(resp_headers))
 
         do_GET = do_POST = do_PUT = do_DELETE = do_PATCH = handle_any
 
