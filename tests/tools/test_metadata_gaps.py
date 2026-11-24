@@ -25,7 +25,11 @@ def setup(tmp_path, with_data):
 
 
 def run(tmp_path, capsys, *extra):
-    code = G.main(["--projects-file", str(tmp_path / "projects.json"), "--data-dir", str(tmp_path), *extra], now=NOW)
+    """The tool's settings file is a synthetic one in tmp_path (never the real one), with a long enough retention unless written otherwise."""
+    st = tmp_path / "tool-settings.json"
+    if not st.exists():
+        st.write_text(json.dumps({G.RETENTION_KEY: 3650}))
+    code = G.main(["--projects-file", str(tmp_path / "projects.json"), "--data-dir", str(tmp_path), "--tool-settings", str(st), *extra], now=NOW)
     return code, capsys.readouterr().out
 
 
@@ -57,6 +61,22 @@ def test_card_and_token_data_present_leaves_only_the_unconfigured_parts(tmp_path
     code, out = run(tmp_path, capsys, "--json")
     ks = {g["kind"] for g in json.loads(out)["gaps"]}
     assert code == 1 and not ks & {"card_data", "token_usage", "stale"}
+
+
+def retention_gaps(out):
+    return [g for g in json.loads(out)["gaps"] if g["kind"] == "transcript_retention"]
+
+
+def test_transcript_retention_gap_reads_the_given_settings_file(tmp_path, capsys):
+    setup(tmp_path, with_data=True)
+    st = tmp_path / "tool-settings.json"
+    st.write_text(json.dumps({"theme": "dark"}))
+    gs = retention_gaps(run(tmp_path, capsys, "--json")[1])
+    assert len(gs) == 1 and str(st) in gs[0]["what"] and G.RETENTION_KEY in gs[0]["what"]
+    st.write_text(json.dumps({G.RETENTION_KEY: 100}))
+    assert retention_gaps(run(tmp_path, capsys, "--json", "--min-retention-days", "90")[1]) == []
+    (tmp_path / "demo" / "transcript-usage.jsonl").unlink()  # no transcripts collected: the project does not use the tool
+    assert retention_gaps(run(tmp_path, capsys, "--json", "--tool-settings", str(tmp_path / "none.json"))[1]) == []
 
 
 def test_timing_check_against_a_local_server(tmp_path):
