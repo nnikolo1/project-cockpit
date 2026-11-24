@@ -4,6 +4,7 @@ Task metadata lives in GitHub (2d). A task is `<repository short name>-<issue nu
 labels on its issue. Priority, deadline, blockers, unblocks and must/nice are read with the cockpit's own logic (logic.derive and
 the helpers below, copied from the retired bootfill.core). Every call goes through two injected functions: `gh(args) -> stdout` and `git(args, cwd) -> stdout`.
 """
+import datetime as dt
 import json
 import logging
 import re
@@ -18,6 +19,7 @@ STATES = ("wip", "unmerged", "failed", "merged")
 FINAL = ("merged", "failed")              # 2c: only the owner or an interactive agent moves a task out of these
 NOT_RELEASABLE = ("question", "type:decision")   # 2b: embryos apart from questions and decisions count as released
 TASK_ID = re.compile(r"^(?P<short>[A-Za-z0-9][A-Za-z0-9._-]*)-(?P<number>\d+)$")
+INTERACTIVE_DAYS = 10                     # 2b: an interactive agent's embryo counts as released after this many days
 BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 
 
@@ -66,12 +68,13 @@ def _rank_inputs(task, by_key, unblocks):
 
 
 class GitHubTasks:
-    def __init__(self, repo, gh, git, repo_dir, manager=None, short=None):
+    def __init__(self, repo, gh, git, repo_dir, manager=None, short=None, now=None):
         """repo: `owner/name`; repo_dir: the task repository's clone on the host; manager: the login whose protected labels count
         (the cockpit's rule; default the repository owner); short: the repository short name in task ids (default: the repository name)."""
         self.repo, self.gh, self.git, self.repo_dir = repo, gh, git, repo_dir
         self.manager = manager or repo.split("/")[0]
         self.short = short or repo.split("/")[1]
+        self.now = now or (lambda: dt.datetime.now(dt.timezone.utc))
 
     def _issues(self):
         owner, name = self.repo.split("/")
@@ -87,23 +90,37 @@ class GitHubTasks:
             after = page["pageInfo"]["endCursor"]
 
     def released(self):
-        """Open, unassigned embryos and released tasks without a state label, except questions and decisions (2b), as Tasks."""
+        """Open, unassigned tasks without a state label, except questions and decisions, that count as released (2b), as Tasks: any task
+        labelled `released`; an embryo with no author label or `author:owner`; an `author:interactive` embryo 10 days after its creation."""
         issues, events = self._issues()
         tasks, _ = L.derive(issues, events, {}, self.manager, [], False)
         by_key = {t["key"]: t for t in tasks}
         unblocks = _unblock_counts(tasks)
         labels = {i["number"]: set(i["labels"]) for i in issues}
         body = {i["number"]: i["body"] for i in issues}
+        created = {i["number"]: i["created_at"] for i in issues}
+        now = self.now()
         out = []
         for t in tasks:
             lab = labels[t["number"]]
             if t["stage"] not in ("embryo", "released") or lab & set(STATES) or lab & set(NOT_RELEASABLE) or t["type"] == "decision":
+                continue
+            if not (t["stage"] == "released" or "released" in lab or self._author_releases(lab, created[t["number"]], now)):
                 continue
             r = _rank_inputs(t, by_key, unblocks)
             out.append(Task(id=f"{self.short}-{t['number']}", repo=self.repo, number=t["number"], title=t["title"], text=body[t["number"]],
                             priority=t["prio"] or 2, due=r["deadline"], blocked=r["blocked"], unblocks=r["unblocks"], must=t["cls"] == "must"))
         log.info("%s: %d released task(s)", self.repo, len(out))
         return out
+
+    @staticmethod
+    def _author_releases(lab, created, now):
+        """2b: whether an embryo counts as released by its author label alone."""
+        if "author:job" in lab:
+            return False
+        if "author:interactive" in lab and "author:owner" not in lab:
+            return L.age_days(created, now) >= INTERACTIVE_DAYS
+        return True
 
     def _number(self, task_id):
         m = TASK_ID.match(task_id)

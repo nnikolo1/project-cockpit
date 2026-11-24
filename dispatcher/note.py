@@ -2,7 +2,7 @@
 Worker's Stop hook imports this module inside the container."""
 
 OUTCOMES = ("done", "gave_up")
-TEXT_FIELDS = ("any_assumptions", "any_limitations_or_caveats", "any_open_questions")
+TEXT_FIELDS = ("any_assumptions", "any_limitations_or_caveats", "any_open_questions", "suggested_task")
 MAX_WORDS = 100
 MAX_CHARS = 400
 

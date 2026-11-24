@@ -10,7 +10,7 @@ def test_minimal_note_is_usable():
 
 
 def test_all_fields_usable():
-    note = {**OK, "any_assumptions": "a", "any_limitations_or_caveats": "b", "any_open_questions": "c", "tokens": 0}
+    note = {**OK, "any_assumptions": "a", "any_limitations_or_caveats": "b", "any_open_questions": "c", "suggested_task": "d", "tokens": 0}
     assert validate(note) == []
 
 
@@ -27,7 +27,7 @@ def test_mandatory_fields(note):
     assert validate(note)
 
 
-@pytest.mark.parametrize("field", ["summary", "any_assumptions", "any_limitations_or_caveats", "any_open_questions"])
+@pytest.mark.parametrize("field", ["summary", "any_assumptions", "any_limitations_or_caveats", "any_open_questions", "suggested_task"])
 def test_size_limits_at_the_boundary(field):
     words = {**OK, field: " ".join(["a"] * 100)}
     assert validate(words) == []
