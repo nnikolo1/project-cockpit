@@ -393,6 +393,7 @@ def build_state(p):
         (issues, events), project, deadlines = fi.result(), fp.result(), fd.result()
     cfgm = load_modules(p)
     tasks, mods = L.derive(issues, events, project, p["manager"], (cfgm or {}).get("modules", []), grow=not cfgm)
+    L.order_subs_by_size(mods, module_sizes(p, [m["id"] for m in mods]))
     for t in tasks:
         t["modDl"] = L.module_deadline(deadlines, t["module"])  # (date, module it is set on): the sub-module's, else the module's
     keys = {i["number"]: L.split_title(i["title"], i["number"])[0] for i in issues}
@@ -926,7 +927,29 @@ def local_modules_of(p):
     except (OSError, ValueError) as ex:
         log.warning("module map of %s unreadable: %s", p.get("name", ""), ex)
         cfgm = None
-    return L.local_modules((cfgm or {}).get("modules", []))
+    mods = L.local_modules((cfgm or {}).get("modules", []))
+    L.order_subs_by_size(mods, module_sizes(p, [m["id"] for m in mods]))
+    return mods
+
+
+def module_sizes(p, ids):
+    """{module id: lines it is ordered by} (PC-89, PC-90): the physical lines of its code files in the clone; without a clone, the code
+    snapshot's code lines; neither: {} (the modules then keep the map's order)."""
+    cfgm = None
+    try:
+        cfgm = load_modules(p)
+        if p.get("git") and cfgm:
+            tracked = tracked_and_heads(p)[0]
+            sizes = cached(pk(p, "linecounts"), lambda: line_counts(p, tracked), 120, swr=True)
+            return L.code_lines(sizes, tracked, cfgm.get("assign", []), ids)
+    except (OSError, ValueError, subprocess.SubprocessError) as ex:
+        log.info("module sizes from the clone of %s unavailable (%s)", p.get("name", ""), ex)
+    try:
+        metrics = json.load(open(pathlib.Path(p["code"]).expanduser() / "metrics.json")) if p.get("code") else {}
+        return {k: v["code"] for k, v in L.code_view(metrics)["modules"].items() if k in ids}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError) as ex:
+        log.info("module sizes from the snapshot of %s unavailable (%s)", p.get("name", ""), ex)
+        return {}
 
 
 def card_metadata(p=None, now=None):

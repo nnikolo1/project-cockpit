@@ -220,6 +220,26 @@ def add_tree(mods, tasks):
         m["rollup"] = {s: sum(c[s] for c in under) for s in STAGES}
 
 
+def code_lines(sizes, paths, assign, ids):
+    """{path: physical lines} of the clone -> {module id: lines of the code files (file_kind 'code') the map assigns to it or its sub-modules}."""
+    return {mid: sum(sizes[x] for x in module_files(paths, assign, mid) if x in sizes and file_kind(x) == "code") for mid in ids}
+
+
+def order_by_size(mods, size):
+    """The one ordering of any list of modules by size (PC-89, PC-90): the biggest first by size {id: lines}; ties by name; the
+    modules without a size come after the sized ones, in the given order. Returns a new list."""
+    has = [m for m in mods if size.get(m["id"]) is not None]
+    return sorted(has, key=lambda m: (-size[m["id"]], m.get("name") or m["id"])) + [m for m in mods if size.get(m["id"]) is None]
+
+
+def order_subs_by_size(mods, size):
+    """Orders each module's `children` (from add_tree) by size among siblings only, and sets `size` (lines or None) on every module, in place."""
+    by = {m["id"]: m for m in mods}
+    for m in mods:
+        m["size"] = size.get(m["id"])
+        m["children"] = [c["id"] for c in order_by_size([by[c] for c in m.get("children", [])], size)]
+
+
 def module_deadline(deadlines, mid):
     """-> (date, id of the module it is set on): the module's own deadline, else the nearest ancestor's; (None, None) if none."""
     return next(((deadlines[i], i) for i in chain(mid) if deadlines.get(i)), (None, None))

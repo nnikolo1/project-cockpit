@@ -351,6 +351,8 @@ function churnLine(e,w){
   const tr=e.trend_pct==null?'new activity':(e.trend_pct>0?'↑ +':e.trend_pct<0?'↓ −':'→ ')+Math.abs(e.trend_pct).toFixed(0)+'% vs before';
   return '<div class="crow"><b>'+w+' d</b>'+bandChip(b)+'<span>'+e.commits+' commits · +'+e.added+' −'+e.removed+' · net '+sgn(e.net)+' · churn '+e.churn
     +(churnRel()&&e.rel!=null?' ('+(e.rel*100).toFixed(1)+'% of size)':'')+' · '+tr+'</span></div>';}
+/* the size the module was ordered by (PC-89, PC-90): its code lines, or nothing when it has none */
+const sizeSum=m=>m.size==null?'<span class="muted">size: no data</span> ':'<span class="muted">'+m.size.toLocaleString('en-US')+' code lines</span> ';
 function churnSum(id){  /* the 30-day band as a chip, for collapsed rows */
   const c=META.churn,m=c.status==='ok'&&c.view.modules[id],e=m&&m.windows['30'];
   return e?bandChip(e[churnRel()?'band_rel':'band_abs'])+' <span class="muted">30 d churn '+e.churn+'</span>':'<span class="muted">churn: no data</span>';}
@@ -406,7 +408,7 @@ function subBlock(m){
   const rows=m.children.map(id=>MODULES.find(x=>x.id===id)).map(q=>{const n=STAGES.reduce((a,s)=>a+q.rollup[s],0);
     return '<div class="subrow"><button class="linkbtn" data-act="mod" data-m="'+q.id+'"><b>'+esc(q.short)+'</b>'+(q.desc?'<span class="muted" style="font-size:12px;display:block">'+esc(q.desc)+'</span>':'')+'</button><span class="muted">'+n+'</span><span class="bar" aria-hidden="true">'+stageBar(q.rollup)+'</span>'
      +'<div style="grid-column:1/-1">'+dlForm(q,D.modDeadline[q.id]||'',true)
-     +'<details class="meta" style="border:0;padding:0"><summary>'+churnSum(q.id)+' <span class="muted">more</span></summary>'+metaBlock(q.id)+'</details></div></div>';}).join('');
+     +'<details class="meta" style="border:0;padding:0"><summary>'+sizeSum(q)+churnSum(q.id)+' <span class="muted">more</span></summary>'+metaBlock(q.id)+'</details></div></div>';}).join('');
   const un=STAGES.reduce((a,s)=>a+m.counts[s],0);
   return '<div style="display:flex;flex-direction:column;gap:2px"><span class="label">Sub-modules</span>'+rows+'<span class="muted" style="font-size:12px">'
    +(un?'<button class="linkbtn" style="color:var(--accent)" data-act="mod" data-m="'+m.id+'" data-x="1">'+un+' tasks only at module level</button>':'No tasks only at module level')+'. Deadlines inherit: task, sub-module, module.</span></div>';}
