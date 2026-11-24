@@ -1144,17 +1144,16 @@ def _iso(epoch):
     return dt.datetime.fromtimestamp(epoch, dt.timezone.utc).isoformat(timespec="minutes")
 
 
-HOURLY_HOURS = 8        # the newest readings are shown per hour for this many hours
 MONTHLY_MONTHS = 2      # whole months before the current one that are shown per month
 
 
 def _period(t, anchor):
     """Where a reading at epoch t falls, seen from the newest reading `anchor`: (level, key, label) or None when older than shown.
-    Per hour for the last HOURLY_HOURS hours; per day for the earlier days of the current (Monday-first) week; per week for the earlier
+    Per hour for the current day; per day for the earlier days of the current (Monday-first) week; per week for the earlier
     weeks of the current month (the first one cut at the month's start); per month for the MONTHLY_MONTHS months before the current one."""
     utc = dt.timezone.utc
     a, x = dt.datetime.fromtimestamp(anchor, utc), dt.datetime.fromtimestamp(t, utc)
-    hour0 = a.replace(minute=0, second=0, microsecond=0) - dt.timedelta(hours=HOURLY_HOURS - 1)
+    hour0 = a.replace(hour=0, minute=0, second=0, microsecond=0)
     week0 = (a - dt.timedelta(days=a.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
     month0 = a.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     m = month0.year * 12 + month0.month - 1 - MONTHLY_MONTHS

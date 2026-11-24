@@ -122,15 +122,14 @@ def test_periods_are_graded_hour_day_week_month():
           "2026-11-03T10:00:00+00:00", "2026-11-04T10:00:00+00:00",   # week of 2026-11-02 (Monday), earlier week of November
           "2026-11-09T10:00:00+00:00",                                # week of 2026-11-09
           "2026-11-23T10:00:00+00:00", "2026-11-24T09:00:00+00:00",   # Monday and Tuesday of the current week: day rows
-          "2026-11-25T00:30:00+00:00",                                # Wednesday, before the 8 hours ending with the newest hour (01:00): its day row
-          "2026-11-25T05:10:00+00:00", "2026-11-25T05:40:00+00:00", "2026-11-25T08:20:00+00:00"]  # hour rows
+                    "2026-11-25T05:10:00+00:00", "2026-11-25T05:40:00+00:00", "2026-11-25T08:20:00+00:00"]  # hour rows: the current day (Wednesday 25th) per hour
     qt = "\n".join(q(ts, 10 + i, 30, end) for i, ts in enumerate(at))
     ps = L._quota(qt, None)[1]["periods"]
     assert [(p["level"], p["key"]) for p in ps] == [
         ("month", "2026-10"), ("week", "2026-11-02"), ("week", "2026-11-09"), ("day", "2026-11-23"), ("day", "2026-11-24"),
-        ("day", "2026-11-25"), ("hour", "2026-11-25T05:00"), ("hour", "2026-11-25T08:00")]
+        ("hour", "2026-11-25T05:00"), ("hour", "2026-11-25T08:00")]
     assert ps[0]["readings"] == 2 and ps[0]["five_hour"] == dict(first=11, last=12, low=11, high=12)
-    assert ps[6]["readings"] == 2 and ps[6]["five_hour"]["first"] == 19 and ps[6]["five_hour"]["last"] == 20
+    assert ps[5]["readings"] == 2 and ps[5]["five_hour"]["first"] == 18 and ps[5]["five_hour"]["last"] == 19
 
 
 def test_week_crossing_a_month_start_has_no_week_row():
