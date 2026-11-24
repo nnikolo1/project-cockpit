@@ -13,7 +13,7 @@
   {"id": "internal/devops", "name": "DevOps", "desc": "the CI workflow, the kit/ install and policy files for a consuming repository, and repository configuration (.gitignore)"},
   {"id": "internal/agents", "name": "Agent policies and skills", "desc": "standing instructions for assistants (CLAUDE.md), skill and agent definitions (.claude/) and the brief check the agent-brief skill runs (tools/check_brief.py)"}
  ],
- "rules": {"groups": [{"name": "Constitution", "paths": ["docs/constitution.md"]}, {"name": "Instructions", "paths": ["CLAUDE.md", "**/CLAUDE.md", ".claude/**"]}, {"name": "Owner defaults and policies", "paths": ["docs/owner-defaults.md"]}, {"name": "Specification", "paths": ["docs/specs/*.md"]}, {"name": "Decisions (ADRs)", "paths": ["docs/adr/*.md"]}, {"name": "Module map and footprints", "paths": ["docs/cockpit-modules.json", "docs/footprint-declared.json"]}]},
+ "rules": {"groups": [{"name": "Constitution", "paths": ["docs/constitution.md"]}, {"name": "Instructions", "paths": ["CLAUDE.md", "**/CLAUDE.md", ".claude/**"]}, {"name": "Owner defaults and policies", "paths": ["docs/owner-defaults.md"]}, {"name": "Specification", "paths": ["docs/specs/*.md"]}, {"name": "Decisions (ADRs)", "paths": ["docs/adr/*.md"]}]},
  "assign": [
   {"path": "logic.py", "module": "githubclient", "basis": "decision PC-21"},
   {"path": "cockpit.py", "module": "githubclient", "basis": "decision PC-21"},
