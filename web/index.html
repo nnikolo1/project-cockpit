@@ -136,8 +136,6 @@ tr.blocked{background:var(--danger-tint)}tr.blocked td:first-child{box-shadow:in
 .act-col{white-space:nowrap;width:1%}
 .btn.armed{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .btn.danger.armed{background:var(--danger);color:#fff;border-color:var(--danger)}
-.qwin{display:flex;flex-direction:column;gap:8px}.qwin .big{font-size:26px;font-weight:600;font-variant-numeric:tabular-nums}
-.bar.thick{height:14px}.bar.thick i{background:var(--accent)}.bar.thick i.hi{background:var(--p1)}
 .chip.stale{background:var(--warn);color:var(--warn-ink);font-weight:600}.chip.ok{background:var(--accent-tint);color:var(--accent)}.chip.dry{border:1px dashed var(--edge);background:none;color:var(--muted)}
 .tblbox.narrow table{min-width:640px}
 @media (max-width:640px){
@@ -236,9 +234,9 @@ async function reload(fresh){
   const mine=PROJ;
   const qp=loadQuestions(fresh);
   try{
-    const [s,f,c,r,mt,bd]=await Promise.all([api('/api/state'+(fresh?'?fresh=1':'')),api('/api/timeline'),api('/api/code'),api('/api/rules').catch(e=>({configured:false,error:e.message})),api('/api/cardmeta').catch(e=>null),api('/api/budget').catch(e=>({error:e.message}))]);
+    const [s,f,c,r,mt]=await Promise.all([api('/api/state'+(fresh?'?fresh=1':'')),api('/api/timeline'),api('/api/code'),api('/api/rules').catch(e=>({configured:false,error:e.message})),api('/api/cardmeta').catch(e=>null)]);
     if(mine!==PROJ)return;  /* the user switched project while this was loading: drop the answer */
-    D=s;TODAY=D.today;MODULES=D.modules;FEED=f.entries;CODE=c;RULES=r;META=mt||NOMETA();BUD=bd;UI.err='';
+    D=s;TODAY=D.today;MODULES=D.modules;FEED=f.entries;CODE=c;RULES=r;META=mt||NOMETA();UI.err='';
     if(!CODE.modules[UI.codeMod]&&!MODULES.some(m=>m.id===UI.codeMod&&m.parent)){const k=MODULES.find(m=>!m.virtual);UI.codeMod=CODE.modules[k&&k.id]?k.id:'unassigned';}
   }catch(e){if(mine!==PROJ)return;UI.err=String(e.message||e);}
   await qp;
@@ -279,48 +277,6 @@ function isUn(c){const v=rev()[c.sha];return v===false||(v==null&&c.date>=rev().
 const ruleChanges=()=>RULES.configured?RULES.changes:[];
 const unreviewed=()=>ruleChanges().filter(isUn);
 const pendingPrs=()=>RULES.configured?RULES.pending:[];
-
-/* ---------- budget: quota feed, usage report, boot-filling decision log (files written elsewhere, see docs/contracts/budget-panel.md) ---------- */
-let BUD=null;  /* /api/budget: {quota, usage, log} or {error} */
-const durTxt=s=>s==null?'unknown':s<90?s+' s':s<5400?Math.round(s/60)+' min':s<172800?Math.floor(s/3600)+' h '+Math.round(s%3600/60)+' min':Math.floor(s/86400)+' d '+Math.round(s%86400/3600)+' h';
-const ageS=s=>s==null?'age unknown':s<90?'just now':durTxt(s)+' ago';
-const utc=t=>t?esc(String(t).replace('T',' ').slice(0,16))+' UTC':'<span class="muted">?</span>';
-const tokN=n=>n==null?'?':n>=1e6?(n/1e6).toFixed(2)+' M':n>=1e3?Math.round(n/1e3)+' k':String(n);
-function srcHead(label,c,staleTxt){
-  if(c.status!=='ok')return '<span class="muted">'+label+': no data'+(c.status==='invalid'?' ('+esc(c.reason)+')':' (file not found)')+'</span>';
-  return '<span class="muted">'+label+': read '+ageS(c.age_s)+'</span>'+(c.stale?' <span class="chip stale">⚠ stale: '+staleTxt+'</span>':'');}
-function winCard(w,u,q){
-  const hi=w.used_pct>=80;
-  let h='<div class="card qwin"><div class="row spread"><h2>'+esc(w.label)+'</h2>'+(w.expired?'<span class="chip stale">⚠ window already reset: this reading is old</span>':'')+'</div>'
-   +'<div class="big">'+w.used_pct+' % <span class="muted" style="font-size:14px;font-weight:400">used · '+w.left_pct+' % left</span></div>'
-   +'<div class="bar thick" role="img" aria-label="'+w.used_pct+' percent used"><i class="'+(hi?'hi':'')+'" style="width:'+w.used_pct+'%"></i></div>'
-   +'<dl class="facts"><dt>Resets in</dt><dd>'+(w.expired?'—':durTxt(w.resets_in_s))+'</dd><dt>Reset time</dt><dd>'+utc(w.resets_at)+'</dd>';
-  const t=u.status==='ok'&&u.windows[w.key];
-  if(t)h+='<dt>Tokens used</dt><dd>'+tokN(t.tokens_used)+'</dd><dt>Cap <span class="chip dry">estimate</span></dt><dd>'+(t.tokens_cap==null?'<span class="muted">unknown</span>':tokN(t.tokens_cap)+(t.cap_source==='derived'?' <span class="muted">(from used share)</span>':''))+'</dd>'
-    +'<dt>Tokens left (est.)</dt><dd>'+(t.tokens_left==null?'<span class="muted">unknown</span>':tokN(t.tokens_left))+'</dd>';
-  else h+='<dt>Tokens</dt><dd class="muted">no usage report for this window</dd>';
-  return h+'</dl></div>';}
-function vBudget(){
-  if(!BUD||BUD.error)return '<div class="page"><h1>Budget and boot-filling</h1><div class="card" style="border-color:var(--danger)"><b class="warnline">Could not load the budget data.</b> <span class="muted">'+esc(BUD?BUD.error:'loading')+'</span></div></div>';
-  const q=BUD.quota,u=BUD.usage,l=BUD.log;
-  let h='<div class="page"><div class="row spread"><div><h1>Budget and boot-filling</h1><span class="muted">Quota readings and the decision log of the boot-filling job. Read-only: nothing here changes anything.</span></div></div>';
-  h+='<div class="card strip">'+srcHead('Quota feed',q,'older than 30 min')+'<span class="muted">·</span>'+srcHead('Usage report',u,'older than 24 h')+'</div>';
-  h+=q.status==='ok'?'<div class="grid">'+q.windows.map(w=>winCard(w,u,q)).join('')+'</div>'
-    :'<div class="card muted">No quota reading available'+(q.status==='invalid'?': '+esc(q.reason):'. Point the cockpit at the quota feed with --quota-feed.')+'</div>';
-  h+='<p class="muted" style="font-size:13px;margin:0">Token caps are estimates: the provider publishes percentages, not token limits. A cap marked “from used share” is tokens used divided by the used share, so it is rough when the share is small.</p>';
-  h+='<div class="row spread"><h2>Released by the boot-filling job</h2><span class="muted">'+(l.status==='ok'?l.releases.length+' latest'+(l.skipped?' · '+l.skipped+' unreadable lines skipped':''):'no decision log yet')+'</span></div>';
-  h+='<div class="tblbox"><table><thead><tr><th>Time</th><th>Trigger</th><th>Rank</th><th>Project</th><th>Task</th><th>Why this rank</th><th>State</th></tr></thead><tbody>'
-   +l.releases.map(r=>'<tr><td class="mono">'+utc(r.time)+'</td><td>'+esc(r.trigger||'')+'</td><td>'+(r.rank==null?'':r.rank)+'</td><td>'+esc(r.project||'')+'</td><td><b class="mono">'+(r.issue==null?'':'#'+r.issue)+'</b> '+esc(r.title||'')+'</td><td>'+esc(r.reason||'')+'</td><td>'+esc(r.state||'')+(r.dry_run?' <span class="chip dry">dry run</span>':'')+'</td></tr>').join('')
-   +(l.releases.length?'':'<tr><td colspan="7" class="muted">No releases recorded.</td></tr>')+'</tbody></table></div>';
-  h+='<div class="row spread"><h2>Latest polls</h2><span class="muted">'+(l.status==='ok'?l.polls.length+' latest':'')+'</span></div>';
-  h+='<div class="tblbox"><table><thead><tr><th>Time</th><th>Idle</th><th>5-hour window</th><th>Weekly window</th><th>Triggers</th><th>Decision</th></tr></thead><tbody>'
-   +l.polls.map(p=>'<tr><td class="mono">'+utc(p.time)+'</td><td>'+(p.idle==null?'<span class="muted">?</span>':'<span class="chip '+(p.idle?'ok':'')+'">'+(p.idle?'idle':'busy')+'</span>')+'<div class="muted" style="font-size:12px">'+esc(p.idle_reason||'')+'</div></td>'
-     +'<td>'+(p.five_hour_used==null?'?':p.five_hour_used+' %')+'<div class="muted" style="font-size:12px">resets '+utc(p.five_hour_resets_at)+'</div></td>'
-     +'<td>'+(p.weekly_used==null?'?':p.weekly_used+' %')+'<div class="muted" style="font-size:12px">resets '+utc(p.weekly_resets_at)+'</div></td>'
-     +'<td>'+(p.triggers.length?'<div class="chips">'+p.triggers.map(x=>'<span class="chip '+(x.verdict==='fired'?'ok':'')+'">'+esc(x.name||'?')+': '+esc(x.verdict||'?')+'</span>').join('')+'</div>':'<span class="muted">none evaluated</span>')+'</td><td>'+esc(p.decision||'')+'</td></tr>').join('')
-   +(p0(l)?'':'<tr><td colspan="6" class="muted">No polls recorded.</td></tr>')+'</tbody></table></div>';
-  return h+'</div>';}
-const p0=l=>l.polls.length>0;
 
 /* Two-click confirmation: the first click on Submit or Cancel arms the button (it asks "Confirm?"), the second click within 6 s does it. */
 function armBtn(kind,t){
@@ -657,7 +613,7 @@ function drawerNew(p){
 /* ---------- render and actions ---------- */
 function render(){
   const R=UI.route;
-  const nav=[['cockpit','Cockpit'],['backlog','Backlog'],['questions','Open questions'],['timeline','Timeline'],['rules','Rules'],['budget','Budget'],['code','Code'],['how','How it works']];
+  const nav=[['cockpit','Cockpit'],['backlog','Backlog'],['questions','Open questions'],['timeline','Timeline'],['rules','Rules'],['code','Code'],['how','How it works']];
   let h='<div class="top"><span class="brand">Project cockpit</span><nav class="nav" aria-label="Main">'+nav.map(n=>'<button data-act="go" data-r="'+n[0]+'"'+(R===n[0]?' aria-current="page"':'')+'>'+n[1]+(n[0]==='questions'?' <span class="chip" aria-label="'+Q.questions.length+' open">'+Q.questions.length+'</span>':'')+'</button>').join('')+'</nav>';
   if(PROJS.length>1)h=h.replace('</span><nav','</span><select class="psel" id="psel" aria-label="Project">'+PROJS.map(p=>'<option value="'+esc(p.name)+'"'+(p.name===PROJ?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select><nav');
   if(D){const s=D.source;
@@ -668,7 +624,7 @@ function render(){
   if(UI.err)h+='<div class="page"><div class="card" style="border-color:var(--danger)"><b class="warnline">Could not load from GitHub.</b> <span class="muted">'+esc(UI.err)+'</span> <button class="btn small" data-act="refresh">Retry</button></div></div>';
   else if(!D)h+='<div class="page"><span class="muted">Loading…</span></div>';
   else{
-  h+=R==='cockpit'?vCockpit():R==='backlog'?vBacklog():R==='questions'?vQuestions():R==='timeline'?vTimeline():R==='how'?vHow():R==='rules'?vRules():R==='budget'?vBudget():vCode();
+  h+=R==='cockpit'?vCockpit():R==='backlog'?vBacklog():R==='questions'?vQuestions():R==='timeline'?vTimeline():R==='how'?vHow():R==='rules'?vRules():vCode();
   if(UI.drawer){const t=UI.drawer.key&&byKey(D,UI.drawer.key);h+='<div class="drawer-bg" data-act="close"></div><div class="drawer" role="dialog" aria-modal="true" aria-label="Task">'+(UI.drawer.mode==='new'&&ST()?drawerNew(UI.drawer.prefill):(t?drawerTask(t):''))+'</div>';}
   }
   if(UI.toast)h+='<div class="toast" role="status">'+esc(UI.toast)+'</div>';

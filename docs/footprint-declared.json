@@ -9,13 +9,6 @@
      "personal_data": false,
      "written_by": "core",
      "note": "access token created with --token-file (mode 0600); a secret, not personal data; the path is the documented default, the owner may choose another"
-    },
-    {
-     "path": "~/.local/share/project-cockpit/budget",
-     "kind": "dir",
-     "personal_data": false,
-     "written_by": "an external producer (quota feed, usage report, boot-filling decision log); the cockpit only reads them",
-     "note": "budget panel inputs quota.json, usage.json, decisions.jsonl (docs/contracts/budget-panel.md); the paths can be changed with --quota-feed, --usage-report, --decision-log"
     }
    ],
    "logging": [
