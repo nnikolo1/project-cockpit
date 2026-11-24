@@ -444,7 +444,7 @@ def get_settings(p):
 
 
 # The Token Usage tab's files, under DATA_DIR/<project name>/ (the folder the Settings page uses)
-USAGE_FILE, PLOG_FILE, AREA_DIR = "proxy-usage.jsonl", "processing/processing.jsonl", "area"
+USAGE_FILE, PLOG_FILE, AREA_DIR, QUOTA_FILE = "proxy-usage.jsonl", "processing/processing.jsonl", "area", "quota-history.jsonl"
 
 
 def _read_text(path):
@@ -454,7 +454,7 @@ def _read_text(path):
         return None
 
 
-def get_usage(p, data_dir=None):
+def _usage_one(p, data_dir=None):
     d = (data_dir or DATA_DIR) / (p.get("name") or p["repo"].split("/")[-1])
 
     def goodbye_tokens(folder):  # only the task folder's name is taken from the log; the file is read inside the area
@@ -463,7 +463,15 @@ def get_usage(p, data_dir=None):
         except (TypeError, ValueError, AttributeError):
             return None
         return t if isinstance(t, int) and not isinstance(t, bool) else None
-    return L.usage_report(_read_text(d / USAGE_FILE), _read_text(d / PLOG_FILE), goodbye_tokens)
+    return L.usage_report(_read_text(d / USAGE_FILE), _read_text(d / PLOG_FILE), goodbye_tokens, _read_text(d / QUOTA_FILE))
+
+
+def get_usage(p, data_dir=None, projects=None):
+    """The selected project's report plus `summary` (its 90-day row) and `projects` (one row per project the Cockpit serves; no counts = no data)."""
+    rep = _usage_one(p, data_dir)
+    rep["summary"] = L.usage_summary(rep)
+    rep["projects"] = [dict(name=n, **(L.usage_summary(_usage_one(q, data_dir)) or {})) for n, q in (projects or PROJECTS or {p.get("name", ""): p}).items()]
+    return rep
 
 
 def save_settings(p, form):

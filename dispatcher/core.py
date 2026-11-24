@@ -228,7 +228,7 @@ class Dispatcher:
         st["workers"][user] = {
             "task_id": task.id, "repo": self.repo_dir, "folder": folder, "pid": proc.pid, "launched": self.probes.now(),
             "started": False}
-        self.plog.event(task.id, folder, "launched")
+        self.plog.event(task.id, folder, "launched", worker=user)
         log.info("started %s for task %s (pid %s)", user, task.id, proc.pid)
         return f"started {user} on {task.id}"
 

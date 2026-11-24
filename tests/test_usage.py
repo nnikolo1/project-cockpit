@@ -21,9 +21,11 @@ PLOG = "\n".join([p("2026-11-20T00:50:00+00:00", "T-1", "launched"), p("2026-11-
 
 def test_report_groups_by_day_window_and_worker_and_skips_bad_lines():
     r = L.usage_report(USAGE, PLOG, lambda f: None)
-    assert [x["key"] for x in r["days"]] == ["2026-11-20", "2026-11-21"]
-    assert r["days"][0]["total"] == 30 and r["days"][0]["input_tokens"] == 3
+    assert len(r["days"]) == 90 and r["days"][-1]["key"] == "2026-11-21" and r["days"][0]["key"] == "2026-08-24"
+    d = {x["key"]: x for x in r["days"]}
+    assert d["2026-11-20"]["total"] == 30 and d["2026-11-20"]["input_tokens"] == 3 and d["2026-11-19"]["total"] == 0
     assert [x["key"] for x in r["windows"]] == ["2026-11-19 21:00", "2026-11-20 02:00", "2026-11-20 22:00"]
+    assert {x["kind"] for x in r["windows"]} == {"fixed"} and r["quota"] is None
     assert r["windows"][0]["total"] == 10 and r["windows"][1]["total"] == 20
     assert {x["key"]: x["total"] for x in r["workers"]} == {"w1": 30, "w2": 10}
 
@@ -38,7 +40,7 @@ def test_tasks_compare_proxy_sum_with_goodbye_tokens():
 
 def test_missing_files_are_no_data():
     r = L.usage_report(None, None, lambda f: None)
-    assert r == dict(days=None, windows=None, workers=None, tasks=None)
+    assert r == dict(days=None, windows=None, workers=None, tasks=None, quota=None)
 
 
 def test_overlapping_tasks_are_marked():
@@ -59,3 +61,52 @@ def test_get_usage_reads_the_project_folder(tmp_path):
     r = C.get_usage(dict(name="proj", repo="o/r"), data_dir=tmp_path)
     assert [t["note"] for t in r["tasks"]] == [25, None]
     assert C.get_usage(dict(name="none", repo="o/r"), data_dir=tmp_path)["days"] is None
+
+
+def test_task_with_a_worker_name_counts_only_that_worker_and_is_not_overlap():
+    log = "\n".join([json.dumps(dict(time="2026-11-20T00:50:00+00:00", task="A", folder="/a/A", state="launched", worker="w1")),
+                     p("2026-11-20T01:00:00+00:00", "B", "launched"), p("2026-11-20T05:00:00+00:00", "A", "done")])
+    a, b = L.usage_report(USAGE, log, lambda f: None)["tasks"]
+    assert a["worker"] == "w1" and a["proxy"] == 20 and a["overlap"] is False   # w1: 01:00 and 05:00, not w2's 04:59
+    assert b["worker"] is None and b["overlap"] is True
+
+
+def q(ts, five, week, resets):
+    return json.dumps({"ts": ts, "five_hour": {"used_percentage": five, "resets_at": resets}, "seven_day": {"used_percentage": week, "resets_at": 0}, "source": "t"})
+
+
+def test_quota_history_gives_vendor_windows_and_daily_maxima():
+    # vendor window 2026-11-20 03:30-08:30 UTC; requests at 04:59 and 05:00 fall in it, 01:00 does not (fixed block)
+    end = int(L._epoch("2026-11-20T08:30:00+00:00"))
+    qt = "\n".join([q("2026-11-20T04:00:00+00:00", 10, 30, end), q("2026-11-20T06:00:00+00:00", 40, 35, end + 3), "bad",
+                     q("2026-11-21T00:30:00+00:00", 5, 36, end + 18000)])
+    r = L.usage_report(USAGE, PLOG, lambda f: None, qt)
+    assert {(x["key"], x["kind"]): x["total"] for x in r["windows"]}[("2026-11-20 03:30", "vendor")] == 20
+    assert {x["kind"] for x in r["windows"]} == {"fixed", "vendor"}
+    d = {x["key"]: x for x in r["quota"]["days"]}
+    assert len(r["quota"]["days"]) == 90 and d["2026-11-20"]["five_hour"] == 40 and d["2026-11-20"]["seven_day"] == 35
+    assert d["2026-11-19"]["five_hour"] is None
+    assert [x["five_hour"] for x in r["quota"]["recent"]] == [10, 40, 5]
+
+
+def test_get_usage_reads_the_quota_file(tmp_path):
+    d = tmp_path / "proj"
+    d.mkdir()
+    (d / "proxy-usage.jsonl").write_text(USAGE)
+    assert C.get_usage(dict(name="proj", repo="o/r"), data_dir=tmp_path)["quota"] is None
+    (d / "quota-history.jsonl").write_text(q("2026-11-21T00:30:00+00:00", 5, 36, 1))
+    assert C.get_usage(dict(name="proj", repo="o/r"), data_dir=tmp_path)["quota"]["recent"][0]["seven_day"] == 36
+
+
+def test_all_projects_table_sums_each_project(tmp_path):
+    for n, ts in (("one", "2026-11-20T01:00:00+00:00"), ("two", "2026-11-22T01:00:00+00:00")):
+        (tmp_path / n).mkdir()
+        (tmp_path / n / "proxy-usage.jsonl").write_text(u(ts, "w1") + "\n" + u(ts, "w2"))
+    (tmp_path / "one" / "processing").mkdir()
+    (tmp_path / "one" / "processing" / "processing.jsonl").write_text(p("2026-11-20T01:00:00+00:00", "T-1", "launched"))
+    projs = {n: dict(name=n, repo="o/" + n) for n in ("one", "two", "none")}
+    r = C.get_usage(projs["one"], data_dir=tmp_path, projects=projs)
+    assert r["summary"]["total"] == 20 and r["summary"]["tasks"] == 1 and r["summary"]["last_day"] == "2026-11-20"
+    rows = {x["name"]: x for x in r["projects"]}
+    assert rows["two"]["total"] == 20 and rows["two"]["tasks"] == 0 and rows["two"]["last_day"] == "2026-11-22"
+    assert rows["none"] == dict(name="none")
