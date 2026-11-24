@@ -105,6 +105,7 @@ def main(argv=None):
     ap.add_argument("--cockpit", required=True, help="the project-cockpit checkout that holds the dispatcher package")
     ap.add_argument("--base", required=True, help="working folder (clone, area, settings, state, log, socket)")
     ap.add_argument("--image", default="cockpit-worker:stub", help="the stub image")
+    ap.add_argument("--container-name", default="cockpit-workers-test", help="the test's own container: never the production one")
     ap.add_argument("--token-file", required=True, help="the proxy's credential file")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -121,7 +122,8 @@ def main(argv=None):
         cases = {mode: f"{short}-{file_issue(a.repo, mode)}" for mode in EXPECTED}
         cmd = [sys.executable, "-m", "dispatcher.core", "--settings", paths["settings.json"], "--state", paths["state.json"],
                "--area", paths["area"], "--socket", paths["p.sock"], "--token-file", a.token_file, "--usage-file", paths["usage.jsonl"],
-               "--repo", a.repo, "--repo-dir", paths["repo"], "--data-dir", paths["data"], "--image", a.image]
+               "--repo", a.repo, "--repo-dir", paths["repo"], "--data-dir", paths["data"], "--image", a.image,
+               "--container-name", a.container_name]
         labels = {}
         start = time.time()
         while time.time() - start < TOTAL_LIMIT:
@@ -144,7 +146,7 @@ def main(argv=None):
             print(f"{'FAIL' if problems else 'PASS'} {mode} ({task_id})" + (": " + "; ".join(problems) if problems else ""))
         return 1 if failed else 0
     finally:
-        for cmd in (["container", "stop", "cockpit-workers"], ["pkill", "-f", f"dispatcher.proxy --socket {paths['p.sock']}"]):
+        for cmd in (["container", "stop", a.container_name], ["pkill", "-f", f"dispatcher.proxy --socket {paths['p.sock']}"]):
             try:
                 subprocess.run(cmd, capture_output=True, timeout=CALL_LIMIT)
             except (OSError, subprocess.TimeoutExpired) as e:

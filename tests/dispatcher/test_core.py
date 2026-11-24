@@ -806,3 +806,22 @@ def test_a_launch_that_starts_no_worker_leaves_no_task_folder(tmp_path):
     w.runtime.launch = lambda u, t: (_ for _ in ()).throw(rt.ContainerError("clone failed"))
     assert "clone failed" in w.fire()
     assert discarded == ["x-1"]
+
+
+def test_container_name_is_an_argument_so_a_test_run_cannot_touch_production(tmp_path, monkeypatch):
+    seen = {}
+
+    class FakeDispatcher:
+        def __init__(self, settings, state, runtime, tasks, plog, probes, relay_path, repo_dir):
+            seen["name"] = runtime.cfg.name
+
+        def fire(self):
+            return "ok"
+
+    monkeypatch.setattr(core, "Dispatcher", FakeDispatcher)
+    common = ["--settings", "s.json", "--state", str(tmp_path / "st"), "--area", str(tmp_path / "a"), "--socket", "/tmp/s",
+              "--token-file", "t", "--usage-file", "u", "--repo", "me/repo", "--repo-dir", str(tmp_path), "--data-dir", str(tmp_path / "d")]
+    core.main(common)
+    assert seen["name"] == "cockpit-workers"
+    core.main(common + ["--container-name", "cockpit-workers-test"])
+    assert seen["name"] == "cockpit-workers-test"
