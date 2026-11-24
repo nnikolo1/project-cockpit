@@ -1390,14 +1390,21 @@ def _period_skeleton(anchor):
     return out
 
 
+def record_kind(rec):
+    """A transcript-usage record's `kind`; a record without one (earlier runs) is headless when its source label starts with `headless`."""
+    k = rec.get("kind")
+    return k if k in ("interactive", "headless") else "headless" if str(rec.get("source") or "").startswith("headless") else "interactive"
+
+
 def transcript_report(text, quota=None, aggregate=None):
-    """The counts of interactive sessions (contract transcript-usage.jsonl) -> dict(periods, sources, sessions, aggregate_days), or None when
+    """The counts of interactive sessions (contract transcript-usage.jsonl) -> dict(periods, sources, sessions, aggregate_days, headless), or None when
     neither file exists. periods: the graded rows of _period(), anchored on the newest quota reading (else the newest message or aggregate
     day), each with the message count, the four counts, their sum and the highest 5-hour and weekly percentage of the same period from
     `quota` (the report of _quota()). sources, sessions: the last HISTORY_DAYS days; sessions are the SESSIONS_SHOWN with the most tokens.
     aggregate: the text of stats-cache-usage.jsonl (its contract): its token totals per day count in a period's `total` and `aggregate`
     only (no split, no messages), never in sources or sessions; a day with per-message records ignores them (the exact data wins).
-    aggregate_days: {day: tokens} of the aggregates used."""
+    aggregate_days: {day: tokens} of the aggregates used. Only records of kind interactive (record_kind) count in periods, sources and
+    sessions; headless: the graded rows of the headless records alike (no aggregates), [] when there are none."""
     recs, agg = _json_lines(text), _json_lines(aggregate)
     if recs is None and agg is None:
         return None
@@ -1405,7 +1412,7 @@ def transcript_report(text, quota=None, aggregate=None):
     for rec in recs or []:
         t = _epoch(rec.get("ts"))
         if t is not None:
-            msgs.append((t, str(rec.get("source") or "?"), str(rec.get("session") or "?"), _message_counts(rec)))
+            msgs.append((t, str(rec.get("source") or "?"), str(rec.get("session") or "?"), _message_counts(rec), record_kind(rec) == "headless"))
     exact = {dt.datetime.fromtimestamp(m[0], dt.timezone.utc).date().isoformat() for m in msgs}
     days = {}
     for rec in agg or []:
@@ -1415,14 +1422,15 @@ def transcript_report(text, quota=None, aggregate=None):
     anchor = (quota or {}).get("anchor") or max([m[0] for m in msgs] + [_epoch(f"{d}T00:00:00+00:00") for d in days], default=None)
     empty = lambda: {k: 0 for k in ("messages", *USAGE_FIELDS, "total")}
     peaks = _held_peaks((quota or {}).get("periods", []))
-    rows = {p[:2]: dict(level=p[0], key=p[1], label=p[2], aggregate=0, **empty()) for p in (_period_skeleton(anchor) if anchor is not None else [])}
+    skeleton = _period_skeleton(anchor) if anchor is not None else []
+    rows, hrows = ({p[:2]: dict(level=p[0], key=p[1], label=p[2], aggregate=0, **empty()) for p in skeleton} for _ in range(2))
     sources, sessions = {}, {}
     since = anchor - HISTORY_DAYS * 86400 if anchor is not None else None
-    for t, src, ses, c in msgs:
+    for t, src, ses, c, headless in msgs:
         p = _period(t, anchor)
         if p is not None and p[:2] in rows:
-            _add_messages(rows[p[:2]], c)
-        if t >= since:
+            _add_messages((hrows if headless else rows)[p[:2]], c)
+        if t >= since and not headless:
             _add_messages(sources.setdefault(src, empty()), c)
             row = sessions.setdefault((src, ses), dict(source=src, **empty()))
             _add_messages(row, c)
@@ -1431,11 +1439,13 @@ def transcript_report(text, quota=None, aggregate=None):
         if p is not None and p[:2] in rows:
             rows[p[:2]]["aggregate"] += n
             rows[p[:2]]["total"] += n
-    for k, row in rows.items():
-        q = peaks.get(k, {})
-        row["five_hour"], row["seven_day"] = q.get("five_hour"), q.get("seven_day")
+    for k in rows:
+        for row in (rows[k], hrows[k]):
+            q = peaks.get(k, {})
+            row["five_hour"], row["seven_day"] = q.get("five_hour"), q.get("seven_day")
     top = sorted(sessions.items(), key=lambda kv: (-kv[1]["total"], kv[0]))[:SESSIONS_SHOWN]
-    return dict(periods=_history(rows.values(), [m[0] for m in msgs] + [_epoch(f"{d}T00:00:00+00:00") for d in days]), sources=[dict(key=k, **v) for k, v in sorted(sources.items(), key=lambda kv: (-kv[1]["total"], kv[0]))],
+    return dict(periods=_history(rows.values(), [m[0] for m in msgs if not m[4]] + [_epoch(f"{d}T00:00:00+00:00") for d in days]),
+                headless=_history(hrows.values(), [m[0] for m in msgs if m[4]]), sources=[dict(key=k, **v) for k, v in sorted(sources.items(), key=lambda kv: (-kv[1]["total"], kv[0]))],
                 sessions=[dict(v, key=k[1]) for k, v in top], aggregate_days=dict(sorted(days.items())))
 
 

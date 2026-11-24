@@ -666,14 +666,16 @@ function sessionCards(T){
   const card=(title,note,head,rows,row,n)=>'<div class="card"><h2>'+title+'</h2><span class="muted">'+note+'</span><div class="tblbox narrow"><table><thead><tr>'+head+'<th>Messages</th>'+cols+(n?'<th>5-hour peak</th><th>Weekly peak</th>':'')+'</tr></thead><tbody>'
     +rows.map(row).join('')+(rows.length?'':'<tr><td class="muted" colspan="9">no data</td></tr>')+'</tbody></table></div></div>';
   if(!T)return '<div class="card"><h2>Interactive sessions</h2><span class="muted">no data</span></div>';
-  const LV=['hour','day','week','month'],hist=recentRows(T.periods,r=>r.messages>0||r.total>0);
+  const LV=['hour','day','week','month'],hist=recentRows(T.periods,r=>r.messages>0||r.total>0),old=recentRows(T.headless||[],r=>r.messages>0);
   if(hist.length&&!hist.some(r=>r.level==='hour'))hist.unshift({level:'hour',none:true});
   const legend='<span class="lvlegend" aria-label="Aggregation levels">'+LV.map(l=>'<span class="lvkey lv-'+l+'"><i aria-hidden="true"></i>'+l+'</span>').join('')+'</span>';
-  return card('Interactive sessions history','Token counts of the interactive Claude Code sessions per period (UTC), with the highest quota percentage of the same period; hours without messages are not listed. Days before the transcripts exist come from the tool’s statistics cache as a daily aggregate without a split: counted in the sum only, marked “daily aggregate, no split”.'+legend,'<th>Period (UTC)</th><th>Per</th>',hist,
-      r=>r.none?'<tr class="lv-hour"><td class="muted" colspan="10">no sessions today</td></tr>'
-        :'<tr class="lv-'+r.level+'"><td class="mono">'+esc(r.label)+(r.aggregate?' <span class="muted" title="'+nf(r.aggregate)+' tokens of the tool’s statistics cache, counted in the sum only">incl. daily aggregate, no split</span>':'')+'</td><td>'+r.level+'</td>'+cells(r)+'<td class="mono">'+pc(r.five_hour)+'</td><td class="mono">'+pc(r.seven_day)+'</td></tr>',true)
-   +card('Interactive sessions per source','Last 90 days.','<th>Source</th>',T.sources,r=>'<tr><td class="mono">'+esc(r.key)+'</td>'+cells(r)+'</tr>')
-   +card('Sessions with the most tokens','Last 90 days, at most 20.','<th>Session</th><th>Source</th>',T.sessions,r=>'<tr><td class="mono">'+esc(r.key)+'</td><td class="mono">'+esc(r.source)+'</td>'+cells(r)+'</tr>');
+  const graded=r=>r.none?'<tr class="lv-hour"><td class="muted" colspan="10">no sessions today</td></tr>'
+        :'<tr class="lv-'+r.level+'"><td class="mono">'+esc(r.label)+(r.aggregate?' <span class="muted" title="'+nf(r.aggregate)+' tokens of the tool’s statistics cache, counted in the sum only">incl. daily aggregate, no split</span>':'')+'</td><td>'+r.level+'</td>'+cells(r)+'<td class="mono">'+pc(r.five_hour)+'</td><td class="mono">'+pc(r.seven_day)+'</td></tr>';
+  /* records of kind headless (the Workers of the old design) only in their own card, shown when there are some; the per-source card only with more than one interactive source (PC-77) */
+  return card('Interactive sessions history','Token counts of the interactive Claude Code sessions per period (UTC), with the highest quota percentage of the same period; hours without messages are not listed. Days before the transcripts exist come from the tool’s statistics cache as a daily aggregate without a split: counted in the sum only, marked “daily aggregate, no split”.'+legend,'<th>Period (UTC)</th><th>Per</th>',hist,graded,true)
+   +(old.length?card('Headless Worker sessions (before the proxy)','Token counts of the headless Worker sessions of the earlier design, from their transcripts, per period (UTC), with the highest quota percentage of the same period; periods without messages are not listed.'+legend,'<th>Period (UTC)</th><th>Per</th>',old,graded,true):'')
+   +(T.sources.length>1?card('Interactive sessions per source','Last 90 days.','<th>Source</th>',T.sources,r=>'<tr><td class="mono">'+esc(r.key)+'</td>'+cells(r)+'</tr>'):'')
+   +card('Interactive sessions with the most tokens','Last 90 days, at most 20.','<th>Session</th><th>Source</th>',T.sessions,r=>'<tr><td class="mono">'+esc(r.key)+'</td><td class="mono">'+esc(r.source)+'</td>'+cells(r)+'</tr>');
 }
 function projectsCard(){
   const nf=x=>x.toLocaleString('en-US'),P=USE.projects||[];
