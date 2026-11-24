@@ -636,7 +636,7 @@ function vQuality(){
   const f1=(v,n)=>v==null?null:v.toFixed(n);
   h+='<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(230px,1fr))">'
    +T('Size',c.code==null?null:c.code.toLocaleString('en-US'),'code lines'+(c.files?' · '+esc(c.files):'')
-     +((c.biggest||[]).length?'<br>Biggest files:'+c.biggest.map(f=>'<br><span class="mono">'+esc(f.path)+'</span> '+f.lines.toLocaleString('en-US')+' lines'+(f.kind==='code'?'':' ('+f.kind+')')).join(''):''))
+     +((c.biggest||[]).length?'<br>Biggest files:'+c.biggest.map(f=>'<br><a class="mono" target="_blank" rel="noopener" href="'+esc(f.url||'#')+'">'+esc(f.path)+'</a> '+f.lines.toLocaleString('en-US')+' lines'+(f.kind==='code'?'':' ('+f.kind+')')).join(''):''))
    +T('Complexity',c.cc,'worst block'+(c.ccAt?' ('+esc(c.ccAt)+')':'')+' · mean '+(c.mean==null?'n/a':c.mean.toFixed(1))+' · '+(c.dfe==null?'n/a':c.dfe)+' blocks rated D to F')
    +T('Maintainability',f1(c.mi,1),'mean index')
    +T('Lint',c.lint,esc(c.lintNote||'default ruleset'))

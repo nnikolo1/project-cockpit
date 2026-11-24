@@ -156,3 +156,12 @@ def test_biggest_files_takes_code_first_then_tests_then_other():
         ("b.py", "code"), ("tests/test_a.py", "test"), ("tests/test_b.py", "test")]
     assert [r["path"] for r in L.biggest_files({"b.py": 5, "docs/x.md": 7, "docs/y.md": 70})] == ["b.py", "docs/y.md", "docs/x.md"]
     assert L.biggest_files({}) == []
+
+
+def test_biggest_by_module_gives_github_links(tmp_path, monkeypatch):
+    import cockpit as C
+    (tmp_path / "a b.py").write_text("x\ny\n")
+    monkeypatch.setattr(C, "run_git", lambda p, a: "a b.py\0")
+    monkeypatch.setattr(C, "load_modules", lambda p: {"assign": [{"path": "a b.py", "module": "m"}]})
+    r = C.biggest_by_module(dict(git=str(tmp_path), repo="o/r"), ["m"])
+    assert r["m"] == [dict(path="a b.py", lines=2, kind="code", url="https://github.com/o/r/blob/main/a%20b.py")]

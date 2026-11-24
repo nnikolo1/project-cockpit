@@ -15,7 +15,7 @@ import datetime as dt
 from concurrent.futures import ThreadPoolExecutor
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 import logic as L
 from dispatcher.core import DEFAULTS as SETTING_DEFAULTS, load_settings
@@ -644,7 +644,9 @@ def biggest_by_module(p, ids):
     tracked = [x for x in run_git(p, ["ls-files", "-z"]).split("\0") if x]
     sizes = line_counts(p, tracked)
     assign = cfgm.get("assign", [])
-    return {mid: L.biggest_files({x: sizes[x] for x in L.module_files(tracked, assign, mid) if x in sizes}) for mid in ids}
+    base = f"https://github.com/{p['repo']}/blob/main/"
+    return {mid: [dict(r, url=base + quote(r["path"])) for r in L.biggest_files({x: sizes[x] for x in L.module_files(tracked, assign, mid) if x in sizes})]
+            for mid in ids}
 
 
 def code_snapshot(p=None):
