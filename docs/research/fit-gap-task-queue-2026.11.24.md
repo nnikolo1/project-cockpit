@@ -77,6 +77,9 @@ Owner briefs:
 | Slurm (4.5k; 2026-11-24) / Grid Engine, i.e. Open Cluster Scheduler (57; 2026-11-23), on one node | C (one queue, partitions) | N | N | P (cgroups) | N | N | N (CPU, not tokens) | P [I] | C (`--requeue`) | P (Linux only) | §5 [V] |
 | HTCondor (339; 2026-11-23) | C | N | N | P | N | N | N | P [I] | P | P | §5 [V partly] |
 | pueue (6.4k; 2026-11-18) | P (groups) | N | N | N | N | N | N | P (`--delay`) | P [I] | C | §5 [V] |
+| Gas Town (18.9k; 2026-11-12; built around Claude Code) | P (its own task store, beads; competes with GitHub) | N | P (one Docker Compose image [I]) | P (official Docker Compose: non-root user, dropped capabilities) | N (no egress restriction documented) | P (beads: git-backed task memory) | N | N | P (watcher nudges and recycles workers) | P | deep-three §4.9 (FIRSTHAND sources there); spine level redone here. Overall rejected earlier (auto-merge default, LLM supervisors). |
+| Prefect (24.2k; 2026-11-24) Docker work pool | N (own queue) | P | P (image per deployment through `job_variables` [V]) | P (container per run [I]) | P (`network_mode` setting [V]) | N | N | C (schedules [I]) | P | P | [worker API](https://docs.prefect.io/integrations/prefect-docker/api-ref/prefect_docker-worker), [docker example](https://docs.prefect.io/v3/deploy/infrastructure-examples/docker) |
+| Dagster (16.5k; 2026-11-24) DockerRunLauncher | N (own queue) | P | P (image of the code location [V]) | P ("each run in a new container" [V]) | P (`network` option [V]) | N | N | C (schedules [I]) | P | P | [dagster-docker](https://docs.dagster.io/api/libraries/dagster-docker) |
 | launchd / systemd timers (system tools) | N | N | N | N | N | N | N | C | N | C | [I] |
 | Claude Agent SDK (8.6k; 2026-11-23) | N | N | N | N | N | P (resume, fork) | P | N | N | C | §4 [V] |
 | Ruflo (82.3k; 2026-11-24) | N | N | N | N | N | P (cross-session memory) | N | N | N | P | §4 [V] |
@@ -87,6 +90,7 @@ Owner briefs:
 - G6 is covered by Claude Code's own mechanisms.
 - G8 is covered by host timers or Kelos' cron.
 - G9 is covered by Optio's auto-resume or a scheduler's requeue, and cheaply by our own setting.
+- **Spine-level re-check of earlier candidates (F-784):** Prefect's and Dagster's container launchers cover images and isolation only by delegating to Docker, while adding a second queue. Gas Town is partial on context (beads) but weak on isolation and network. None changes M1.
 - **Network:** none of the real hybrids found makes a no-network sandbox the default. ProPR's allowlist is optional and off; Optio's author says agents have open egress.
 
 ### 0.3 The best combinations
@@ -160,31 +164,43 @@ The real hybrids (M5) prove the combination is common, but each one hands the qu
 
 **Earlier studies.** The overlap note (`overlap-2a-2b-2026.11.22.md`) recorded that both studies rejected Temporal, Airflow, Slurm and BPMN engines; that is not repeated here. The note also says "tasks needing local data cannot run in the cloud". That is now out of date: a Project thread can run on the owner's computer through Remote Control. Such a thread runs without project memory loaded [V, [Projects](https://code.claude.com/docs/en/claude-projects)].
 
-## 1a. What the earlier reports already established (F-783)
+## 1a. What the earlier reports already established (F-783 to F-785)
 
-Read on 2026-11-24 from git history without checking out (`git log --all -- docs/research/*`, then `git show <commit>:<path>`). Dates are those of the reports.
+Read on 2026-11-24 from git history without checking out (`git log --all -- docs/research/*`, then `git show <commit>:<path>`). Dates are those of the reports. The earlier runs compared candidates at a coarser level: queueing, scheduling and general fit (F-784).
 
-| Report (date) | What it covered; main finding | This report: agrees, differs (why), reuses |
-|---|---|---|
-| orchestration-fit-gap-a, -b (2026-11-22) | Under the older brief: no workflow engine; a stateless reconciliation loop over GitHub; at-most-once starts by an intent marker read back; WIP limit by Little's law; hybrid concurrency control | Agrees on no engine and on one source of task state. The WIP limit was later dropped by the owner (synthesis, "no review-backlog cap"), so it is not proposed here. |
-| sota-ai-orchestration, study C (2026-11-22) | Literature on graphs, lazy execution and scheduling for LLM agents; ideas transfer, products do not | Not repeated; theory unchanged |
-| review-orchestration (2026-11-22) | Engines do not remove the claim-to-start window; mutual exclusion really rests on one dispatcher on one machine | Agrees: M1 keeps one Dispatcher on one host. Reused as the reason against M3 and M5's second queue. |
-| study2-a, study2-b (2026-11-22) | Adopt the vendor cloud (scheduled tasks, Projects), GitHub as queue, PRs as acceptance | **Differs**: since then the owner specified a local Dispatcher, no push (3e) and a local log (5c). The cloud remains row M4. |
-| review2-orchestration (2026-11-22) | Issue triggers cannot be filtered by label; the cloud proxy blocks GraphQL; branch protection unavailable on the private repository's plan [observed]; 25 of 44 released tasks need local data | Reused: these facts still weigh against M4. The local-data count supports local Workers (M1). Not re-verified here. |
-| decision-memo (2026-11-22) | Merged five sources; a no-regret core (complete reads or no decision, claim before start); rejected Baton (3 commits, idle since 2026-03-27) | Agrees; Baton would also fail the trust rules (F-779) |
-| build-baseline (2026-11-22) | The build: tick, processing log, heartbeat, limits and kills, good-bye note, launcher, adopted sandbox | It is the "keep building" row of §0.4 |
-| oss-survey (2026-11-22) | No open-source framework covers the dispatcher's defining needs (user and clone per worker, kill policy, verified note, counting proxy); engines supply the cheap parts; AI orchestrators (Symphony and ports, Bernstein, Gas Town, vibe-kanban and others) conflict with no-retry and no-merge | Agrees and reuses its engine and orchestrator verdicts. This report adds issue-to-PR runners not named in its summary (Kelos, Optio, ProPR, Cyrus, CodeForge). Their verdict is the same: pattern, not borrow. |
-| deep-three (2026-11-22) | Adopt no engine; build with a seam; DBOS as fallback; engines cannot kill a process inside a container (moby#9098); large deadwood | Agrees; the kill point reappears in the seam review. Its DBOS and Temporal fallback is kept implicitly (out of scope here, since no engine is proposed). |
-| apple-container-vs-orbstack (2026-11-22) | Apple's tool wins on egress (no-network mode plus a socket relay) if three hands-on tests pass on macOS 15.3; otherwise upgrade or OrbStack with a weaker boundary | Agrees; the tests later passed (seam review §1). New here: the Linux host option (F-748), kept neutral (F-754). |
-| sandbox-options (2026-11-22) | The boundary must be the OS or a VM, not the agent's tool lists; a linked worktree is not self-contained (its `.git` points outside) | Agrees; spec 4k (separate clones, no hardlinks) already follows it |
-| feasibility-container-networking (2026-11-23) | Documentation and source of Apple's tool; not run at first (no installation) | Superseded by the later observed run (seam review §1) |
-| synthesis-build-vs-borrow (2026-11-23) | Build the small dispatcher, adopt components; credential through a Console API key, because a host proxy injecting a subscription token "conflicts with the vendor text" | Agrees on build-with-seam. **Differs on the credential**: the owner has since specified subscription access (spec 4g) and recorded his reading of the terms for his single-user case (F-755 to F-757). §9 quotes the same vendor text and finds no clear conflict with that use case. The synthesis' reading is not discarded; it remains the documented alternative, and the decision is the owner's. |
-| trenches (2026-11-22) | Practitioner reports: silent failure dominates; review is the bottleneck; deterministic machinery outside the model gets the credit | Agrees; supports keeping the deterministic decision core and the end check. Reused instead of repeating a practitioner survey. |
+**Common limits of all earlier runs** (as stated in the reports):
+- they were scoped to the dispatcher question on the macOS laptop;
+- they included generic and multi-model frameworks;
+- they had no star or commit-date trust floor (F-777, F-779);
+- none examined Worker image management, a network policy per task kind, context management for Workers, or one queue for all projects;
+- task isolation was examined only in the sandbox studies, and there per sandbox, not per task kind.
 
-**What is new in this report** compared with all of the above:
-- the spine items (Worker images, a network policy per task kind, context management), from owner needs raised after 2026-11-23 (F-759, F-760, F-763);
-- the Claude-only and trust rules (F-767, F-777 to F-779);
-- the Linux host option (F-748);
+**Marks for each reused comparison:**
+- **reused as is**: the earlier report already covered the point.
+- **redone at the finer level**: re-checked here on the spine items. The results are in the matrix (§0.2) and in §2 to §4.
+
+| Report (date) | What it established | This report | Limits of that run |
+|---|---|---|---|
+| orchestration-fit-gap-a, -b (2026-11-22) | Under the older brief: no workflow engine; a stateless reconciliation loop over GitHub; at-most-once starts by an intent marker read back; WIP limit by Little's law | Agrees on no engine and one source of task state. **Reused as is** for queueing and state. The WIP limit was later dropped by the owner (synthesis), so it is not proposed. | Brief: the superseded assistant-written one, quota triggers and scheduling as the question; generic engines; sources numbered and read 2026-11-22, unverified items marked |
+| sota-ai-orchestration, study C (2026-11-22) | Literature on graphs, lazy execution and LLM-agent scheduling; ideas transfer, products do not | **Reused as is** (theory) | Literature only; no products judged on the spine items |
+| review-orchestration (2026-11-22) | Engines do not remove the claim-to-start window; mutual exclusion rests on one dispatcher on one machine | **Reused as is**: the reason against a second queue (M3, M5) | Reviewed A, B and C only; verdicts confirmed or refuted against primary sources |
+| study2-a, study2-b (2026-11-22) | Adopt the vendor cloud (scheduled tasks, Projects); GitHub as queue; PRs as acceptance | **Differs**: the later spec requires a local Dispatcher, no push (3e) and a local log (5c). The cloud's spine coverage is **redone at the finer level** (cloud environments, VM per session, project memory: row in §0.2). | Owner brief of 2026-11-22; generic engines; before spec 3e and 5c; sources numbered, some unverified |
+| review2-orchestration (2026-11-22) | Issue triggers not filterable by label; cloud proxy blocks GraphQL; no branch protection on the private plan [observed]; 25 of 44 released tasks need local data | **Reused as is** (these facts weigh against M4; not re-verified) | Reviewed 2A and 2B; read-only observations of the repositories |
+| decision-memo (2026-11-22) | A no-regret core (complete reads, claim before start); Baton rejected (3 commits, idle since 2026-03-27) | **Reused as is**; Baton would also fail F-779 | Merged five sources; later partly superseded by owner decisions (per the synthesis) |
+| build-baseline (2026-11-22) | The build: tick, log, heartbeat, limits and kills, note, launcher, adopted sandbox | **Reused as is** as the "keep building" row of §0.4 | One sandbox environment for 3 workers; images and context not in scope |
+| oss-survey (2026-11-22) | No open-source framework covers the dispatcher's defining needs; engines supply the cheap parts; AI orchestrators (Symphony and ports, Bernstein, Gas Town, vibe-kanban and others) conflict with no-retry or no-merge | Queueing and retry verdicts **reused as is**. **Redone at the finer level** for the candidates still in scope: Gas Town (Claude Code-built) in the matrix; Prefect and Dagster for images, isolation and network (matrix rows); Bernstein noted in appendix A. New runners (Kelos, Optio, ProPR, Cyrus, CodeForge) judged here. | Requirements R1-R14 of the dispatcher; repository data from the GitHub API (`pushed_at` as a proxy for last commit) |
+| deep-three (2026-11-22) | Adopt no engine; build with a seam; DBOS as fallback; engines cannot kill a process inside a container (moby#9098) | **Reused as is** for engines as schedulers. At the spine level the engines' container launchers (Prefect, Dagster) are re-checked in the matrix; they delegate to Docker and add nothing over M1's direct use [I]. | Engines and orchestrators of at least 500 stars; a ten-point treatment focused on scheduling, retries and kills |
+| apple-container-vs-orbstack (2026-11-22) | Apple's tool wins on egress if three tests pass on macOS 15.3 | **Reused as is** for the laptop boundary; the tests later passed (seam review §1). The Linux option is new (F-748). | One sandbox for three workers; desk research, vendor sources marked documented or unverified |
+| sandbox-options (2026-11-22) | The boundary must be the OS or a VM; a linked worktree is not self-contained | **Reused as is**; spec 4k already follows it. Per-task-kind network policy **redone** in §2 (F-763). | Laptop sandbox only; nothing installed; unverified claims marked |
+| feasibility-container-networking (2026-11-23) | Documentation and source of Apple's tool; not run at first | Superseded by the later observed run (seam review §1) | Not run; findings from documentation and source only |
+| synthesis-build-vs-borrow (2026-11-23) | Build the small dispatcher with adopted components; credential through an API key, because a proxy injecting a subscription token "conflicts with the vendor text" | Agrees on build-with-seam (**reused as is**). **Differs on the credential**: the owner later specified subscription access (4g) and recorded his reading (F-755 to F-757). §9 finds no clear conflict for that use case. The synthesis' reading remains the documented alternative; the decision is the owner's. | Seven earlier reports plus five spot-checks; before the spine items and the trust rules |
+| trenches (2026-11-22) | Practitioner reports: silent failure dominates; review is the bottleneck; deterministic machinery outside the model gets the credit | **Reused as is**; supports the deterministic core and the end check | Reported experience classified firsthand, secondhand or vendor; not a candidate comparison |
+
+**What is new in this report:**
+- the spine items: images, per-kind network policy, context (F-759, F-760, F-763);
+- the Claude-only scope and the trust rules (F-767, F-777 to F-779);
+- prior art under cluster managers, HPC and hybrids (F-769 to F-776);
+- the Linux option (F-748);
 - the gap-coverage method (F-772).
 
 ## 2. Task isolation (spine 1)
@@ -601,6 +617,7 @@ None of these is the only way to meet a spine item:
 - **Microsoft Agent Framework / AutoGen** (AutoGen in maintenance mode [V via its repository notice]);
 - **OpenHands** (models "supported by LiteLLM" [V, [docs](https://docs.openhands.dev/openhands/usage/llms/llms)]);
 - **SWE-agent** (superseded by mini-swe-agent [V, [repo](https://github.com/SWE-agent/SWE-agent)]);
+- **Bernstein** (multi-model, 55 agent adapters per deep-three §4.1): at the spine level its Docker backend runs one long-running container per session (2 GB, 2 CPUs) [deep-three, FIRSTHAND]. Left out as not Claude-specific; its pattern adds nothing over M1.
 - **Vibe Kanban** ("sunsetting" [V, [README](https://raw.githubusercontent.com/BloopAI/vibe-kanban/HEAD/README.md)]).
 
 ## Appendix B. Untrusted repositories (F-777 to F-779; checked 2026-11-24)
