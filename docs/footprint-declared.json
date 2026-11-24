@@ -37,6 +37,13 @@
      "personal_data": false,
      "written_by": "owner",
      "note": "the list of projects the Cockpit serves (the --projects file); written by hand, only read by githubclient"
+    },
+    {
+     "path": "~/.local/share/project-cockpit/<project>/transcript-usage.jsonl",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "tools/transcript_usage.py",
+     "note": "read only, by get_usage for the Token Usage page (a missing file shows as no data); exact token counts of interactive sessions, numbers and ids only"
     }
    ],
    "logging": [

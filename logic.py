@@ -1273,7 +1273,67 @@ def _quota(quota_text, end_day):
             for k in ("five_hour", "seven_day"):
                 if r[k] is not None and (d[k] is None or r[k] > d[k]):
                     d[k] = r[k]
-    return ends, dict(days=[dict(key=k, **v) for k, v in days.items()], periods=_periods(reads))
+    return ends, dict(days=[dict(key=k, **v) for k, v in days.items()], periods=_periods(reads), anchor=reads[-1]["t"] if reads else None)
+
+
+SESSIONS_SHOWN = 20
+
+
+def _message_counts(rec):
+    return dict(_counts(rec), messages=1)
+
+
+def _period_skeleton(anchor):
+    """Every graded period of _period() up to `anchor`, oldest first: (level, key, label). Hours still to come are not listed."""
+    out, seen = [], set()
+    t = anchor - anchor % 3600 - 3 * 31 * 86400
+    while t <= anchor:
+        p = _period(t, anchor)
+        if p is not None and p[:2] not in seen:
+            seen.add(p[:2])
+            out.append(p)
+        t += 3600
+    return out
+
+
+def transcript_report(text, quota=None):
+    """The counts of interactive sessions (contract transcript-usage.jsonl) -> dict(periods, sources, sessions), or None for no file.
+    periods: the graded rows of _period(), anchored on the newest quota reading (else the newest message), each with the message count,
+    the four counts, their sum and the highest 5-hour and weekly percentage of the same period from `quota` (the report of _quota()).
+    sources, sessions: the last HISTORY_DAYS days; sessions are the SESSIONS_SHOWN with the most tokens."""
+    recs = _json_lines(text)
+    if recs is None:
+        return None
+    msgs = []
+    for rec in recs:
+        t = _epoch(rec.get("ts"))
+        if t is not None:
+            msgs.append((t, str(rec.get("source") or "?"), str(rec.get("session") or "?"), _message_counts(rec)))
+    anchor = (quota or {}).get("anchor") or max((m[0] for m in msgs), default=None)
+    empty = lambda: {k: 0 for k in ("messages", *USAGE_FIELDS, "total")}
+    peaks = {(p["level"], p["key"]): p for p in (quota or {}).get("periods", [])}
+    rows = {p[:2]: dict(level=p[0], key=p[1], label=p[2], **empty()) for p in (_period_skeleton(anchor) if anchor is not None else [])}
+    sources, sessions = {}, {}
+    since = anchor - HISTORY_DAYS * 86400 if anchor is not None else None
+    for t, src, ses, c in msgs:
+        p = _period(t, anchor)
+        if p is not None and p[:2] in rows:
+            _add_messages(rows[p[:2]], c)
+        if t >= since:
+            _add_messages(sources.setdefault(src, empty()), c)
+            row = sessions.setdefault((src, ses), dict(source=src, **empty()))
+            _add_messages(row, c)
+    for k, row in rows.items():
+        q = peaks.get(k, {})
+        row["five_hour"], row["seven_day"] = (q.get(w, {}).get("high") for w in ("five_hour", "seven_day"))
+    top = sorted(sessions.items(), key=lambda kv: (-kv[1]["total"], kv[0]))[:SESSIONS_SHOWN]
+    return dict(periods=list(rows.values()), sources=[dict(key=k, **v) for k, v in sorted(sources.items(), key=lambda kv: (-kv[1]["total"], kv[0]))],
+                sessions=[dict(v, key=k[1]) for k, v in top])
+
+
+def _add_messages(into, c):
+    for k in ("messages", *USAGE_FIELDS, "total"):
+        into[k] += c[k]
 
 
 def usage_summary(rep):
