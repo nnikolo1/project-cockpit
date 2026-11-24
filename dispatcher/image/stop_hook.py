@@ -4,6 +4,7 @@ shown to the Worker. `stop_hook_active` is true when the Worker is already conti
 second failure lets it end (the Dispatcher then fails the task by 3e).
 Environment (set by Runtime.launch): WORKER_TASK_ID, WORKER_OUTBOX. The hook runs in the Worker's clone."""
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -13,6 +14,42 @@ try:  # in the image note.py sits next to this file; in the repository it is dis
     import note as good_bye  # noqa: E402
 except ImportError:
     from dispatcher import note as good_bye  # noqa: E402
+
+
+log = logging.getLogger("stop_hook")
+USAGE_FIELDS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+
+
+def transcript_tokens(path):
+    """Input + output + cache-creation + cache-read tokens over all assistant messages of the transcript (JSONL).
+    A message written as several lines (one per content block) repeats its usage, so it is counted once per id."""
+    usage_by_id = {}
+    with open(path, encoding="utf-8") as fh:
+        for n, line in enumerate(fh):
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            msg = entry.get("message") if isinstance(entry, dict) and entry.get("type") == "assistant" else None
+            if isinstance(msg, dict) and isinstance(msg.get("usage"), dict):
+                usage_by_id[msg.get("id") or f"line-{n}"] = msg["usage"]
+    return sum(u.get(f) or 0 for u in usage_by_id.values() for f in USAGE_FIELDS)
+
+
+def stamp_tokens(outbox, transcript_path):
+    """Write `tokens` into the note, replacing any value the Worker wrote; on any failure leave the note alone."""
+    note = os.path.join(outbox, "goodbye.json")
+    try:
+        total = transcript_tokens(transcript_path)
+        with open(note, encoding="utf-8") as fh:
+            parsed = json.load(fh)
+        if not isinstance(parsed, dict):
+            return
+        parsed["tokens"] = total
+        with open(note, "w", encoding="utf-8") as fh:
+            json.dump(parsed, fh)
+    except (OSError, ValueError, TypeError) as exc:
+        log.warning("tokens not written to %s from transcript %r: %s", note, transcript_path, exc)
 
 
 def commits_beyond_main(clone, task_id):
@@ -51,17 +88,20 @@ def main(stdin=None, env=None):
         event = json.load(stdin or sys.stdin)
     except ValueError:
         event = {}
-    if event.get("stop_hook_active"):
-        return 0  # refused once already: let the Worker end
     task_id, outbox = env.get("WORKER_TASK_ID"), env.get("WORKER_OUTBOX")
     if not task_id or not outbox:
         return 0  # not a Dispatcher Worker run
+    if event.get("stop_hook_active"):
+        stamp_tokens(outbox, event.get("transcript_path"))
+        return 0  # refused once already: let the Worker end
     found = problems(event.get("cwd") or os.getcwd(), task_id, outbox)
     if found:
         print("You cannot stop yet:\n- " + "\n- ".join(found), file=sys.stderr)
         return 2
+    stamp_tokens(outbox, event.get("transcript_path"))
     return 0
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.WARNING, format="stop_hook: %(message)s")
     sys.exit(main())
