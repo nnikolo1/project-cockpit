@@ -52,3 +52,8 @@ Accepted for the time being, to resolve the ambiguity about task creation:
 - A Worker may suggest at most one task per run, so whatever it wants to suggest goes into that single suggestion, a pre-embryo in its good-bye note. The Dispatcher does not file it; the Interactive Session Agent that mops up decides whether to file one or more tasks from it.
 - The author of every task is recorded (who created it: the owner, an interactive session, or a scheduled job), so that the rules above can be applied and checked.
 This replaces the earlier statement that tasks are created only by the Orchestrator and the Personal Assistant. The release privilege itself (the owner releases embryos) is unchanged apart from the 10-day rule above.
+
+## Standing policies: stale components are refreshed; findings are filed, not fixed by the finder (owner, 2026-11-24)
+
+- **Refresh, not only report.** When a component of the project is found to be stale (the generated card data, the module map, the footprint declarations, the Workflow drawing, the README, the screenshots and the like), it is refreshed. A staleness report is filed in the repository, but the report is not the goal: the refresh is. What is mechanical is refreshed by the daily job; everything else becomes a task.
+- **Separation of powers.** If at any time an agent finds that a file (documentation or code) contradicts a standing policy, it may file a task, and that task counts as released at once. The agent that found the contradiction is not allowed to work on that task itself: the finder files, someone else works. The separation of the filing from the working is a check and balance, like the separation of the Dispatcher, the Workers and the owner.
