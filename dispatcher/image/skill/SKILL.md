@@ -25,7 +25,7 @@ Read `inbox/task.md`. Work in your own clone. Write the file `outbox/started` fi
 | `suggested_task` | Optional: one task you suggest, everything you want to say about it in this single field. A suggestion is a pre-embryo: the Dispatcher does not file it. |
 | `tokens` | A whole number: the tokens you consumed. |
 
-The three optional text fields have the same size limit as `summary`.
+The four optional text fields have the same size limit as `summary`.
 
 If you cannot finish, you may still commit the partial work and write the outcome `"gave_up"`. A partial delivery is a failure, which the owner accepts.
 
