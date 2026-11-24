@@ -81,7 +81,3 @@ This is an AI agent working with the Owner in an interactive session. It merges 
 ### A Worker
 
 This is a headless AI agent that works on one task, in its own clone, as an unprivileged user in a container. Multiple Workers may be active at any given time.
-
-## The Event Log
-
-The main data structure is the append-only Event Log. Any change of state is recorded there.
