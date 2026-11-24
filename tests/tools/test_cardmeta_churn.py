@@ -38,7 +38,7 @@ def test_windows_rollup_trend_and_check():
     assert a["own"]["30"]["prev_churn"] == 6 and a["own"]["30"]["trend_pct"] == 100.0
     assert r["modules"]["b"]["own"]["30"]["trend_pct"] is None
     assert r["unassigned"]["30"]["churn"] == 9 and r["unassigned"]["30"]["tests"]["churn"] == 2
-    assert r["excluded"] == {"files": 1, "lines": 100}
+    assert r["excluded"] == {"files": 1, "lines": 100, "by_reason": {"generated": {"files": 1, "lines": 100}, "deleted files": {"files": 0, "lines": 0}}}
     assert r["mapping_check"]["30"] == {"raw_lines": 125, "bucket_lines": 25, "excluded_lines": 100, "ok": True}
     assert a["own"]["30"]["source"]["churn"] == 12 and a["own"]["30"]["active_days"] == 1 and a["own"]["30"]["commits"] == 1
 
@@ -112,3 +112,29 @@ def test_weekly_series_from_a_temporary_repo(tmp_path):
 def test_week_starts_are_mondays_and_end_with_the_current_week():
     w = ch.week_starts(datetime(2026, 11, 22, 23, tzinfo=timezone.utc))
     assert len(w) == 52 and w[-1] == "2026-11-16" and w[0] == "2025-11-24"
+
+
+def test_deleted_files_are_excluded_not_unassigned(tmp_path):
+    import subprocess
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    until = datetime(2026, 11, 22, 12, tzinfo=timezone.utc)
+    _commit(tmp_path, datetime(2026, 11, 10, 9, tzinfo=timezone.utc), "a/keep.py", "1\n2\n")
+    _commit(tmp_path, datetime(2026, 11, 11, 9, tzinfo=timezone.utc), "gone/job.py", "1\n2\n3\n")
+    _commit(tmp_path, datetime(2026, 11, 12, 9, tzinfo=timezone.utc), "a/gone.py", "1\n")
+    _git(tmp_path, "rm", "-q", "gone/job.py", "a/gone.py")
+    _commit(tmp_path, datetime(2026, 11, 13, 9, tzinfo=timezone.utc), "loose.txt", "x\n")
+    recs = ch.parse_log(ch.git_log(tmp_path, until - timedelta(days=500), until))
+    existing = set(ch.mp.tracked_files(tmp_path))
+    r = ch.aggregate(recs, MAP, [28], until, [], existing)
+    assert r["modules"]["a"]["own"]["28"]["churn"] == 2 and r["modules"]["a"]["own"]["28"]["files"] == 1
+    assert r["unassigned"]["28"]["churn"] == 1 and r["unassigned"]["28"]["files"] == 1
+    # job.py: +3 -3 (added and deleted), gone.py: +1 -1 -> 8 lines, 2 files
+    assert r["excluded"]["by_reason"]["deleted files"] == {"files": 2, "lines": 8} and r["excluded"]["lines"] == 8
+    c = r["mapping_check"]["28"]
+    assert c["ok"] and c["raw_lines"] == 2 + 8 + 1 and c["bucket_lines"] == 3 and c["excluded_lines"] == 8
+    weeks = r["unassigned"]["series"]["weekly"]["own"]
+    assert sum(e["added"] + e["removed"] for e in weeks[-4:]) == r["unassigned"]["28"]["churn"] == 1
+    a = r["modules"]["a"]["series"]["weekly"]["own"]
+    assert sum(e["added"] + e["removed"] for e in a[-4:]) == 2
+    # without the rule (existing=None) the deleted files fall to a module / unassigned as before
+    assert ch.aggregate(recs, MAP, [28], until, [])["unassigned"]["28"]["churn"] == 1 + 6
