@@ -8,7 +8,7 @@
   --bg:#f7f7f4;--surface:#ffffff;--line:#e2e0d8;--ink:#1d1d1a;--muted:#666560;
   --accent:#0f766e;--accent-ink:#ffffff;--accent-tint:#e3f1ee;
   --p1:#b42318;--p1-ink:#ffffff;--p2:#f7d9bf;--p2-ink:#7d3503;--p3:#e6ecf5;--p3-ink:#2f4a73;
-  --danger:#b42318;--danger-tint:#fdecea;--warn:#fbf0d9;--warn-ink:#724d00;
+  --danger:#b42318;--danger-tint:#fdecea;--warn:#fbf0d9;--warn-ink:#724d00;--q-ok:#2e7d32;--q-warn:#d9a400;--q-bad:#b42318;--q-none:#9a9990;
   --s-embryo:#d9a400;--s-released:#c0392b;--s-wip:#0f766e;--s-unmerged:#2f5fc4;--s-failed:#8e3aa8;--s-merged:#2e7d32;
   --edge:#8b8a82;--add-bg:#e4f3e8;--add-ink:#14532d;--del-bg:#fdecea;--del-ink:#8f1d12;--font:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;
 }
@@ -16,13 +16,13 @@
   --bg:#151513;--surface:#1e1e1b;--line:#34342f;--ink:#ecebe6;--muted:#a09f97;
   --accent:#3fb5a8;--accent-ink:#0b1f1c;--accent-tint:#17332f;
   --p1:#e5645a;--p1-ink:#1a0503;--p2:#5a3a1c;--p2-ink:#f5d5b5;--p3:#26354d;--p3-ink:#cfdcf0;
-  --danger:#f17b72;--danger-tint:#3a1a17;--warn:#3a2f12;--warn-ink:#f0cf84;
+  --danger:#f17b72;--danger-tint:#3a1a17;--warn:#3a2f12;--warn-ink:#f0cf84;--q-ok:#5fbf7a;--q-warn:#e0b94a;--q-bad:#e57368;--q-none:#77766e;
   --s-embryo:#e0b94a;--s-released:#e57368;--s-wip:#3fb5a8;--s-unmerged:#7ea2f0;--s-failed:#c98be0;--s-merged:#5fbf7a;--edge:#77766e;--add-bg:#143323;--add-ink:#9fe0b4;--del-bg:#3a1a17;--del-ink:#f4a8a0;color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#151513;--surface:#1e1e1b;--line:#34342f;--ink:#ecebe6;--muted:#a09f97;
   --accent:#3fb5a8;--accent-ink:#0b1f1c;--accent-tint:#17332f;
   --p1:#e5645a;--p1-ink:#1a0503;--p2:#5a3a1c;--p2-ink:#f5d5b5;--p3:#26354d;--p3-ink:#cfdcf0;
-  --danger:#f17b72;--danger-tint:#3a1a17;--warn:#3a2f12;--warn-ink:#f0cf84;
+  --danger:#f17b72;--danger-tint:#3a1a17;--warn:#3a2f12;--warn-ink:#f0cf84;--q-ok:#5fbf7a;--q-warn:#e0b94a;--q-bad:#e57368;--q-none:#77766e;
   --s-embryo:#e0b94a;--s-released:#e57368;--s-wip:#3fb5a8;--s-unmerged:#7ea2f0;--s-failed:#c98be0;--s-merged:#5fbf7a;--edge:#77766e;--add-bg:#143323;--add-ink:#9fe0b4;--del-bg:#3a1a17;--del-ink:#f4a8a0;color-scheme:dark}
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font:14px/1.45 var(--font);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 48px}
@@ -135,6 +135,9 @@ tr.blocked{background:var(--danger-tint)}tr.blocked td:first-child{box-shadow:in
 /* Churn bands reuse the priority palette (red, amber, blue are told apart without relying on hue) and always carry a symbol and a word. */
 .band{display:inline-block;border-radius:6px;padding:1px 8px;font-size:12px;font-weight:600;white-space:nowrap}
 .band-hot{background:var(--p1);color:var(--p1-ink)}.band-mid{background:var(--p2);color:var(--p2-ink)}.band-cold{background:var(--p3);color:var(--p3-ink)}
+.qbar{height:6px;border-radius:3px;background:var(--q-none)}.qbar.qb-ok{background:var(--q-ok)}.qbar.qb-warn{background:var(--q-warn)}.qbar.qb-bad{background:var(--q-bad)}
+.qw{font-size:12px;font-weight:600}.qleg{display:flex;flex-wrap:wrap;gap:14px;font-size:13px}.qleg i{display:inline-block;width:18px;height:6px;border-radius:3px;margin-right:6px;vertical-align:middle}
+.qth{display:grid;grid-template-columns:minmax(120px,1fr) 80px 90px 90px;gap:8px;align-items:center}.qth input{min-height:36px;width:100%}
 .band-dormant{background:none;border:1px dashed var(--s-embryo);color:var(--muted)}
 .chg{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
 .chg .pn{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:4px}
@@ -528,12 +531,24 @@ const SETROWS=[['enabled','Dispatcher on','Starts a Worker at each firing while 
   ['retries','Retries','How many times a failed task is tried again (0 = never).'],['workers','Workers','How many run at once.'],
   ['runaway_minutes','Runaway limit (minutes)','A Worker running longer is killed.'],['idle_minutes','No-activity limit (minutes)','A Worker with no record for this long is killed.'],
   ['start_minutes','No-start limit (minutes)','A Worker that has not started within this time is killed.']];
+function qThForm(ro){
+  const cur=(CSET&&(CSET.quality_thresholds||(CSET.values||{}).quality_thresholds))||{},d=(CSET&&CSET.defaults&&CSET.defaults.quality_thresholds)||{};
+  const keys=Object.keys(cur).length?Object.keys(cur):Object.keys(d);
+  const lab={complexity:'Complexity (worst block)',maintainability:'Maintainability (mean index)',lint:'Lint (per 1,000 lines)',dead:'Dead code (per 1,000 code lines)',cycles:'Import cycles (files)',duplication:'Duplication (% of code)',docstrings:'Docstrings (% documented)',coverage:'Test coverage (%)',tests:'Tests (test-to-code ratio)'};
+  const inp=(k,f,v)=>'<input type="number" step="any" name="qt_'+k+'_'+f+'" aria-label="'+esc(k)+' '+f+'" value="'+esc(String(v))+'"'+(ro?' disabled':'')+'>';
+  return '<div class="field"><label>Quality thresholds</label><span class="muted" style="font-size:12px">Colours of the bars in the Quality view. Lower is better: at or below ok is green, at or below warn is amber, above is red. Higher is better: the reverse.</span>'
+   +'<div class="qth"><span class="muted">Metric</span><span class="muted">Direction</span><span class="muted">ok</span><span class="muted">warn</span></div>'
+   +keys.map(k=>{const t=cur[k]||d[k];return '<div class="qth"><span>'+esc(lab[k]||k)+'</span><span>'+(t.direction==='high'?'higher is better':'lower is better')+'</span>'+inp(k,'ok',t.ok)+inp(k,'warn',t.warn)+'</div>';}).join('')
+   +(ro?'':'<div><button type="button" class="btn small" data-act="qtdefaults">Restore defaults</button></div>')+'</div>';}
+function qThRead(fd){
+  const cur=(CSET&&(CSET.quality_thresholds||(CSET.values||{}).quality_thresholds))||{},o={};
+  Object.keys(cur).forEach(k=>{o[k]={direction:cur[k].direction,ok:Number(fd.get('qt_'+k+'_ok')),warn:Number(fd.get('qt_'+k+'_warn'))};});return o;}
 function cardSettingsForm(){
   const ro=!ST(),v=CSET.values.churn_colour,o=(k,t)=>'<option value="'+k+'"'+(v===k?' selected':'')+'>'+t+'</option>';
   return '<form class="card" data-form="cardsettings" style="display:flex;flex-direction:column;gap:12px"><h2>Module cards</h2><div class="field"><label for="s_churn_colour">Colour churn by</label>'
    +'<select id="s_churn_colour" name="churn_colour"'+(ro?' disabled':'')+'>'+o('size','size (changed lines / current lines)')+o('absolute','absolute churn (lines added + removed)')+'</select>'
    +'<span class="muted" style="font-size:12px">Sets the colour of the churn chips on the overview and the module cards.</span></div>'
-   +(ro?'':'<div><button class="btn primary">Save</button></div>')+'</form>';}
+   +qThForm(ro)+(ro?'':'<div><button class="btn primary">Save</button></div>')+'</form>';}
 function vSettings(){
   const sec=UI.setSec,head='<div class="page"><div><h1>Settings</h1></div><div class="filters" role="group" aria-label="Section">'+[['dispatcher','Dispatcher settings'],['cards','Module cards'],['policies','Policies']].map(x=>'<button class="f" data-act="setsec" data-v="'+x[0]+'" aria-pressed="'+(sec===x[0])+'">'+x[1]+'</button>').join('')+'</div>';
   if(sec==='policies')return head+vRules()+'</div>';
@@ -626,9 +641,20 @@ function vRules(){
    +'<p class="muted" style="font-size:13px;margin:0;max-width:75ch">In phase 1 every commit is made under your name, so the Co-Authored-By line is the only sign that an agent was involved. With a separate Orchestrator account, a change not made by you becomes a hard, red flag. Review marks are kept in this browser only.</p></div>';
   return h;
 }
+/* quality-bands:start (pure helpers; docs/contracts/quality-bands.md) */
+const QKEYS=['complexity','maintainability','lint','dead','cycles','duplication','docstrings','coverage','tests'];
+const QBAND={ok:['●','normal'],warn:['▲','borderline'],bad:['■','out of range'],none:['–','no figure']};
+function qBar(c,key){
+  const b=((c&&c.bands)||{})[key],k=b&&QBAND[b.band]?b.band:'none',w=(b&&b.word)||QBAND[k][1];
+  return '<div class="qbar qb-'+k+'" data-q="'+key+'" data-band="'+k+'" role="img" aria-label="'+esc(w)+'"></div><span class="qw" style="color:var(--ink)">'+QBAND[k][0]+' '+esc(w)+'</span>';}
+function qTile(c,key,l,v,s){
+  return '<div class="card tile"><span class="label">'+l+'</span><span class="v">'+(v==null?'<span class="muted">n/a</span>':v)+'</span>'+qBar(c,key)+'<span class="muted" style="font-size:13px">'+s+'</span></div>';}
+function qLegend(){
+  return '<div class="qleg" role="note"><span><i style="background:var(--q-ok)"></i>green: normal</span><span><i style="background:var(--q-warn)"></i>amber: borderline</span><span><i style="background:var(--q-bad)"></i>red: out of range</span><span><i style="background:var(--q-none)"></i>grey: no figure</span></div>';}
+/* quality-bands:end */
 function vQuality(){
   const id=UI.codeMod;const c=CODE.modules[id];const mm=MODULES.find(m=>m.id===id);const nm=id==='unassigned'?'Not mapped to a module':(mm?(mm.parent?modShort(id):mm.name):id);
-  const snap=CODE.wired?'Snapshot '+esc(CODE.commit)+', '+esc((CODE.generated_at||'').slice(0,10))+'. Dimensions stay separate: no overall score, no pass or fail until you set a threshold.':'';
+  const snap=CODE.wired?'Snapshot '+esc(CODE.commit)+', '+esc((CODE.generated_at||'').slice(0,10))+'. Dimensions stay separate: no overall score, colours follow the thresholds in Settings.':'';
   let h='<div class="page"><div><h1>Code: '+esc(nm)+'</h1><span class="muted">'+snap+'</span></div>';
   h+=modFilter(id,'codem',null,'whole module (roll-up)',false,[{id:'unassigned',short:'Unassigned'}]);
   if(!c)return h+'<div class="card tile nw"><span class="label">Code snapshot</span><span class="v muted" style="font-size:18px">not wired</span><span class="muted" style="font-size:13px">'+(CODE.wired?'no metrics for this module in the snapshot':'point --code at a code snapshot directory')+'</span></div></div>';
@@ -636,17 +662,17 @@ function vQuality(){
   const f1=(v,n)=>v==null?null:v.toFixed(n);
   const big=(c.biggest||[]).length?'<br>Biggest files:'+c.biggest.map(f=>'<br><a class="mono" target="_blank" rel="noopener" href="'+esc(f.url||'#')+'">'+esc(f.path)+'</a> '+f.lines.toLocaleString('en-US')+' lines'+(f.kind==='code'?'':' ('+f.kind+')')).join(''):'';
   if(!c.filesN)return h+'<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(230px,1fr))">'+T('Size',null,'files of this module'+big)+'<div class="card tile nw"><span class="label">Quality metrics</span><span class="v muted" style="font-size:18px">not measured</span><span class="muted" style="font-size:13px">the snapshot analyses Python and JavaScript files only; this module has none</span></div></div></div>';
-  h+='<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(230px,1fr))">'
+  h+=qLegend()+'<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(230px,1fr))">'
    +T('Size',c.code==null?null:c.code.toLocaleString('en-US'),'code lines'+(c.files?' · '+esc(c.files):'')+big)
-   +T('Complexity',c.cc,'worst block'+(c.ccAt?' ('+esc(c.ccAt)+')':'')+' · mean '+(c.mean==null?'n/a':c.mean.toFixed(1))+' · '+(c.dfe==null?'n/a':c.dfe)+' blocks rated D to F')
-   +T('Maintainability',f1(c.mi,1),'mean index')
-   +T('Lint',c.lint,esc(c.lintNote||'default ruleset'))
-   +T('Dead-code candidates',c.dead,'candidates only; many are false positives')
-   +T('Import cycles',c.cyc==null?null:c.cyc+' files','in cycles')
-   +T('Duplication',c.dup==null?null:c.dup.toFixed(2)+'%','of code lines')
-   +T('Docstrings',c.doc==null?null:c.doc.toFixed(1)+'%','documented')
-   +T('Test coverage',c.cov==null?null:c.cov.toFixed(1)+'%',c.cov==null?(c.pyN===0?'no Python source files to measure':'no coverage data: needs a coverage run (pytest --cov)'):'of '+(c.covN||0).toLocaleString('en-US')+' statements covered')
-   +(c.churn!=null?T('Churn',c.churn,esc(c.churnNote)):'')+(c.testRatio!=null?T('Tests',c.testRatio,'test-to-code ratio; '+esc(c.testsNote)):'')+'</div>';
+   +qTile(c,'complexity','Complexity',c.cc,'worst block'+(c.ccAt?' ('+esc(c.ccAt)+')':'')+' · mean '+(c.mean==null?'n/a':c.mean.toFixed(1))+' · '+(c.dfe==null?'n/a':c.dfe)+' blocks rated D to F')
+   +qTile(c,'maintainability','Maintainability',f1(c.mi,1),'mean index')
+   +qTile(c,'lint','Lint',c.lint,esc(c.lintNote||'default ruleset'))
+   +qTile(c,'dead','Dead-code candidates',c.dead,'candidates only; many are false positives')
+   +qTile(c,'cycles','Import cycles',c.cyc==null?null:c.cyc+' files','in cycles')
+   +qTile(c,'duplication','Duplication',c.dup==null?null:c.dup.toFixed(2)+'%','of code lines')
+   +qTile(c,'docstrings','Docstrings',c.doc==null?null:c.doc.toFixed(1)+'%','documented')
+   +qTile(c,'coverage','Test coverage',c.cov==null?null:c.cov.toFixed(1)+'%',c.cov==null?(c.pyN===0?'no Python source files to measure':'no coverage data: needs a coverage run (pytest --cov)'):'of '+(c.covN||0).toLocaleString('en-US')+' statements covered')
+   +(c.churn!=null?T('Churn',c.churn,esc(c.churnNote)):'')+(c.testRatio!=null?qTile(c,'tests','Tests',c.testRatio,'test-to-code ratio; '+esc(c.testsNote)):'')+'</div>';
   h+='<div class="tblbox"><table style="min-width:560px"><thead><tr><th>Hotspot</th><th>Commits in window</th><th>Worst complexity</th><th></th></tr></thead><tbody>'
    +(c.hot||[]).map((x,i)=>'<tr><td class="mono">'+esc(x[0])+'</td><td>'+x[1]+'</td><td>'+x[2]+'</td><td>'+(ST()?'<button class="btn small" data-act="hotspot" data-m="'+id+'" data-i="'+i+'">File a task</button>':'')+'</td></tr>').join('')
    +'</tbody></table></div><p class="muted" style="font-size:13px;margin:0">Hotspot = commits in the window × worst block complexity: a sorting aid, not a verdict..</p></div>';
@@ -821,6 +847,8 @@ function act(a,ds){
   const t=ds.k&&byKey(D,ds.k);
   if(a!=='arm'&&UI.armed){UI.armed=null;clearTimeout(armTimer);}  /* any other click disarms */
   switch(a){
+   case 'qtdefaults':{const d=(CSET.defaults||{}).quality_thresholds||{},f=document.querySelector('[data-form=cardsettings]');
+     Object.keys(d).forEach(k=>['ok','warn'].forEach(x=>{const i=f.elements['qt_'+k+'_'+x];if(i)i.value=d[k][x];}));say('Defaults filled in; press Save to keep them.');break;}
    case 'setsec':UI.setSec=ds.v;render();break;
    case 'go':UI.route=ds.r;if(ds.r==='how'){UI.route='code';UI.codeTab='flowchart';}if(ds.r==='rules'){UI.route='settings';UI.setSec='policies';}UI.drawer=null;render();window.scrollTo(0,0);break;
    case 'code':UI.route='code';UI.codeTab='quality';UI.codeMod=ds.m;render();window.scrollTo(0,0);break;
@@ -864,7 +892,7 @@ document.addEventListener('submit',async function(e){
   else if(kind==='block')fd.get('b')&&post({action:'block',n:t.number,b:num(fd.get('b'))});
   else if(kind==='settings'){const b={action:'settings',enabled:f.elements.enabled.checked};
     SETROWS.slice(1).forEach(r=>{b[r[0]]=fd.get(r[0]);});post(b);}
-  else if(kind==='cardsettings')post({action:'cardsettings',churn_colour:fd.get('churn_colour')});
+  else if(kind==='cardsettings')post({action:'cardsettings',churn_colour:fd.get('churn_colour'),quality_thresholds:qThRead(fd)});
   else if(kind==='moddl')post({action:'moddl',module:f.dataset.m,d:fd.get('d')||''});
   else if(kind==='new'){const title=fd.get('title');
     if(await post({action:'new',title:title,desc:fd.get('desc'),module:fd.get('module'),type:fd.get('type'),cls:fd.get('cls'),parent:fd.get('parent')||''})){
