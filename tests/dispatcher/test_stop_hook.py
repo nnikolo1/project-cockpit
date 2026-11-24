@@ -109,3 +109,52 @@ def test_containerfile_wires_the_hook():
     assert cmd == "python3 /opt/hook/stop_hook.py"
     assert "COPY dispatcher/image/stop_hook.py dispatcher/note.py /opt/hook/" in text
     assert "skills/" in text and "SKILL.md" in text
+
+
+def transcript(tmp_path):
+    def line(kind, mid, **u):
+        return json.dumps({"type": kind, "message": {"id": mid, "usage": u}})
+    p = tmp_path / "session.jsonl"
+    p.write_text("\n".join([
+        line("user", "u1", input_tokens=999),
+        line("assistant", "m1", input_tokens=1, output_tokens=2, cache_creation_input_tokens=3,
+             cache_read_input_tokens=4),
+        line("assistant", "m1", input_tokens=1, output_tokens=2, cache_creation_input_tokens=3,
+             cache_read_input_tokens=4),  # same message, second content block
+        line("assistant", "m2", input_tokens=10, output_tokens=20),
+        "not json",
+    ]))
+    return p
+
+
+def test_tokens_written_over_workers_value(world, tmp_path):
+    clone, outbox, env = world
+    (outbox / "goodbye.json").write_text(json.dumps(dict(GOOD, tokens=5)))
+    (outbox / "result.bundle").write_text("x")
+    commit(clone)
+    assert run(clone, env, transcript_path=str(transcript(tmp_path)))[0] == 0
+    assert json.loads((outbox / "goodbye.json").read_text()) == dict(GOOD, tokens=40)
+
+
+def test_refused_stop_leaves_note_unchanged(world, tmp_path):
+    clone, outbox, env = world
+    (outbox / "goodbye.json").write_text(json.dumps(GOOD))
+    assert run(clone, env, transcript_path=str(transcript(tmp_path)))[0] == 2
+    assert json.loads((outbox / "goodbye.json").read_text()) == GOOD
+
+
+def test_second_stop_also_stamps(world, tmp_path):
+    clone, outbox, env = world
+    (outbox / "goodbye.json").write_text(json.dumps(GOOD))
+    assert run(clone, env, stop_hook_active=True, transcript_path=str(transcript(tmp_path)))[0] == 0
+    assert json.loads((outbox / "goodbye.json").read_text())["tokens"] == 40
+
+
+def test_unreadable_transcript_keeps_value_and_warns(world, tmp_path, caplog):
+    clone, outbox, env = world
+    (outbox / "goodbye.json").write_text(json.dumps(dict(GOOD, tokens=5)))
+    (outbox / "result.bundle").write_text("x")
+    commit(clone)
+    assert run(clone, env, transcript_path=str(tmp_path / "missing.jsonl"))[0] == 0
+    assert json.loads((outbox / "goodbye.json").read_text())["tokens"] == 5
+    assert "tokens not written" in caplog.text
