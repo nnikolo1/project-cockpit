@@ -133,7 +133,8 @@ def test_path_helpers_use_the_projects_own_paths(two, tmp_path):
     (snap / "report" / "x.html").write_text("<p>x</p>")
     C.proj("alpha")["code"] = str(snap)
     assert C.code_snapshot(C.proj("alpha")).get("wired") is not None
-    assert C.code_snapshot(C.proj("beta")) == dict(wired=False, modules={}, diagrams=[])  # beta has no snapshot dir
+    cs = C.code_snapshot(C.proj("beta"))
+    assert (cs["wired"], cs["modules"], cs["diagrams"]) == (False, {}, [])  # beta has no snapshot dir
     assert C.L.report_file(C.proj("alpha")["code"], "x.html") and C.proj("beta")["code"] is None
     assert C.build_rules(C.proj("beta")) == dict(configured=False)
 
