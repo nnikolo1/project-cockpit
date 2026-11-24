@@ -1542,9 +1542,7 @@ def metadata_gaps(project, now, modules, cards, metrics, usage, policies, max_ag
                 add("churn", f"churn data counts {shown} unassigned files, the repository has {actual}: files that no longer exist", None, c["age_h"])
     _snapshot_gaps(add, g, project, now, mods, metrics, max_age_h)
     for mid in mods:
-        gaps_n, docs_n = (module_facts or {}).get(mid, (None, None)) if module_facts is not None else (0, 0)
-        if gaps_n is None:
-            add("no_data", "module card: open gaps: no data", mid)
+        docs_n = (module_facts or {}).get(mid, (None, None))[1] if module_facts is not None else 0
         if docs_n is None:
             add("no_data", "module card: documents: no data", mid)
         if content is not None:

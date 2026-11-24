@@ -401,7 +401,7 @@ function vCockpit(){
     h+='<div class="card" style="display:flex;flex-direction:column;gap:12px"><div class="row spread"><button class="linkbtn" data-act="mod" data-m="'+m.id+'"><h2>'+esc(m.name)+'</h2></button><span class="muted">'+(n?n+' tasks':'no tasks')+'</span></div>'
      +'<div class="bar" aria-hidden="true">'+bar+'</div><span class="muted" style="font-size:13px">'+txt+'</span>'
      +subBlock(m)
-     +'<dl class="facts"><dt>Open gaps</dt><dd>'+(m.gaps==null?'<span class="muted">no data</span>':m.gaps)+'</dd><dt>Documents</dt><dd>'+(m.ndocs==null?'<span class="muted">no data</span>':m.ndocs)+'</dd>'
+     +'<dl class="facts"><dt>Documents</dt><dd>'+(m.ndocs==null?'<span class="muted">no data</span>':m.ndocs)+'</dd>'
      +'<dt>Code lines</dt><dd>'+nd(c.code,x=>x.toLocaleString('en-US'))+'</dd><dt>Worst complexity</dt><dd>'+nd(c.cc)+'</dd><dt>Import cycles</dt><dd>'+nd(c.cyc,x=>x+' files')+'</dd></dl>'
      +dlForm(m,md)+metaBlock(m.id)
      +'<div style="border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:5px;font-size:13px">'
