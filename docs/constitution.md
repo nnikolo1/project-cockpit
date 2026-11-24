@@ -52,6 +52,10 @@ Wrinkles on the path to automation are removed (owner, 2026-11-24): a step still
 
 Continuous integration is automatic (owner, 2026-11-24): no check, gate or report depends on a person remembering to run it; "by hand" is an oxymoron for CI.
 
+## Amendment: the Interactive Agent merges unmerged tasks (owner, 2026-11-24)
+
+The Interactive Agent has the authority to merge tasks in the state `unmerged`, and does so unprompted. Before merging it verifies (1) that the commit matches the task brief and (2) that it obeys all policies (tests passing included). If both hold, it merges. If no policy is violated and no test fails but the commit does not meet the brief fully, it merges and files a task meant to finish the job. If a policy is violated or a test fails, it does not merge: it formulates a new follow-up task whose work is to remove the existing issues (owner, 2026-11-24, constitutional amendment).
+
 Findings are released by the finder and worked by someone else (owner, 2026-11-24): A policy violation identified by the interactive agent may be filed and released by it as a task, to be worked by a background agent (a Worker); the finder itself never works the task, so the separation of powers holds. The release applies only to tasks labelled policy-finding that carry the policy sentence and the evidence, with a trail comment naming the policy (owner, 2026-11-24; amends the policy-finding rule of the same day).
 
 Policy is code (owner, 2026-11-24): a standing policy is a check that a program can run, and a violation is like a failing test in a coding harness: it automatically triggers remediation, a task filed and released at once, which the finder does not work on itself. The checks and the remediation are an extension of the coding agent's own harness, run by the daily job for every project the Cockpit serves; the owner decides policies, the harness enforces them.

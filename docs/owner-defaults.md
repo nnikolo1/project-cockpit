@@ -73,3 +73,7 @@ The Cockpit is a pocket-size Swiss Army knife for agent-assisted software develo
 ## Policy findings may be released by the interactive agent (owner, 2026-11-24)
 
 A policy violation identified by the interactive agent may be filed and released by it as a task, to be worked by a background agent (a Worker); the finder itself never works the task, so the separation of powers holds. The release applies only to tasks labelled policy-finding that carry the policy sentence and the evidence, with a trail comment naming the policy (owner, 2026-11-24; amends the policy-finding rule of the same day).
+
+## The Interactive Agent merges unmerged tasks (owner, 2026-11-24, constitutional amendment)
+
+The Interactive Agent has the authority to merge tasks in the state `unmerged`, and does so unprompted. Before merging it verifies (1) that the commit matches the task brief and (2) that it obeys all policies (tests passing included). If both hold, it merges. If no policy is violated and no test fails but the commit does not meet the brief fully, it merges and files a task meant to finish the job. If a policy is violated or a test fails, it does not merge: it formulates a new follow-up task whose work is to remove the existing issues (owner, 2026-11-24, constitutional amendment).
