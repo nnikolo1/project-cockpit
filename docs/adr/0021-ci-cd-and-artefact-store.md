@@ -9,6 +9,8 @@ Amends: [0009](0009-stdlib-only-small-code-pure-tests.md)
 The Cockpit began as a viewer over GitHub. In practice it also builds what its projects need (collectors, code snapshots, token statistics, reports, backups), checks it (the gap checker, the policy harness), and delivers its own releases and managed files to the projects, and the generated artefacts need a known place, an age and a version. The owner stated this on 2026-11-24.
 
 ## Decision
+The frame is the objective of the constitution: a pocket-size Swiss Army knife for agent-assisted software development, in a nutshell and opinionated.
+
 The Cockpit has a small element of continuous integration and delivery and of an artefact store:
 - it builds, checks and delivers for every project it serves, through one daily upkeep job with ordered phases (refresh, policy checks, remediation tasks);
 - generated artefacts live in a known place (a standard folder in each project, outside version control for generated data) with their age and version;
