@@ -50,6 +50,8 @@ The constitution is not aspirational (owner, 2026-11-24): every rule has an enfo
 
 Wrinkles on the path to automation are removed (owner, 2026-11-24): a step still done by hand is either automated or has an open task, and the manual-interventions log is the list.
 
+The Cockpit UI is the owner's alone (owner, 2026-11-24): its state-changing actions (release, cancel, edit, deploy) are for the owner; agents use the hosting-service command line and the commands, never the UI.
+
 Continuous integration is automatic (owner, 2026-11-24): no check, gate or report depends on a person remembering to run it; "by hand" is an oxymoron for CI.
 
 ## Amendment: the Interactive Agent merges unmerged tasks (owner, 2026-11-24)
