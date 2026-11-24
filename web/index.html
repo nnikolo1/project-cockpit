@@ -586,10 +586,10 @@ function vQuality(){
 
 /* ---------- code intelligence tabs, diagrams, workflow ---------- */
 const DIAG={
- deps:{t:'Module dependency graph',d:'Who imports whom among the Python packages. An arrow from A to B means A imports B. Red edges are packages that import each other (cycles). Whole repository, not one module.'},
+ deps:{t:'Module dependency graph',d:'Who imports whom among the packages. An arrow from A to B means A imports B. Red edges are packages that import each other (cycles). Whole repository, not one module.'},
  flow:{t:'Data flow: code to database tables',d:'Which packages read from or write to which database tables, found by scanning the SQL in the code. Blue solid arrows write, grey dotted arrows read. A heuristic scan: it misses table names built at run time.'},
  erd:{t:'Entity-relationship diagram of the database',d:'The tables of the database grouped by name prefix, with the declared foreign keys between them. Amber dashed edges would mark relations only inferred from column names.'},
- js:{t:'Extension dependency graph',d:'The scripts of the browser extension and which script loads which.'}
+ js:{t:'JavaScript dependency graph',d:'The scripts of the project and which script loads which.'}
 };
 const SVGFILE={deps:'deps',flow:'dataflow',erd:'erd',js:'js'};
 function vDiagram(k){
@@ -608,10 +608,12 @@ async function hydrate(){
   const again=document.getElementById('dgbox');if(again&&again.dataset.k===k)again.innerHTML=SVGC[k];
 }
 function vCode(){
-  const tabs=[['quality','Quality'],['deps','Dependencies'],['flow','Data flow'],['erd','ERD'],['js','Extension'],['flowchart','Flowchart']];
-  const T=UI.codeTab;
+  const have=CODE.wired?CODE.diagrams:[];
+  const tabs=[['quality','Quality'],...[['deps','Dependencies'],['flow','Data flow'],['erd','ERD'],['js','JavaScript']].filter(t=>have.includes(SVGFILE[t[0]])),['flowchart','Flowchart']];
+  const T=tabs.some(t=>t[0]===UI.codeTab)?UI.codeTab:'quality';
   return '<div class="page"><div><h1>Code</h1><span class="muted">Metrics and documentation drawn from the code itself, one snapshot of the repository.</span></div>'
    +'<div class="tabs" role="tablist">'+tabs.map(t=>'<button role="tab" data-act="codetab" data-v="'+t[0]+'" aria-selected="'+(T===t[0])+'">'+t[1]+'</button>').join('')+'</div>'
+   +(have.length?'':'<p class="muted" style="font-size:13px;margin:0">A code snapshot is not configured for this project.</p>')
    +(T==='quality'?vQuality():T==='flowchart'?vHow():vDiagram(T))+'</div>';
 }
 function wfSvg(){
