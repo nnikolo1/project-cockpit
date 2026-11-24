@@ -306,7 +306,7 @@ const ageTxt=a=>a<1?'under 1 h ago':a<48?Math.round(a)+' h ago':Math.round(a/24)
 const hb=n=>n==null?'?':n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':(n/1048576).toFixed(1)+' MB';
 function asOf(c){
   if(c.status!=='ok')return '<span class="muted">no data'+(c.status==='invalid'?' ('+esc(c.reason)+')':'')+'</span>';
-  return '<span class="muted">as of '+esc((c.generated_at||'unknown time').replace('T',' ').slice(0,16))+(c.age_h==null?'':' · '+ageTxt(c.age_h))+'</span>'+(c.stale?' <span class="chip blocks">⚠ stale: older than 48 h</span>':'');}
+  return '<span class="muted">as of '+esc((c.generated_at||'unknown time').replace('T',' ').slice(0,16))+((c.generated_at||'').endsWith('Z')?' UTC':'')+(c.age_h==null?'':' · '+ageTxt(c.age_h))+'</span>'+(c.stale?' <span class="chip blocks">⚠ stale: older than 48 h</span>':'');}
 const churnRel=()=>!CSET||CSET.values.churn_colour==='size';  /* Settings > Module cards; size is the default */
 function churnLine(e,w){
   const b=e[churnRel()?'band_rel':'band_abs'];
@@ -330,8 +330,8 @@ function footHtml(id){
   const pol=(l,p)=>'<div>'+l+': '+(p[1]?'<span class="gap">⚠ undocumented (gap)</span>':esc(p[0]))+'</div>';
   const vol=['day','week','month'].map(k=>{const v=m.volume[k];return k+': '+(v?(v.rows==null?'?':v.rows)+' rows, '+hb(v.bytes):'<span class="muted">no data</span>');}).join(' · ');
   return '<details>'+head+'<b>Tables</b>'+li(m.tables.map(t=>'<li class="mono">'+esc(t.name)+' · '+(t.rows==null?'?':t.rows)+' rows'+(t.bytes==null?'':' · '+hb(t.bytes))+' · owner '+esc(t.owner||'?')+(t.role?' ('+esc(t.role)+')':'')+'</li>'))
-   +'<b>Files and folders</b>'+li(m.files.map(x=>'<li><span class="mono">'+esc(x.path)+'</span> <span class="chip">'+x.location+' the repo</span>'+(x.personal_data?' <span class="chip blk">◆ personal data</span>':'')+' <span class="muted">'+esc(x.kind||'')+' '+(x.count!=null?x.count+' files':x.size_bytes!=null?hb(x.size_bytes):'')+(x.written_by?' · written by '+esc(x.written_by):'')+'</span></li>'))
-   +'<b>Logging</b>'+li(m.logging.map(x=>'<li><span class="mono">'+esc(x.logger||'?')+'</span> → '+esc(x.file||'?')+' <span class="muted">'+hb(x.size_bytes)+' · rotation: '+esc(x.rotation||'none recorded')+'</span></li>'))
+   +'<b>Files and folders</b>'+li(m.files.map(x=>'<li><span class="mono">'+esc(x.path)+'</span> <span class="chip">'+x.location+' the repo</span>'+(x.personal_data?' <span class="chip blk">◆ personal data</span>':'')+' <span class="muted">'+esc(x.kind||'')+' '+(x.exists===false?'not present':x.count!=null?x.count+' files':x.size_bytes!=null?hb(x.size_bytes):'')+(x.written_by?' · written by '+esc(x.written_by):'')+'</span></li>'))
+   +'<b>Logging</b>'+li(m.logging.map(x=>'<li><span class="mono">'+esc(x.logger||'?')+'</span> → '+(x.file?esc(x.file):'standard error (no log file)')+' <span class="muted">'+(x.file?hb(x.size_bytes)+' · ':'')+'rotation: '+esc(x.rotation||'none recorded')+'</span></li>'))
    +'<div style="margin-top:6px"><b>Volume</b> '+vol+'</div>'+pol('<b>Backup</b>',m.backup)+pol('<b>Retention</b>',m.retention)+'</details>';}
 function ambHtml(id){
   const a=META.ambiguity,m=a.status==='ok'&&a.view.modules[id];
@@ -339,6 +339,7 @@ function ambHtml(id){
   if(!m)return '<details>'+head('')+(a.status==='ok'?'<span class="muted">no data for this module</span>':'')+'</details>';
   const sub=Object.keys(m.subs).map(k=>esc(k)+' '+m.subs[k]).join(', ');
   const sh=Math.round(m.share*100);
+  if(!m.unsorted.length&&!m.ambiguous.length&&!m.high)return '';  /* nothing to report: the block is not shown */
   const mark=m.high?' <span class="chip blk">⚠ many unsorted: '+sh+'%</span>':(m.unsorted.length?' <span class="muted">'+m.unsorted.length+' unsorted ('+sh+'%)</span>':' <span class="muted">none unsorted</span>');
   const note=m.ambiguous.length?'<div class="note"><b>Ambiguous between sub-modules ('+m.ambiguous.length+'):</b> kept in this module by the rule that a file which cannot be assigned unambiguously to a sub-module belongs to its module<ul>'+m.ambiguous.map(u=>'<li><span class="mono">'+esc(u.path)+'</span> <span class="muted">could be '+esc((u.candidates||[]).join(' or '))+' · '+esc(u.reason||'no reason given')+'</span></li>').join('')+'</ul></div>':'';
   return note+'<details'+(m.high?' open':'')+'>'+head(mark)+'<div>Module level: '+m.own+' files'+(sub?' · sub-modules: '+sub:'')+' · unsorted: '+m.unsorted.length+' of '+m.total+' files</div>'
