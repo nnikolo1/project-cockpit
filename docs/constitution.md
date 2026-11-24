@@ -40,6 +40,8 @@ It will also try to address the mismatch in information bandwidth and context wi
 
 The human behind this project management system is acutely aware that there are dozens, if not hundreds, of such project management systems. Thus there will be a preference towards "buy" (or adopt) vs. "build". Yet, there is no fear in threading new ground - the super-human power of the agents drastically lowers the cost of code generation. There will be no fear in yielding this super-power judiciously. The goal is to come up with a project-management system which is light-weight, as general (and generalizable) as possible,  and leverages as much of the pre-existing tooling and infrastructure, as practical.
 
+Policy is code (owner, 2026-11-24): a standing policy is a check that a program can run, and a violation is like a failing test in a coding harness: it automatically triggers remediation, a task filed and released at once, which the finder does not work on itself. The checks and the remediation are an extension of the coding agent's own harness, run by the daily job for every project the Cockpit serves; the owner decides policies, the harness enforces them.
+
 The host operating system does not dictate the architecture (owner, 2026-11-24): the system is not bent to fit one operating system or one version of it; where the current host needs workarounds, they are a cost to weigh against moving, not a requirement.
 
 Any text or code produced follows the principle "less is more": it is included only if it is absolutely necessary or specifically asked for by the owner.
