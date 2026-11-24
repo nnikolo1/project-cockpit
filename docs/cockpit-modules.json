@@ -31,6 +31,7 @@
   {"path": "dispatcher/", "module": "internal/bootfilling", "basis": "the Dispatcher and Workers runtime of the spec docs/specs/dispatcher-and-workers.md, the redesign of the boot-filling job"},
   {"path": "tests/dispatcher/", "module": "internal/bootfilling", "basis": "tests the dispatcher/ package; tests follow the code"},
   {"path": "dispatcher/core.py", "module": "internal/bootfilling/dispatcher", "basis": "the Dispatcher's firing logic; its test follows it"},
+  {"path": "dispatcher/host.py", "module": "internal/bootfilling/dispatcher", "basis": "the host readings (memory pressure, power source) the Dispatcher puts in its heartbeat; its test is tests/dispatcher/test_host.py"},
   {"path": "dispatcher/runtime.py", "module": "internal/bootfilling/dispatcher", "basis": "the container-runtime interface the Dispatcher calls; its test follows it"},
   {"path": "dispatcher/proxy.py", "module": "internal/bootfilling/dispatcher", "basis": "the host-side reverse proxy the Dispatcher starts; its test is tests/dispatcher/test_proxy.py"},
   {"path": "dispatcher/tasks.py", "module": "internal/bootfilling/dispatcher", "basis": "the Dispatcher's task source (GitHub); its test follows it"},
