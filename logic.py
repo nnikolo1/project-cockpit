@@ -121,7 +121,24 @@ def stage(issue, eff):
         return "merged"
     if issue.get("assignees"):
         return "wip"
+    if is_finding(lab):
+        return "released"
     return "released" if "released" in eff else "embryo"
+
+
+FINDING = "policy-finding"
+FILED_BY = re.compile(r"<!--\s*filed-by:\s*(\S+?)\s*-->")
+
+
+def is_finding(labels):
+    """A task filed because a file contradicts a standing policy: released at once (spec 2b), but never a question or a decision."""
+    return FINDING in labels and "question" not in labels and "type:decision" not in labels
+
+
+def parse_filed_by(body):
+    """The agent id in the body's `<!-- filed-by: <agent id> -->` line, or None."""
+    m = FILED_BY.search(body or "")
+    return m.group(1) if m else None
 
 
 def is_running(stage_):
@@ -241,7 +258,7 @@ def derive(issues, events, project, manager, mods, grow):
             type=_prefixed(i["labels"], "type:") or KIND_TYPE.get(kind, "") or "task", cls=cls, prio=prio, deadline=due,
             parent=keys.get(i.get("parent")), blockedBy=[keys[n] for n in i.get("blocked_by", []) if n in keys],
             stage=stage(i, eff), assignee=(i.get("assignees") or [None])[0], hint=hint, est=p.get("est"), used=p.get("used"),
-            status=p.get("status", ""), created=i["created_at"], closed=i.get("closed_at"), author=i.get("author"),
+            status=p.get("status", ""), finding=is_finding(i["labels"]), filed_by=parse_filed_by(body), created=i["created_at"], closed=i.get("closed_at"), author=i.get("author"),
             desc=body.split("**Evidence**")[0].strip()[:700], evidence=[dict(text=t, url=u) for t, u in LINK.findall(body)][:6],
             labels=i["labels"], running=is_running(stage(i, eff)), flags=[f"unauthorised: {n} set by {a}" for n, a in sorted(bad.items())], bad=sorted(bad)))
     with_parents(mods)

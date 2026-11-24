@@ -59,6 +59,13 @@ def test_author_labels_decide_release():
     assert sorted(t.id for t in make(gh, now=day(11)).released()) == ["cockpit-1", "cockpit-2", "cockpit-4", "cockpit-5"]   # 10 days old
 
 
+def test_policy_finding_is_released_whatever_its_author():
+    gh = Gh([node(1, ["policy-finding", "author:job"], body="<!-- filed-by: worker1 -->"), node(2, ["policy-finding", "author:interactive"]),
+             node(3, ["policy-finding", "question"]), node(4, ["policy-finding", "type:decision"]), node(5, ["author:job"])])
+    got = {t.id: t for t in make(gh).released()}
+    assert sorted(got) == ["cockpit-1", "cockpit-2"] and got["cockpit-1"].filed_by == "worker1" and got["cockpit-2"].filed_by is None
+
+
 def test_unauthorised_priority_label_is_ignored():
     gh = Gh([node(1, ["P1"])])  # no labeled event by the manager
     assert make(gh).released()[0].priority == 2
