@@ -23,7 +23,7 @@ Every requirement below is the owner's own statement or was approved by the owne
 - 2a. The states of a task are embryo, released, WIP, unmerged, failed and merged.
 - 2b. At the moment all embryos (apart from "questions" and "decisions") are regarded as "released" but this may change in the future. A tentative idea is to have the Owner or an interactive agent session release them.
 - 2c. Only the owner or an interactive agent can change the status of a task once it is "merged" or "failed".
-- 2d. Task metadata lives in GitHub, which is its single source of truth.
+- 2d. Task metadata lives in GitHub, which is its single source of truth. A task is identified as `<repository short name>-<issue number>` (for example `cockpit-44`); its states WIP, unmerged, failed and merged are the labels `wip`, `unmerged`, `failed` and `merged` on its issue (embryo and released as before).
 - 2e. The Interactive Session Agent sets a task to "merged" after merging its branch into main.
 
 **3. Dispatcher**
