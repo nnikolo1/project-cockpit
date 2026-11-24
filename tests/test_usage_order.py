@@ -11,9 +11,9 @@ ROOT = pathlib.Path(__file__).parent.parent
 PAGE = (ROOT / "web" / "index.html").read_text()
 node = pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
 
-ORDER = ["windows", "heatmap", "readings", "sessions", "days", "quota", "projects", "tasks"]
+ORDER = ["windows", "heatmap", "readings", "sessions", "days", "quota", "projects", "fit", "tasks"]
 TITLE = {"windows": "Usage per 5-hour window", "heatmap": "Tokens per day", "readings": "Today’s readings", "sessions": "Interactive sessions",
-         "days": "Usage per day", "quota": "Vendor quota used", "projects": "All projects (last 90 days)", "tasks": "Per task"}
+         "days": "Usage per day", "quota": "Vendor quota used", "projects": "All projects (last 90 days)", "fit": "How these numbers fit", "tasks": "Per task"}
 
 
 def usage_order():

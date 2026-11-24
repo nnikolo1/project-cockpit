@@ -675,6 +675,20 @@ function sessionCards(T){
    +card('Interactive sessions per source','Last 90 days.','<th>Source</th>',T.sources,r=>'<tr><td class="mono">'+esc(r.key)+'</td>'+cells(r)+'</tr>')
    +card('Sessions with the most tokens','Last 90 days, at most 20.','<th>Session</th><th>Source</th>',T.sessions,r=>'<tr><td class="mono">'+esc(r.key)+'</td><td class="mono">'+esc(r.source)+'</td>'+cells(r)+'</tr>');
 }
+function fitCard(F){
+  /* "How these numbers fit": the coverage of each source, the main matches and mismatches, the reasons (tools/token_reconcile.py, computed by the server) */
+  const T='How these numbers fit';
+  if(!F)return '<div class="card"><h2>'+T+'</h2><span class="muted">no data</span></div>';
+  const NM={quota:'Vendor quota readings',proxy:'Proxy (Workers)',transcripts:'Interactive transcripts',stats_cache:'Statistics cache',notes:'Good-bye notes'};
+  const rs=(F.reasons||[]),ob=rs.filter(r=>r.status==='observed'),po=rs.filter(r=>r.status!=='observed');
+  return '<div class="card"><h2>'+T+'</h2><span class="muted">Which source covers which days and what it leaves out, how the sources compare where they overlap, and the known reasons for the differences. The full report: <span class="mono">tools/token_reconcile.py</span>.</span>'
+   +'<div class="tblbox narrow"><table><thead><tr><th>Source</th><th>Days</th><th>From</th><th>To</th><th>Records</th><th>Does not count</th></tr></thead><tbody>'
+   +F.coverage.map(r=>'<tr><td>'+esc(NM[r.source]||r.source)+'</td>'+(r.present?'<td class="mono">'+r.days+'</td><td class="mono">'+esc(r.first||'')+'</td><td class="mono">'+esc(r.last||'')+'</td><td class="mono">'+r.records+'</td>':'<td class="muted" colspan="4">no data</td>')+'<td class="muted" style="font-size:12px">'+esc(r.not_counted)+'</td></tr>').join('')
+   +'</tbody></table></div>'
+   +(F.sentences.length?'<ul>'+F.sentences.map(s=>'<li>'+esc(s)+'</li>').join('')+'</ul>':'<p class="muted">Nothing to compare yet.</p>')
+   +(ob.length?'<h3>Observed here</h3><ul>'+ob.map(r=>'<li>'+esc(r.label)+': '+esc(r.evidence)+'</li>').join('')+'</ul>':'')
+   +(po.length?'<h3>Open: possible, not seen in these files</h3><ul>'+po.map(r=>'<li>'+esc(r.label)+'</li>').join('')+'</ul>':'')+'</div>';
+}
 function projectsCard(){
   const nf=x=>x.toLocaleString('en-US'),P=USE.projects||[];
   const cell=(r,f)=>'<td class="mono">'+(r.total===undefined?'':nf(r[f]))+'</td>';
@@ -684,7 +698,7 @@ function projectsCard(){
    +'</tbody></table></div></div>';
 }
 /* The order of the Token Usage cards, top to bottom (owner, 2026-11-24, PC-81): the one place to change it; a card with nothing to show is left out without a gap */
-const USAGE_ORDER=['windows','heatmap','readings','sessions','days','quota','projects','tasks'];  // the one list that fixes the order of the Token Usage cards
+const USAGE_ORDER=['windows','heatmap','readings','sessions','days','quota','projects','fit','tasks'];  // the one list that fixes the order of the Token Usage cards
 function vUsage(){
   const head='<div class="page"><div><h1>Token Usage</h1><span class="muted">Tokens the Workers used, counted by the proxy, for the last 90 days. 5-hour windows are the vendor’s own windows where quota readings exist, otherwise fixed blocks counted from the epoch (UTC); the label says which. The vendor’s quota percentages come from its readings, not from the proxy.</span></div>';
   if(!USE)return head+'<div class="card"><span class="muted">no data</span></div></div>';
@@ -694,7 +708,7 @@ function vUsage(){
   const hm='<div class="card"><h2>Tokens per day</h2>'+heatmap(dv,(d,n)=>nf(n)+' tokens on '+d+(ag[d]!=null?'\nincl. '+nf(ag[d])+' daily aggregate, no split':'')+(fh[d]!=null?'\nhighest 5-hour reading '+fh[d]+' %':''),'Sum of the four token counts per day (UTC), as in the per-day table below; the proxy file has usage on '+((USE.days||[]).length)+' of the last 90 days. Days before the interactive transcripts add the statistics cache’s daily total (daily aggregate, no split).')+'</div>';
   const C={windows:()=>usageTable('Usage per 5-hour window',USE.windows&&USE.windows.map(r=>Object.assign({},r,{key:r.key+' ('+r.kind+')'})),NOUSE),heatmap:()=>hm,
    readings:()=>latestCard(USE.quota),sessions:()=>sessionCards(USE.sessions),days:()=>usageTable('Usage per day',USE.days,NOUSE),quota:()=>quotaCard(USE.quota),
-   projects:()=>projectsCard(),
+   projects:()=>projectsCard(),fit:()=>fitCard(USE.reconcile),
    tasks:()=>'<div class="card"><h2>Per task</h2><div class="tblbox narrow"><table><thead><tr><th>Task</th><th>Worker</th><th>Launched (UTC)</th><th>Proxy sum</th><th>Good-bye note</th><th>Difference</th></tr></thead><tbody>'
    +(tk?recentRows(tk).map(t=>'<tr><td class="mono">'+esc(t.task)+'</td><td class="mono">'+esc(t.worker||'')+'</td><td class="mono">'+esc(t.start)+'</td><td class="mono">'+nf(t.proxy)+(t.overlap?' <span class="muted" title="Another task ran at the same time; the sum may include its requests">overlap</span>':'')+'</td><td class="mono">'+nf(t.note)+'</td><td class="mono">'+nf(t.diff)+'</td></tr>').join(''):'')
    +(tk&&tk.length?'':'<tr><td class="muted" colspan="6">no data</td></tr>')+'</tbody></table></div><p class="muted" style="font-size:13px;margin:8px 0 0">The proxy sum counts the requests of the task’s Worker between the task’s launch and its last log entry. Older tasks, launched before the log named the Worker, count all Workers’ requests in that span (marked overlap when another task ran then).</p></div>'};

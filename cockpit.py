@@ -4,6 +4,7 @@ Every action is exactly one GitHub operation (labels, sub-issues, dependencies, 
 import argparse
 import json
 import logging
+import importlib.util
 import os
 import pathlib
 import re
@@ -13,6 +14,7 @@ import tarfile
 import tempfile
 import collections
 import subprocess
+import sys
 import threading
 import time
 import datetime as dt
@@ -75,6 +77,8 @@ def projects_from_file(data):
         p.update({k: os.path.expanduser(e[k]) if e.get(k) else None for k in ("git", "modules", "phases", "code")})
         if e.get("meta"):
             p["meta"] = os.path.expanduser(e["meta"])  # optional: absent means the default folder, see meta_dir()
+        if e.get("stats_cache"):
+            p["stats_cache"] = os.path.expanduser(e["stats_cache"])  # optional: the tool's statistics cache, for "How these numbers fit"
         try:
             p["code_collect"] = L.collect_command(e.get("code_collect"))  # the snapshot's collector command, run by the daily refresh
         except ValueError as ex:
@@ -691,7 +695,28 @@ def get_usage(p, data_dir=None, projects=None):
     rep["sessions"] = L.transcript_report(_read_text(d / TRANSCRIPT_FILE), rep["quota"], _read_text(d / AGGREGATE_FILE))
     rep["summary"] = L.usage_summary(rep)
     rep["projects"] = [dict(name=n, **(L.usage_summary(_usage_one(q, data_dir)) or {})) for n, q in (projects or PROJECTS or {p.get("name", ""): p}).items()]
+    rep["reconcile"] = _reconcile_card(d, p.get("stats_cache"))
     return rep
+
+
+def _reconcile_card(d, cache=None):
+    """The card "How these numbers fit": tools/token_reconcile.py on the same files (local day: the server's zone); None if it fails."""
+    try:
+        R = _tool("token_reconcile")
+        return R.card(R.reconcile(R.load(d, cache)))
+    except Exception:  # a defect of the analysis must not take the Token Usage page down
+        log.exception("token reconciliation failed")
+        return None
+
+
+def _tool(name):
+    """A module of tools/ (not a package), loaded once."""
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, pathlib.Path(__file__).resolve().parent / "tools" / f"{name}.py")
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[name] = mod
+        spec.loader.exec_module(mod)
+    return sys.modules[name]
 
 
 def save_settings(p, form):
@@ -1037,7 +1062,7 @@ def open_backup(root):
         e = dict(m["project"])
     except (OSError, ValueError, KeyError, TypeError) as ex:
         raise ValueError(f"{root / MANIFEST}: unusable manifest: {ex}")
-    (p,), _ = projects_from_file(dict(projects=[{k: v for k, v in e.items() if k not in BACKUP_PATHS + ("meta",)}]))
+    (p,), _ = projects_from_file(dict(projects=[{k: v for k, v in e.items() if k not in BACKUP_PATHS + ("meta", "stats_cache")}]))
     for k in BACKUP_PATHS:
         if e.get(k):
             f = (root / e[k]).resolve()

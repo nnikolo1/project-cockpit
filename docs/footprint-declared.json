@@ -43,14 +43,21 @@
      "kind": "file",
      "personal_data": false,
      "written_by": "tools/transcript_usage.py",
-     "note": "read only, by get_usage for the Token Usage page (a missing file shows as no data); exact token counts of interactive sessions, numbers and ids only"
+     "note": "read only, by get_usage for the Token Usage page (a missing file shows as no data) and by tools/token_reconcile.py (the card How these numbers fit); exact token counts of interactive sessions, numbers and ids only"
     },
     {
      "path": "~/.local/share/project-cockpit/<project>/stats-cache-usage.jsonl",
      "kind": "file",
      "personal_data": false,
      "written_by": "tools/stats_cache_usage.py",
-     "note": "read only, by get_usage for the Token Usage page (a missing file shows as no data); daily token totals per model and daily message and session counts from the vendor tool's statistics cache, a coarse backfill marked source stats-cache; numbers only; rewritten whole on each run, rebuildable while the cache exists"
+     "note": "read only, by get_usage for the Token Usage page (a missing file shows as no data) and by tools/token_reconcile.py; daily token totals per model and daily message and session counts from the vendor tool's statistics cache, a coarse backfill marked source stats-cache; numbers only; rewritten whole on each run, rebuildable while the cache exists"
+    },
+    {
+     "path": "~/.claude/stats-cache.json",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "the vendor coding tool",
+     "note": "not ours: read only, when the projects file names it (key stats_cache) or tools/token_reconcile.py gets --cache, for the card How these numbers fit; only its daily numbers are read, nothing is copied or written. tools/token_reconcile.py writes no file: it reads the quota, proxy, transcript, backfill and processing files and the good-bye notes of the data folder and prints its report"
     },
     {
      "path": "~/.local/share/project-cockpit/cache/",
