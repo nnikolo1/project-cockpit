@@ -7,10 +7,11 @@ import datetime as dt
 import json
 import logging
 import pathlib
+import re
 
 log = logging.getLogger("dispatcher.plog")
 
-REASONS = ("no start", "over 40 minutes", "no activity", "no note", "unusable note")   # 5b
+REASONS = ("no start", "over N minutes", "no activity", "no note", "unusable note", "no commit in the bundle")   # 5b; N is the runaway limit
 LOG_NAME, STAMP_NAME = "processing.jsonl", "backup.stamp"
 
 
@@ -39,7 +40,7 @@ class ProcessingLog:
         self._write(task=task_id, folder=str(task_folder), state=state, **({"reason": reason} if reason else {}))
 
     def failure(self, task_id, task_folder, reason):
-        if reason not in REASONS:
+        if reason not in REASONS and not re.fullmatch(r"over \d+ minutes", reason):
             raise ValueError(f"unknown failure reason {reason!r}; expected one of {REASONS}")
         self.event(task_id, task_folder, "failed", reason)
 

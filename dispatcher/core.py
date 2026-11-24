@@ -26,11 +26,11 @@ log = logging.getLogger("dispatcher.core")
 
 GIB = 1024 ** 3
 MIN_FREE = 10 * GIB                 # 3n
-START_LIMIT = 60                    # seconds to write `started` after launch (3j)
 DEFAULTS = {                        # 6a: the spec's values, used when the file or a key is missing
     "enabled": True, "interval_minutes": 2, "retries": 0, "workers": 3,
-    "runaway_minutes": 40, "idle_minutes": 10,
+    "runaway_minutes": 40, "idle_minutes": 20, "start_minutes": 1,
 }
+MINIMUMS = {"runaway_minutes": 30, "idle_minutes": 10, "start_minutes": 1}   # 3i, 3j
 
 
 class Skip(Exception):
@@ -58,6 +58,9 @@ def load_settings(path):
             ok = isinstance(v, bool)
         else:
             ok = isinstance(v, int) and not isinstance(v, bool) and v >= (0 if k == "retries" else 1)
+        if ok and k in MINIMUMS and v < MINIMUMS[k]:
+            log.warning("settings key %s=%r is below its minimum; raised to %d", k, v, MINIMUMS[k])
+            v = MINIMUMS[k]
         if ok:
             s[k] = v
         else:
@@ -150,7 +153,7 @@ class Dispatcher:
                 continue
             age = now - w["launched"]
             limit, idle = self.settings["runaway_minutes"], self.settings["idle_minutes"]
-            if not w["started"] and age > START_LIMIT:
+            if not w["started"] and age > self.settings["start_minutes"] * 60:
                 why = "no start"
             elif age > limit * 60:
                 why = f"over {limit} minutes"
@@ -176,7 +179,7 @@ class Dispatcher:
             log.exception("fetching the branch of %s failed", tid)
             return self._fail(st, user, w, f"unusable bundle: {e}")
         if ahead < 1:
-            return self._fail(st, user, w, "no commit")
+            return self._fail(st, user, w, "no commit in the bundle")
         self.tasks.set_state(tid, "unmerged")
         self.plog.event(tid, w["folder"], "unmerged")
         log.info("task %s is unmerged (%d commits on worker/%s)", tid, ahead, tid)
