@@ -530,3 +530,20 @@ def _main_image(tmp_path, monkeypatch, extra):
 def test_main_image_default_and_override(tmp_path, monkeypatch):
     assert _main_image(tmp_path, monkeypatch, []) == "cockpit-worker:latest"
     assert _main_image(tmp_path, monkeypatch, ["--image", "cockpit-worker:stub"]) == "cockpit-worker:stub"
+
+
+def test_transcript_mtime_reads_the_agents_glob():
+    seen = []
+
+    class Rt:
+        def exec(self, user, *cmd):
+            seen.append(cmd[-1])
+            return 0, "12.5\n"
+
+    class A:
+        def activity_glob(self, user):
+            return f"/g/{user}/*.log"
+
+    assert core.transcript_mtime(Rt(), "w1", A()) == 12.5 and "/g/w1/*.log" in seen[0]
+    core.transcript_mtime(Rt(), "w1")
+    assert "/home/w1/.claude/projects/**/*.jsonl" in seen[1]

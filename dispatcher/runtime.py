@@ -14,6 +14,7 @@ import subprocess
 from dataclasses import dataclass
 
 from dispatcher import note as good_bye
+from dispatcher.agent import ClaudeCode
 
 log = logging.getLogger("dispatcher.runtime")
 
@@ -23,14 +24,8 @@ BUILD_TIMEOUT = 1800
 TASK_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 INSTRUCTION = (  # 4r
     "Read {inbox}/task.md. Work in your own clone ({clone}). Write {outbox}/started first. "
-    "At the end write {outbox}/goodbye.json (outcome, summary, tokens) and {outbox}/result.bundle "
+    "At the end write {outbox}/goodbye.json (outcome, summary) and {outbox}/result.bundle "
     "(a git bundle of your branch).")
-# 4i: Claude Code's non-essential traffic off; skipWebFetchPreflight is set in the image's settings.json
-SWITCHES = {
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_TELEMETRY": "1", "DISABLE_ERROR_REPORTING": "1",
-    "ENABLE_CLAUDEAI_MCP_SERVERS": "false", "CLAUDE_CODE_DISABLE_ARTIFACT": "1",
-    "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL": "1",
-}
 EGRESS_PROBE = (  # prints BLOCKED only if the connection fails; any other outcome counts as a leak or an error
     "import socket,sys\n"
     "try:\n socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=5).close(); print('OPEN')\n"
@@ -238,20 +233,20 @@ class Runtime:
             raise ContainerError(f"clone for {task_id} failed: {out[-300:]}")
         return f"{home}/clone"
 
-    def launch(self, user, task_id):
+    def launch(self, user, task_id, agent=None):
         """Start the Worker; returns the host-side process handle (killing it ends the guest process, which
         the Dispatcher uses for 3i/3j). The in-guest `timeout` is the backstop of 4e."""
+        agent = agent or ClaudeCode()
         clone = self.clone_main(user, task_id)
         base = f"/area/{task_id}"
-        env = dict(SWITCHES, ANTHROPIC_BASE_URL=f"http://127.0.0.1:{self.cfg.relay_port}",
-                   ANTHROPIC_AUTH_TOKEN=dummy_token(user), CLAUDE_CONFIG_DIR=f"/home/{user}/.claude",
+        env = dict(agent.env(user, f"http://127.0.0.1:{self.cfg.relay_port}", dummy_token(user)),
                    HOME=f"/home/{user}", WORKER_TASK_ID=task_id, WORKER_OUTBOX=f"{base}/outbox")  # 4t: for the Stop hook
         prompt = INSTRUCTION.format(inbox=f"{base}/inbox", outbox=f"{base}/outbox", clone=clone)
         backstop = 2 * self.cfg.runaway_minutes * 60
         cmd = [self.cfg.container, "exec", "--user", user, "--workdir", clone]
         for k, v in env.items():
             cmd += ["--env", f"{k}={v}"]
-        cmd += [self.cfg.name, "timeout", str(backstop), "claude", "-p", prompt]
+        cmd += [self.cfg.name, "timeout", str(backstop), *agent.command(prompt)]
         log.info("launching %s for task %s in %s", user, task_id, clone)
         return self._spawn(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 

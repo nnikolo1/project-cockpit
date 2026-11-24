@@ -23,7 +23,7 @@ Read `inbox/task.md`. Work in your own clone. Write the file `outbox/started` fi
 | `any_limitations_or_caveats` | Limitations or caveats not stated there. |
 | `any_open_questions` | Open questions. |
 | `suggested_task` | Optional: one task you suggest, everything you want to say about it in this single field. A suggestion is a pre-embryo: the Dispatcher does not file it. |
-| `tokens` | A whole number: the tokens you consumed. |
+| `tokens` | Leave it out: the end check writes it from the session transcript. |
 
 The four optional text fields have the same size limit as `summary`.
 
