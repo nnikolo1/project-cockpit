@@ -21,6 +21,7 @@ import time
 from dataclasses import dataclass, field
 
 from dispatcher import runtime as rt
+from dispatcher.agent import ClaudeCode
 from dispatcher.host import _cmd, default_probes
 
 log = logging.getLogger("dispatcher.core")
@@ -319,9 +320,10 @@ def commits_ahead(repo, task_id):
     return int(p.stdout.strip())
 
 
-def transcript_mtime(runtime, user):
+def transcript_mtime(runtime, user, agent=None):
+    agent = agent or ClaudeCode()
     code = ("import glob,os;print(max([os.path.getmtime(f) for f in "
-            f"glob.glob('/home/{user}/.claude/projects/**/*.jsonl',recursive=True)] or [0]))")
+            f"glob.glob('{agent.activity_glob(user)}',recursive=True)] or [0]))")
     try:
         rc, out = runtime.exec(user, "python3", "-c", code)
         return float(out.splitlines()[-1]) or None if rc == 0 and out else None

@@ -8,6 +8,7 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 from dispatcher import runtime as rt  # noqa: E402
+from dispatcher.agent import Agent, ClaudeCode  # noqa: E402
 
 
 class Fake:
@@ -244,8 +245,9 @@ def test_launch_command(tmp_path):
     line = " ".join(cmd)
     assert cmd[1:5] == ["exec", "--user", "worker1", "--workdir"] and cmd[5] == "/home/worker1/T-5/clone"
     assert cmd[cmd.index("timeout") + 1] == str(2 * 40 * 60)       # 4e: twice the runaway limit
-    for sw in rt.SWITCHES:
-        assert f"{sw}={rt.SWITCHES[sw]}" in line
+    for sw in ClaudeCode.SWITCHES:
+        assert f"{sw}={ClaudeCode.SWITCHES[sw]}" in line
+    assert cmd[-3:-1] == ["claude", "-p"]
     assert "CLAUDE_CONFIG_DIR=/home/worker1/.claude" in line
     assert "ANTHROPIC_BASE_URL=http://127.0.0.1:8089" in line
     assert f"ANTHROPIC_AUTH_TOKEN={rt.dummy_token('worker1')}" in line
@@ -276,3 +278,25 @@ def test_alive_for_self_and_dead(tmp_path):
     r, _ = make(tmp_path)
     assert r.alive(os.getpid())
     assert not r.alive(2 ** 22 + 12345)
+
+
+def test_claude_code_adapter():
+    a = ClaudeCode()
+    assert a.command("do it") == ["claude", "-p", "do it"]
+    env = a.env("worker1", "http://127.0.0.1:1", "tok")
+    assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:1" and env["ANTHROPIC_AUTH_TOKEN"] == "tok"
+    assert env["CLAUDE_CONFIG_DIR"] == "/home/worker1/.claude"
+    assert set(ClaudeCode.SWITCHES) <= set(env)
+    assert a.activity_glob("worker1") == "/home/worker1/.claude/projects/**/*.jsonl"
+
+
+def test_launch_uses_the_given_agent(tmp_path):
+    class Other(Agent):
+        def command(self, prompt): return ["other", prompt]
+        def env(self, user, base_url, token): return {"OTHER_URL": base_url}
+        def activity_glob(self, user): return "/x"
+    r, _ = make(tmp_path)
+    _, cmd = r.launch("worker1", "T-5", Other())
+    line = " ".join(cmd)
+    assert "OTHER_URL=http://127.0.0.1:8089" in line and "ANTHROPIC" not in line and "claude" not in cmd[-2:]
+    assert cmd[-2] == "other"
