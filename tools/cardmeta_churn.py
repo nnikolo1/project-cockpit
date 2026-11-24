@@ -8,6 +8,7 @@ mapped to the module itself, `total` = with its sub-modules. `size` = current co
 comments; counted over tracked files of known source types). Paths the map cannot place go to `unassigned`.
 Check: lines in all buckets plus the excluded lines must equal the raw numstat total of each window (asserted; exit code 2 otherwise).
 Excluded by default (generated files): .coverage, **/package-lock.json, **/yarn.lock, **/poetry.lock, **/uv.lock, docs/screens/**.
+Each module and `unassigned` also gets `series.weekly` (own/total, 52 Mondays, from the same records and mapping).
 Shape: docs/contracts/card-metadata.md.
 
 Usage: python3 tools/cardmeta_churn.py --project NAME [--repo .] [--days 30 --days 90] [--until ISO] [--out-dir DIR] [--format json|md]
@@ -32,6 +33,7 @@ log = logging.getLogger("cardmeta.churn")
 DEFAULT_EXCLUDES = [".coverage", "**/package-lock.json", "**/yarn.lock", "**/poetry.lock", "**/uv.lock", "docs/screens/**"]
 CATEGORIES = ("source", "tests", "docs")
 SOURCE_SUFFIXES = {".py": "#", ".js": "//", ".sh": "#", ".html": None, ".css": None, ".yml": "#", ".yaml": "#"}
+WEEKS = 52
 _HEADER = "@@@"
 _NUMSTAT = re.compile(r"^(\d+|-)\t(\d+|-)\t(.+)$")
 _BRACE = re.compile(r"^(.*)\{(.*) => (.*)\}(.*)$")
@@ -155,7 +157,54 @@ def aggregate(records: list[dict], mmap: dict, days_list: list[int], until: date
     mods = {mid: {"own": {str(d): window(mid, d, False) for d in days_list}, "total": {str(d): window(mid, d, True) for d in days_list}}
             for mid in ids}
     un = {str(d): window(mp.UNASSIGNED, d, False) for d in days_list}
+    ser = weekly_series(records, mmap, until, patterns)
+    for mid in ids:
+        mods[mid]["series"] = {"weekly": ser[mid]}
+    un["series"] = {"weekly": {"own": ser[mp.UNASSIGNED]["own"], "total": ser[mp.UNASSIGNED]["own"]}}
     return {"modules": mods, "unassigned": un, "mapping_check": check, "excluded": {"files": len(excl_files), "lines": excl_lines}}
+
+
+def week_starts(until: datetime, weeks: int = WEEKS) -> list[str]:
+    """Mondays (UTC, YYYY-MM-DD) of the last `weeks` weeks, oldest first, the last one being the week of `until`."""
+    u = until.astimezone(timezone.utc).date()
+    monday = u - timedelta(days=u.weekday())
+    return [(monday - timedelta(weeks=k)).isoformat() for k in range(weeks - 1, -1, -1)]
+
+
+def weekly_series(records: list[dict], mmap: dict, until: datetime, patterns: list[re.Pattern]) -> dict:
+    """Pure: weekly series per module id (and `unassigned`), {id: {"own": [...], "total": [...]}}, same filters and mapping as the windows."""
+    weeks = week_starts(until)
+    first = datetime.fromisoformat(weeks[0]).replace(tzinfo=timezone.utc).timestamp()
+    until_ts = until.timestamp()
+    cell: dict[tuple, dict] = {}  # (own module, week) -> {sha set, added, removed, tests, docs}
+    for r in records:
+        if not first <= r["ts"] <= until_ts or any(p.match(r["path"]) for p in patterns):
+            continue
+        d = datetime.fromtimestamp(r["ts"], timezone.utc).date()
+        w = (d - timedelta(days=d.weekday())).isoformat()
+        c = cell.setdefault((mp.module_of(r["path"], mmap), w), {"shas": set(), "added": 0, "removed": 0, "tests": 0, "docs": 0})
+        c["shas"].add(r["sha"])
+        c["added"] += r["added"]
+        c["removed"] += r["removed"]
+        cat = category_of(r["path"])
+        if cat != "source":
+            c[cat] += r["added"] + r["removed"]
+
+    def series(match) -> list[dict]:
+        out = []
+        for w in weeks:
+            shas, tot = set(), {"added": 0, "removed": 0, "tests": 0, "docs": 0}
+            for (m, ww), c in cell.items():
+                if ww == w and match(m):
+                    shas |= c["shas"]
+                    for k in tot:
+                        tot[k] += c[k]
+            out.append({"w": w, "commits": len(shas), **tot})
+        return out
+
+    res = {m["id"]: {"own": series(lambda x, i=m["id"]: x == i), "total": series(lambda x, i=m["id"]: mp.in_module(x, i))} for m in mmap["modules"]}
+    res[mp.UNASSIGNED] = {"own": series(lambda x: x == mp.UNASSIGNED)}
+    return res
 
 
 def count_code_lines(path: str, text: str) -> int | None:
@@ -235,7 +284,7 @@ def main(argv=None) -> int:
     until = parse_until(a.until)
     pats = [glob_to_regex(p) for p in (a.exclude if a.exclude is not None else DEFAULT_EXCLUDES)]
     mmap = mp.load_map(map_path)
-    records = parse_log(git_log(repo, until - timedelta(days=2 * max(days)), until))
+    records = parse_log(git_log(repo, until - timedelta(days=max(2 * max(days), 7 * WEEKS + 7)), until))
     log.info("%d file changes parsed", len(records))
     res = aggregate(records, mmap, days, until, pats)
     for d, c in res["mapping_check"].items():
