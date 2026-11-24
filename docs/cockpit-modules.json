@@ -5,9 +5,10 @@
   {"id": "cockpitwebpage", "name": "Cockpit webpage", "desc": "web/index.html: the single-page user interface"},
   {"id": "docs", "name": "Documentation", "desc": "docs/ and the root README and LICENSE: constitution, ADRs, memos, research notes, contracts, deployment, screenshots and owner defaults; documents whose Modules line names one other module are listed with that module"},
   {"id": "internal", "name": "Internal", "desc": "what keeps the project and its assistants running, as opposed to the product (template default for every project); itself it holds tools/shots.py, the screenshot tool"},
-  {"id": "taskqueue", "name": "Task Queue", "desc": "the Dispatcher and the Workers that work the task queue, with their specification (docs/specs/dispatcher-and-workers.md), the failure-path test driver with its model stub (tools/e2e_failure_paths.py, tools/e2e/) and the documents that name it"},
+  {"id": "taskqueue", "name": "Task Queue", "desc": "the Dispatcher and the Workers that work the task queue, with their specification (docs/specs/dispatcher-and-workers.md) and the documents that name it"},
   {"id": "taskqueue/dispatcher", "name": "Dispatcher", "desc": "the host-side procedure that assigns released tasks to Workers and collects their results: firing logic, task source, container runtime and agent adapter, host probes, the proxy, the quota collector, the processing log and the LaunchAgent renderer"},
   {"id": "taskqueue/worker", "name": "Worker", "desc": "what runs inside the Workers' container: the image (Containerfile), its Stop hook and note skill, and the relay to the host proxy"},
+  {"id": "taskqueue/e2e", "name": "E2E test", "desc": "end-to-end tests of the task queue: the failure-path test driver (tools/e2e_failure_paths.py) and the stub of the model with its derived image (tools/e2e/), with their tests"},
   {"id": "internal/metadata", "name": "Project metadata", "desc": "this module map, the footprint declaration and the card-metadata collectors (tools/cardmeta_*.py) with their tests"},
   {"id": "internal/devops", "name": "DevOps", "desc": "the CI workflow, the kit/ install and policy files for a consuming repository, and repository configuration (.gitignore)"},
   {"id": "internal/agents", "name": "Agent policies and skills", "desc": "standing instructions for assistants (CLAUDE.md), skill and agent definitions (.claude/) and the brief check the agent-brief skill runs (tools/check_brief.py)"}
@@ -76,8 +77,8 @@
   {"path": "docs/adr/0019-boot-filling-never-twice.md", "module": "taskqueue", "basis": "its Modules line names taskqueue and internal/cockpit; internal/cockpit is not a module of this map, so the one existing module, taskqueue, is its main user"},
   {"path": "docs/specs/dispatcher-and-workers.md", "module": "taskqueue", "basis": "specification of the unattended-worker dispatcher, the redesign of the boot-filling job (owner, 2026-11-23): a document clearly about one module stays with it"},
   {"path": ".claude/", "module": "internal/agents", "basis": "agent policies and skills (owner, 2026-11-23: the agent-brief skill)"},
-  {"path": "tools/e2e_failure_paths.py", "module": "taskqueue", "candidates": ["taskqueue/dispatcher", "taskqueue/worker"], "basis": "failure-path test driver of the Dispatcher; it also runs the stub Worker image, so it stays in the parent; its test follows it"},
-  {"path": "tools/e2e/", "module": "taskqueue", "candidates": ["taskqueue/dispatcher", "taskqueue/worker"], "basis": "stub of the model and its derived image for the failure-path test; Worker-side code used to test the Dispatcher, so it stays in the parent; its test follows it"},
+  {"path": "tools/e2e_failure_paths.py", "module": "taskqueue/e2e", "basis": "failure-path test driver of the task queue; its test is tests/tools/test_e2e_failure_paths.py"},
+  {"path": "tools/e2e/", "module": "taskqueue/e2e", "basis": "stub of the model and its derived image for the failure-path test; its test is tests/tools/e2e/test_stub_claude.py"},
   {"path": "tools/check_brief.py", "module": "internal/agents", "basis": "the check the agent-brief skill runs before a background agent is launched; its test tests/tools/test_check_brief.py follows it"},
   {"path": "tests/tools/test_check_brief.py", "module": "internal/agents", "basis": "test of tools/check_brief.py"}
  ]
