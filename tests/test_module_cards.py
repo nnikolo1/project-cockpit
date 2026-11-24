@@ -1,4 +1,4 @@
-"""The module and sub-module cards carry no "Documents" and no "Open gaps" line (owner, 2026-11-24); the module page keeps its documents."""
+"""The module and sub-module cards carry no "Documents", no "Open gaps" and no "Import cycles" line (owner, 2026-11-24); the module page keeps its documents, the Quality view its Import cycles tile."""
 import pathlib
 import re
 
@@ -15,6 +15,14 @@ def test_no_documents_or_open_gaps_line_on_module_cards():
     src = cards_source()
     assert not re.search(r"Documents|Open gaps|ndocs|m\.gaps", src)
     assert "Code files / lines" in src  # the other card facts are still there
+
+
+def test_no_import_cycles_documents_or_open_gaps_line_on_module_cards():
+    assert not re.search(r"Import cycles|c\.cyc|Documents|Open gaps", cards_source())
+
+
+def test_quality_view_keeps_its_import_cycles_tile():
+    assert "qTile(c,'cycles','Import cycles'" in PAGE[PAGE.index("function vQuality("):]
 
 
 def test_snapshot_lines_are_hidden_without_a_configured_snapshot_and_show_its_age_otherwise():

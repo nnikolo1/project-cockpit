@@ -149,11 +149,11 @@ def test_zero_percent_coverage_is_a_figure_not_a_gap():
     assert gaps(metrics=m) == []
 
 
-def test_card_lines_without_data_complexity_cycles():
+def test_card_lines_without_data_complexity_only():
     m = metrics()
     m["modules"]["a"]["metrics"].update(complexity={}, structure={})
     g = gaps(metrics=m)
-    assert sorted(x["what"] for x in g if x["module"] == "a") == ["module card: import cycles: no data", "module card: worst complexity: no data"]
+    assert sorted(x["what"] for x in g if x["module"] == "a") == ["module card: worst complexity: no data"]
     assert [x for x in g if x["module"] == "a/one"] == []
 
 

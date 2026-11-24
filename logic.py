@@ -1765,9 +1765,8 @@ def _snapshot_gaps(add, g, project, now, mods, metrics, max_age_h, setting=None)
         elif m["pyN"]:
             if m["cov"] is None:
                 add("snapshot", "no coverage figure for a module with Python files", mid, age)
-            for key, label in (("cc", "worst complexity"), ("cyc", "import cycles")):
-                if m[key] is None:
-                    add("no_data", f"module card: {label}: no data", mid, age)
+            if m["cc"] is None:
+                add("no_data", "module card: worst complexity: no data", mid, age)
     cov = [_age_h(((m.get("metrics") or {}).get("test_coverage") or {}).get("data_file_modified"), now) for m in (metrics.get("modules") or {}).values()]
     cov = [a for a in cov if a is not None]
     g += _stale(project, "stale", "coverage file", max(cov) if cov else None, max_age_h)

@@ -63,7 +63,7 @@ WEEK = {"w": "YYYY-MM-DD", commits, added, removed, tests, docs}
 - `policy`: free text. An empty, missing or "undocumented" value is shown as a **gap**, not as a blank.
 
 ## Code snapshot
-The module cards' code lines (code files and lines, worst complexity, import cycles) and the Code tab's Quality view come from the code snapshot ([ADR 0008](../adr/0008-code-intelligence-from-a-snapshot.md)), a second folder the project's collector produces.
+The module cards' code lines (code files and lines, worst complexity) and the Code tab's Quality view come from the code snapshot ([ADR 0008](../adr/0008-code-intelligence-from-a-snapshot.md)), a second folder the project's collector produces.
 - **Settings** (per project in the `--projects` file): `code`, the snapshot folder; `code_collect`, the collector command, a list of arguments (`["python3", "tools/snapshot.py", "--out", "~/snap/widgets"]`) or one string split like a shell would (no shell runs it). The command runs in the project's clone (`git`, else the current folder) and must leave the folder below. Single-project flags: `--code`, `--code-collect`.
 - **Folder**: `metrics.json` with `generated_at` (ISO 8601 UTC) and `modules` (shape: `code_view` in `logic.py`), and optionally `erd.svg`, `dataflow.svg`, `deps.svg`, `js.svg`. Generated into a local folder outside the repository, never committed; write `metrics.json` last and atomically.
 - **Age**: the cards and the Quality view show the snapshot's age; older than 24 hours (the standing policy) it is marked stale, and so is a `generated_at` that is missing or unreadable.
