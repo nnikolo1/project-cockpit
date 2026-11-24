@@ -49,7 +49,7 @@ Every requirement below is the owner's own statement or was approved by the owne
 
 - 4a. Up to 3 Workers run at once; this can be changed via "Settings" in the Cockpit UI, up to the number of `workerN` users defined in the image.
 - 4b. All Workers run in one container, at any time.
-- 4c. The container is Apple's native macOS `container` tool, using plain `container run` (not `container machine`): one long-lived container with `--init`, no network interface (`--network none`), a fixed `--memory` (4-6 GB) and `--cpus`, volumes only for the worker area and an outbox, and no `--ssh`.
+- 4c. The container is Apple's native macOS `container` tool, using plain `container run` (not `container machine`): one long-lived container with `--init`, no network interface (`--network none`), a fixed `--memory` (4-6 GB) and `--cpus`, one volume for the worker area, and no `--ssh`.
 - 4d. A LaunchAgent in the owner's logged-in session keeps the proxy running and holds `caffeinate -i` for as long as it does.
 - 4e. The image has no sudo; the Dispatcher starts each Worker with `container exec --user workerN`, using a `workerN` that no running Worker is using, under an in-guest `timeout` of twice the runaway limit (80 minutes by default) as a backstop if the Dispatcher is down.
 - 4f. A host Unix socket (its path shorter than 104 bytes) is mounted into the container (the runtime relays it over vsock); inside, a tiny relay exposes it on `127.0.0.1`, and the Workers' Claude Code points `ANTHROPIC_BASE_URL` there.
