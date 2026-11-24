@@ -54,3 +54,29 @@ def test_read_only_refuses_save_with_403(tmp_path, monkeypatch):
     monkeypatch.setitem(C.CFG, "steer", False)
     assert C.do_act(dict(action="settings", **OK), p=P)[0] == 403
     assert not C.settings_path(P).exists() and C.get_settings(P)["steering"] is False
+
+
+def test_card_settings_validation():
+    assert L.validate_card_settings({"churn_colour": "absolute"}) == {"churn_colour": "absolute"}
+    assert L.validate_card_settings({"churn_colour": "size"}) == L.CARD_SETTING_DEFAULTS
+    for bad in ({}, {"churn_colour": "red"}, {"churn_colour": None}):
+        with pytest.raises(ValueError, match="churn colour"):
+            L.validate_card_settings(bad)
+
+
+def test_card_settings_default_save_and_read_only(tmp_path, monkeypatch):
+    monkeypatch.setattr(C, "DATA_DIR", tmp_path)
+    monkeypatch.setitem(C.CFG, "steer", True)
+    assert C.get_card_settings(P)["values"] == L.CARD_SETTING_DEFAULTS
+    code, _ = C.do_act(dict(action="cardsettings", churn_colour="absolute"), p=P)
+    f = C.card_settings_path(P)
+    assert code == 200 and f == tmp_path / "proj" / "cockpit-settings.json"
+    assert stat.S_IMODE(f.stat().st_mode) == 0o600 and not list(f.parent.glob("*.tmp"))
+    assert C.get_card_settings(P)["values"] == {"churn_colour": "absolute"}
+    assert C.do_act(dict(action="cardsettings", churn_colour="x"), p=P)[0] == 400
+    assert C.get_card_settings(P)["values"] == {"churn_colour": "absolute"}
+    f.write_text("not json")
+    assert C.get_card_settings(P)["values"] == L.CARD_SETTING_DEFAULTS
+    assert not (tmp_path / "proj" / "dispatcher-settings.json").exists()
+    monkeypatch.setitem(C.CFG, "steer", False)
+    assert C.do_act(dict(action="cardsettings", churn_colour="size"), p=P)[0] == 403
