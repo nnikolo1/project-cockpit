@@ -1457,7 +1457,7 @@ def usage_summary(rep):
 
 def usage_report(usage_text, plog_text, goodbye_tokens, quota_text=None):
     """The Usage tab. usage_text / plog_text / quota_text: the file contents or None when missing; goodbye_tokens(folder) -> the `tokens` of the
-    task's good-bye note or None. -> dict(days, windows, workers (each a list of {key, counts}), tasks, quota) or None parts where there is no data.
+    task's good-bye note or None. -> dict(days, windows (each a list of {key, counts}), tasks, quota) or None parts where there is no data.
     days: the last 90 UTC days counted back from the latest day of use, a day without use as zeros. Windows are the vendor's 5-hour windows (from
     the quota readings' `resets_at`, kind "vendor") and, for requests outside them or without readings, fixed 5-hour blocks counted from the
     epoch (kind "fixed"). A task launched with a Worker name counts only that Worker's requests between its launch and its last log entry; an
@@ -1469,11 +1469,11 @@ def usage_report(usage_text, plog_text, goodbye_tokens, quota_text=None):
             reqs.append((t, rec.get("worker") or "?", _counts(rec)))
     end_day = max((dt.datetime.fromtimestamp(t, dt.timezone.utc).date() for t, _, _ in reqs), default=None)
     ends, quota = _quota(quota_text, end_day)
-    groups = {"days": {}, "windows": {}, "workers": {}}
+    groups = {"days": {}, "windows": {}}
     if end_day is not None:
         for i in range(HISTORY_DAYS):
             groups["days"][(end_day - dt.timedelta(days=HISTORY_DAYS - 1 - i)).isoformat()] = {k: 0 for k in (*USAGE_FIELDS, "total")}
-    for t, w, c in reqs:
+    for t, _, c in reqs:
         u = dt.datetime.fromtimestamp(t, dt.timezone.utc)
         if u.date().isoformat() in groups["days"]:
             _add(groups["days"][u.date().isoformat()], c)
@@ -1483,8 +1483,7 @@ def usage_report(usage_text, plog_text, goodbye_tokens, quota_text=None):
         else:
             key = dict(key=dt.datetime.fromtimestamp(t - t % WINDOW_SECONDS, dt.timezone.utc).strftime("%Y-%m-%d %H:%M"), kind="fixed")
         _add(groups["windows"].setdefault((key["key"], key["kind"]), {}), c)
-        _add(groups["workers"].setdefault(w, {}), c)
-    rep = {k: None if usage_text is None else [dict(key=key, **v) for key, v in sorted(g.items())] for k, g in groups.items() if k != "windows"}
+    rep = {"days": None if usage_text is None else [dict(key=key, **v) for key, v in sorted(groups["days"].items())]}
     rep["windows"] = None if usage_text is None else [dict(key=k[0], kind=k[1], **v) for k, v in sorted(groups["windows"].items())]
     rep["quota"] = quota
     spans = {}
