@@ -142,3 +142,17 @@ def test_build_moduledoc_reads_content_next_to_the_map_without_a_clone(tmp_path)
         assert False
     except ValueError:
         pass
+
+
+def test_file_kind_classifies_code_tests_and_other():
+    assert [L.file_kind(x) for x in ("cockpit.py", "tests/test_x.py", "pkg/test_y.py", "a_test.go", "docs/a.md", "web/index.html", "x/tests/data.json")] == [
+        "code", "test", "test", "test", "other", "other", "test"]
+
+
+def test_biggest_files_takes_code_first_then_tests_then_other():
+    sizes = {"a.py": 10, "b.py": 500, "c.py": 40, "tests/test_a.py": 900, "docs/x.md": 2000}
+    assert [r["path"] for r in L.biggest_files(sizes)] == ["b.py", "c.py", "a.py"]
+    assert [(r["path"], r["kind"]) for r in L.biggest_files({"b.py": 5, "tests/test_a.py": 9, "tests/test_b.py": 3, "docs/x.md": 2000})] == [
+        ("b.py", "code"), ("tests/test_a.py", "test"), ("tests/test_b.py", "test")]
+    assert [r["path"] for r in L.biggest_files({"b.py": 5, "docs/x.md": 7, "docs/y.md": 70})] == ["b.py", "docs/y.md", "docs/x.md"]
+    assert L.biggest_files({}) == []

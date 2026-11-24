@@ -624,7 +624,8 @@ function vQuality(){
   const T=(l,v,s)=>'<div class="card tile"><span class="label">'+l+'</span><span class="v">'+(v==null?'<span class="muted">n/a</span>':v)+'</span><span class="muted" style="font-size:13px">'+s+'</span></div>';
   const f1=(v,n)=>v==null?null:v.toFixed(n);
   h+='<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(230px,1fr))">'
-   +T('Size',c.code==null?null:c.code.toLocaleString('en-US'),'code lines'+(c.files?' · '+esc(c.files):''))
+   +T('Size',c.code==null?null:c.code.toLocaleString('en-US'),'code lines'+(c.files?' · '+esc(c.files):'')
+     +((c.biggest||[]).length?'<br>Biggest files:'+c.biggest.map(f=>'<br><span class="mono">'+esc(f.path)+'</span> '+f.lines.toLocaleString('en-US')+' lines'+(f.kind==='code'?'':' ('+f.kind+')')).join(''):''))
    +T('Complexity',c.cc,'worst block'+(c.ccAt?' ('+esc(c.ccAt)+')':'')+' · mean '+(c.mean==null?'n/a':c.mean.toFixed(1))+' · '+(c.dfe==null?'n/a':c.dfe)+' blocks rated D to F')
    +T('Maintainability',f1(c.mi,1),'mean index')
    +T('Lint',c.lint,esc(c.lintNote||'default ruleset'))
@@ -632,7 +633,7 @@ function vQuality(){
    +T('Import cycles',c.cyc==null?null:c.cyc+' files','in cycles')
    +T('Duplication',c.dup==null?null:c.dup.toFixed(2)+'%','of code lines')
    +T('Docstrings',c.doc==null?null:c.doc.toFixed(1)+'%','documented')
-   +(c.cov==null?'<div class="card tile nw"><span class="label">Test coverage</span><span class="v muted" style="font-size:18px">not wired</span><span class="muted" style="font-size:13px">needs a coverage run (pytest --cov)</span></div>':T('Test coverage',c.cov.toFixed(1)+'%','statements covered'))
+   +T('Test coverage',c.cov==null?null:c.cov.toFixed(1)+'%',c.cov==null?(c.pyN===0?'no Python source files to measure':'no coverage data: needs a coverage run (pytest --cov)'):'of '+(c.covN||0).toLocaleString('en-US')+' statements covered')
    +(c.churn!=null?T('Churn',c.churn,esc(c.churnNote)):'')+(c.testRatio!=null?T('Tests',c.testRatio,'test-to-code ratio; '+esc(c.testsNote)):'')+'</div>';
   h+='<div class="tblbox"><table style="min-width:560px"><thead><tr><th>Hotspot</th><th>Commits in window</th><th>Worst complexity</th><th></th></tr></thead><tbody>'
    +(c.hot||[]).map((x,i)=>'<tr><td class="mono">'+esc(x[0])+'</td><td>'+x[1]+'</td><td>'+x[2]+'</td><td>'+(ST()?'<button class="btn small" data-act="hotspot" data-m="'+id+'" data-i="'+i+'">File a task</button>':'')+'</td></tr>').join('')

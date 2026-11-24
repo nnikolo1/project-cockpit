@@ -299,6 +299,28 @@ def group_files(paths, limit=8):
     return [dict(dir=d, count=len(n), names=n[:limit]) for d, n in sorted(g.items())]
 
 
+CODE_EXT = (".py", ".js", ".mjs", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java", ".kt", ".c", ".h", ".cc", ".cpp", ".rb", ".sh", ".swift", ".sql")
+
+
+def file_kind(path):
+    """'test' for files under a tests folder or named test_* / *_test.*, 'code' for other source files by extension, else 'other'."""
+    parts = path.split("/")
+    name = parts[-1]
+    stem = name.rpartition(".")[0]
+    if any(x in ("tests", "test", "__tests__") for x in parts[:-1]) or stem.startswith("test_") or stem.endswith("_test"):
+        return "test"
+    return "code" if name.endswith(CODE_EXT) else "other"
+
+
+def biggest_files(sizes, n=3):
+    """{path: lines} -> up to n of [{path, lines, kind}]: the biggest code files first; when there are fewer than n code files, the
+    biggest test files fill up, then the biggest other files (each group by lines, largest first)."""
+    rank = {"code": 0, "test": 1, "other": 2}
+    rows = [dict(path=p, lines=v, kind=file_kind(p)) for p, v in sizes.items()]
+    rows.sort(key=lambda r: (rank[r["kind"]], -r["lines"], r["path"]))
+    return rows[:n]
+
+
 def module_files(paths, assign, mid):
     """The tracked files the module map assigns to the module or one of its sub-modules."""
     return [p for p in paths if (m := map_path(p, assign)) == mid or m.startswith(mid + "/")]
@@ -627,7 +649,8 @@ def code_view(metrics):
             mean=_g(x, "complexity", "mean"), dfe=_g(x, "complexity", "rated_DEF"), mi=_g(x, "maintainability", "mean_mi"),
             lint=_g(x, "lint", "total"), lintNote=f"{_g(x, 'lint', 'per_kloc')} per 1,000 lines" + ("; " + ", ".join(f"{k} {v}" for k, v in list(top)[:2]) if top else ""),
             dead=_g(x, "dead_code", "candidates"), cyc=_g(x, "structure", "files_in_cycles"), dup=_g(x, "duplication", "pct_of_code_lines"),
-            doc=_g(x, "docstring_coverage", "pct_documented"), cov=_g(x, "test_coverage", "pct_statements_covered"),
+            doc=_g(x, "docstring_coverage", "pct_documented"), cov=_g(x, "test_coverage", "pct_statements_covered"), covN=_g(x, "test_coverage", "statements"),
+            pyN=_g(loc, "python_source", "files") or 0,
             churn=_g(x, "churn", "commits_touching_files"), churnNote=f"{_g(x, 'churn', 'commits_touching_files')} commits touching {_g(x, 'churn', 'files_touched')} files in {_g(x, 'churn', 'window_days')} days",
             testRatio=_g(x, "tests", "test_to_code_ratio_python"), testsNote=f"{_g(x, 'tests', 'source_files_with_mirror_test')} source files have a mirror test",
             hot=[[h["path"], h["churn"], h["cc_max"]] for h in (_g(x, "hotspots", "top") or [])[:5]])

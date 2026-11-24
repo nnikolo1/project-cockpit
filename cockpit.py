@@ -620,10 +620,39 @@ def build_timeline(S, p=None):
     return dict(entries=out[:400], total=len(out), activity=L.activity_days(S["tasks"], S["events"], mod_of))
 
 
+def line_counts(p, tracked):
+    """{path: physical lines} of the tracked text files of the clone (binary files and unreadable ones are left out)."""
+    root, out = pathlib.Path(p["git"]).expanduser(), {}
+    for x in tracked[:5000]:
+        try:
+            b = (root / x).read_bytes()
+        except OSError:
+            continue
+        if b"\0" not in b[:8192]:
+            out[x] = b.count(b"\n") + (1 if b and not b.endswith(b"\n") else 0)
+    return out
+
+
+def biggest_by_module(p, ids):
+    """{module id: its biggest files (logic.biggest_files)} from the clone and the module map; {} without --git or a map."""
+    cfgm = load_modules(p)
+    if not (p.get("git") and cfgm):
+        return {}
+    tracked = [x for x in run_git(p, ["ls-files", "-z"]).split("\0") if x]
+    sizes = line_counts(p, tracked)
+    assign = cfgm.get("assign", [])
+    return {mid: L.biggest_files({x: sizes[x] for x in L.module_files(tracked, assign, mid) if x in sizes}) for mid in ids}
+
+
 def code_snapshot(p=None):
     try:
-        d = pathlib.Path((p or proj())["code"]).expanduser()
-        return dict(wired=True, **L.code_view(json.load(open(d / "metrics.json"))), diagrams=[k for k, f in SVGS.items() if (d / f).exists()])
+        p = p or proj()
+        d = pathlib.Path(p["code"]).expanduser()
+        view = L.code_view(json.load(open(d / "metrics.json")))
+        big = cached(pk(p, "biggest"), lambda: biggest_by_module(p, list(view["modules"])), 120)
+        for mid, m in view["modules"].items():
+            m["biggest"] = big.get(mid, [])
+        return dict(wired=True, **view, diagrams=[k for k, f in SVGS.items() if (d / f).exists()])
     except (OSError, ValueError, TypeError) as ex:
         log.info("code snapshot not wired (%s)", ex)
         return dict(wired=False, modules={}, diagrams=[])
