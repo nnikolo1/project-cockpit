@@ -27,6 +27,8 @@
   {"path": "docs/cockpit-modules.json", "module": "internal/metadata", "basis": "the module map itself (owner decision 2026-11-20: project metadata is a sub-module of Internal); longer path than docs/, so it wins"},
   {"path": "docs/footprint-declared.json", "module": "internal/metadata", "basis": "committed footprint declaration read by the collectors; project metadata"},
   {"path": "bootfill/", "module": "internal/bootfilling", "basis": "owner decision 2026-11-20 (issue 28): boot-filling is a sub-module of Internal"},
+  {"path": "dispatcher/", "module": "internal/bootfilling", "basis": "the Dispatcher and Workers runtime of the spec docs/specs/dispatcher-and-workers.md, the redesign of the boot-filling job"},
+  {"path": "tests/dispatcher/", "module": "internal/bootfilling", "basis": "tests the dispatcher/ package; tests follow the code"},
   {"path": "bootfill/com.project-cockpit.bootfill.plist.template", "module": "internal/bootfilling", "basis": "the job's launchd template and its renderer belong to the job (owner structure of 2026-11-20: one owner per file; DevOps keeps the generic CI and install scripts)"},
   {"path": "bootfill/render_plist.py", "module": "internal/bootfilling", "basis": "the job's launchd template and its renderer belong to the job (owner structure of 2026-11-20: one owner per file; DevOps keeps the generic CI and install scripts)"},
   {"path": "tests/test_bootfill_core.py", "module": "internal/bootfilling", "basis": "tests bootfill/core.py; tests follow the code"},
