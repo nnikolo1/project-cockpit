@@ -10,7 +10,7 @@
   {"id": "taskqueue/worker", "name": "Worker", "desc": "what runs inside the Workers' container: the image (Containerfile), its Stop hook and note skill, and the relay to the host proxy"},
   {"id": "taskqueue/e2e", "name": "E2E test", "desc": "end-to-end tests of the task queue: the failure-path test driver (tools/e2e_failure_paths.py) and the stub of the model with its derived image (tools/e2e/), with their tests"},
   {"id": "internal/metadata", "name": "Project metadata", "desc": "this module map, the footprint declaration and the card-metadata collectors (tools/cardmeta_*.py) with their tests"},
-  {"id": "internal/devops", "name": "DevOps", "desc": "the CI workflow, the kit/ install and policy files for a consuming repository, and repository configuration (.gitignore)"},
+  {"id": "internal/devops", "name": "DevOps", "desc": "the CI workflow, the kit/ install and policy files for a consuming repository, repository configuration (.gitignore) and the daily backup of a project's Cockpit data to Drive (tools/project_backup.py, with the Drive retention script tools/drive_retention.gs)"},
   {"id": "internal/agents", "name": "Agent policies and skills", "desc": "standing instructions for assistants (CLAUDE.md), skill and agent definitions (.claude/) and the brief check the agent-brief skill runs (tools/check_brief.py)"}
  ],
  "rules": {"groups": [{"name": "Constitution", "paths": ["docs/constitution.md"]}, {"name": "Instructions", "paths": ["CLAUDE.md", "**/CLAUDE.md", ".claude/**"]}, {"name": "Owner defaults and policies", "paths": ["docs/owner-defaults.md"]}, {"name": "Specification", "paths": ["docs/specs/*.md"]}, {"name": "Decisions (ADRs)", "paths": ["docs/adr/*.md"]}]},
@@ -75,6 +75,8 @@
   {"path": "tests/test_rules.py", "module": "githubclient", "basis": "tests the rule-change functions of logic.py"},
   {"path": "tests/fixtures/cardmeta/", "module": "githubclient", "basis": "synthetic inputs of tests/test_cardmeta.py"},
   {"path": "CLAUDE.md", "module": "internal/agents", "basis": "decided 2026-11-20 with the Internal restructure (issue 28): standing instructions for assistants are exactly what Internal/Agent policies holds; it was ambiguous only while no such module existed"},
+  {"path": "tools/project_backup.py", "module": "internal/devops", "basis": "PC-62: the daily backup job of a project's Cockpit data (operations, not the Cockpit app); its test tests/tools/test_project_backup.py follows it"},
+  {"path": "tools/drive_retention.gs", "module": "internal/devops", "basis": "PC-62: the Apps Script draft that keeps the newest 30 backups in Drive, installed by the owner"},
   {"path": ".gitignore", "module": "internal/devops", "basis": "decided 2026-11-20: repository configuration is DevOps; it was ambiguous only while no such module existed"},
   {"path": ".github/workflows/test.yml", "module": "internal/devops", "basis": "decided 2026-11-20: CI workflow is DevOps; it was ambiguous only while no such module existed"},
   {"path": "docs/adr/0015-boot-filling-implementation-choices.md", "module": "taskqueue", "basis": "its Modules line names only taskqueue; a document clearly about one module stays with it (owner rule, 2026-11-20)"},

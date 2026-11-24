@@ -80,7 +80,7 @@ def collect(p, data_dir, now):
     return dict(quality=quality, modules=modules, cards=cards, metrics=metrics if isinstance(metrics, dict) else None, usage=usage,
                 policies=dict(config=L.rules_config(cfgm), files=files), descs={m["id"]: m.get("desc") for m in (cfgm or {}).get("modules", [])},
                 tracked=files, assign=(cfgm or {}).get("assign") if cfgm else None, docs_heads=docs_heads, content=content,
-                data_root=str(d), data_entries=entries)
+                data_root=str(d), data_entries=entries, backup=dict(text=_read(d / L.BACKUP_STATUS_FILE)))
 
 
 TIMED = ("projects", "state", "questions", "timeline", "settings", "cardsettings", "usage", "rules", "code", "cardmeta")

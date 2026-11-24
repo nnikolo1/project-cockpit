@@ -1504,7 +1504,7 @@ def _stale(project, kind, label, age, max_h, module=None):
 
 def metadata_gaps(project, now, modules, cards, metrics, usage, policies, max_age_h=GAPS_MAX_AGE_H, descs=None,
                   tracked=None, assign=None, docs_heads=None, content=None, data_root=None, data_entries=None, timings=None, timing_limit=3.0, quality=None,
-                  retention=None):
+                  retention=None, backup=None):
     """Pure detection of what the Cockpit shows as no data / not wired / not measured / stale / missing. Every fact comes from the project's own
     data, already read; -> list of gap dicts {project, module|None, kind, what, age_h|None}; an empty list means clean. A check whose input is
     None is not run (e.g. no clone: no `tracked`).
@@ -1517,7 +1517,8 @@ def metadata_gaps(project, now, modules, cards, metrics, usage, policies, max_ag
       docs_heads    {path: first text} of the tracked docs/*.md; content {id: {txt: bool, svg: bool}} of docs/modules/
       quality       dict(modules={id: the `/api/code` module payload}, thresholds=`quality_thresholds` of the card settings or None for the defaults)
       data_root     the project's data folder, data_entries the names in it; timings [(request, seconds|None)] of a live check
-      retention     dict(path, text|None, key, min_days) of the coding tool's settings file (transcript_retention_gaps)"""
+      retention     dict(path, text|None, key, min_days) of the coding tool's settings file (transcript_retention_gaps)
+      backup        dict(text=the daily backup's status record or None when missing) (backup_status_gaps)"""
     g = []
     add = lambda kind, what, mod=None, age=None: g.append(_gap(project, kind, what, mod, age))
     mods = modules or []
@@ -1579,10 +1580,46 @@ def metadata_gaps(project, now, modules, cards, metrics, usage, policies, max_ag
     if retention is not None and usage.get("transcript") is not None:  # a project without collected transcripts does not use the tool
         for what in transcript_retention_gaps(**retention):
             add("transcript_retention", what)
+    if backup is not None:
+        for what, age in backup_status_gaps(backup.get("text"), now, max_age_h):
+            add("backup", what, None, age)
     for name, secs in timings or []:
         if secs is None or secs > timing_limit:
             add("slow", f"request {name} " + ("failed" if secs is None else f"took {secs:.1f} s (limit {timing_limit:g} s)"))
     return g
+
+
+BACKUP_STATUS_FILE = "backup-status.json"  # in the project's data folder; written by tools/project_backup.py after every run (PC-62)
+
+
+def backup_status(text):
+    """The daily backup's status record (its text, None when missing) -> dict(time, ok, archive, size, files, reason, last_ok), or None when
+    missing or unreadable."""
+    try:
+        r = json.loads(text) if text else None
+    except ValueError:
+        return None
+    if not isinstance(r, dict) or not isinstance(r.get("ok"), bool) or _epoch(r.get("time")) is None:
+        return None
+    return {k: r.get(k) for k in ("time", "ok", "archive", "size", "files", "reason", "last_ok")}
+
+
+def backup_status_gaps(text, now, max_age_h=GAPS_MAX_AGE_H):
+    """The status record's text -> [(what, age_h|None)]: no backup recorded, the last run failed, or the last good backup is too old."""
+    r = backup_status(text)
+    if r is None:
+        return [("no backup recorded: no daily backup has run, or its status record is unreadable", None)]
+    out = []
+    if not r["ok"]:
+        out.append((f"last backup failed at {r['time']}: {r.get('reason') or 'no reason given'}", _age_h(r["time"], now)))
+    age = _age_h(r["last_ok"], now) if _epoch(r.get("last_ok")) is not None else None
+    if age is None and r["ok"]:
+        age = _age_h(r["time"], now)
+    if age is None:
+        out.append(("no successful backup recorded", None))
+    elif age > max_age_h:
+        out.append((f"last successful backup is older than {max_age_h:g} hours", age))
+    return out
 
 
 RETENTION_MIN_DAYS = 3650  # owner, 2026-11-24: keep the session transcripts (the source of the token statistics) as long as possible
