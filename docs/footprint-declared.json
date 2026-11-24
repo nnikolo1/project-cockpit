@@ -8,26 +8,47 @@
      "kind": "file",
      "personal_data": false,
      "written_by": "githubclient",
-     "note": "access token created with --token-file (mode 0600); a secret, not personal data; the path is the documented default, the owner may choose another"
+     "note": "access token of the service (mode 0600); a secret, not personal data; one token serves all projects of one Cockpit instance, so it lives in the folder of the project named in the service's --token-file, not in every project's folder: a project whose folder has none shows it as not present"
+    },
+    {
+     "path": "~/.local/share/project-cockpit/<project>/cockpit.log",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "githubclient",
+     "note": "standard output and error of the launchd job (the cockpit logger writes to standard error); the request log hides the token; only in the folder named in the job's log settings; never rotated (a gap, see the policy)"
+    },
+    {
+     "path": "~/.local/share/project-cockpit/<project>/dispatcher-settings.json",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "githubclient",
+     "note": "the Dispatcher's settings, written by the Settings page (mode 0600, atomically); an owner decision, read by taskqueue/dispatcher at each firing; a missing file means the defaults"
     },
     {
      "path": "~/.local/share/project-cockpit/<project>/cockpit-settings.json",
      "kind": "file",
      "personal_data": false,
      "written_by": "githubclient",
-     "note": "module-card options of the Settings tab (mode 0600, written atomically); a missing file means the defaults"
+     "note": "module-card options of the Settings tab (mode 0600, written atomically); an owner decision; a missing file means the defaults"
+    },
+    {
+     "path": "~/.local/share/project-cockpit/<project>/projects.json",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "owner",
+     "note": "the list of projects the Cockpit serves (the --projects file); written by hand, only read by githubclient"
     }
    ],
    "logging": [
     {
      "logger": "cockpit",
-     "file": null,
-     "rotation": "none: the logger writes to standard error, no log file; the request log hides the token"
+     "file": "~/.local/share/project-cockpit/<project>/cockpit.log",
+     "rotation": "none recorded: the logger writes to standard error, which the launchd job appends to cockpit.log without rotation (about 2.8 MB after three days); the request log hides the token"
     }
    ],
    "policy": {
-    "backup": "code: the git repository and its remote; runtime state is a rebuildable cache and the token file is a secret: not backed up on purpose",
-    "retention": "in-memory cache: lives with the process, entries refresh after 60 to 3600 seconds (cached() in cockpit.py); token file: kept until the owner deletes it, no rotation in the code; no database"
+    "backup": "code: the git repository and its remote; the settings files (dispatcher-settings.json, cockpit-settings.json) and projects.json are owner decisions, not rebuildable: they belong into the daily backup of local data once it exists; the token file is a secret and the log and the in-memory cache are rebuildable: not backed up on purpose",
+    "retention": "in-memory cache: lives with the process, entries refresh after 60 to 3600 seconds (cached() in cockpit.py); token file: kept until the owner deletes it, no rotation in the code; cockpit.log: grows without limit (no rotation yet: open); settings files: kept; no database"
    }
   },
   "cockpitwebpage": {
