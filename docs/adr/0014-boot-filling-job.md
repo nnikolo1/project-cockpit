@@ -1,6 +1,7 @@
 # 0014. The boot-filling job releases ranked tasks to use quota that would expire
 
-Status: accepted (owner, 2026-11-20); built (task PC-19); poll interval, idle definition and conflict-aware choice amended 2026-11-20
+Status: Superseded by docs/specs/dispatcher-and-workers.md (2026-11-24)
+Earlier status: accepted (owner, 2026-11-20); built (task PC-19); poll interval, idle definition and conflict-aware choice amended 2026-11-20
 Date: 2026-11-20
 
 ## Context

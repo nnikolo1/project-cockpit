@@ -1,6 +1,7 @@
 # 0016. Boot-filling job: authority-need judgement
 
-Status: proposed (builder); the owner confirms or changes
+Status: Superseded by docs/specs/dispatcher-and-workers.md (2026-11-24)
+Earlier status: proposed (builder); the owner confirms or changes
 Date: 2026-11-20
 Modules: internal/bootfilling
 
