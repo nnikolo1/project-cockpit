@@ -4,7 +4,8 @@ Project cockpit is a light-weight, opinionated viewer over GitHub for agent-assi
 
 - Principles: Purity, Frugality, Brevity. Every line must be required by `docs/constitution.md` or the user's words; prefer deleting to generalising.
 - Stdlib only. No token storage: the app acts as the `gh` login.
-- Read-only unless `--steer`.
+- Steering is the default (owner, 2026-11-24); `--read-only` turns actions off.
+- Restarting the running Cockpit service (standing rule, owner, 2026-11-24, for this project only): after a merge of Cockpit code, restart the service yourself without asking (unload and load the launchd job; a kick-start reuses the old definition) and log it in the manual-interventions log; never ask the owner about a restart.
 - Tests: pytest, pure logic, no network. Logging via `logging`, not print. Explain every shell command.
 - No data or names of any consuming project in this repo.
 - Open questions for the owner (standing rule, owner, 2026-11-20): every question an assistant has for the owner that is still open is persisted as a GitHub issue in the repository it belongs to (labels `type:decision` and `question`, an embryo, with the question, the options, a recommendation and the provenance block) and is listed by the cockpit for every project it shows (label `question`, open, with its age). An answer is recorded as a comment, the decision is logged, and the issue is closed with a link to that record.
