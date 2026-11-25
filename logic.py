@@ -1252,7 +1252,10 @@ QUALITY_DEFAULTS = {
 }
 QUOTA_SETTING_DEFAULTS = {"quota_plan_start": "2026-11-01",  # the first day of the current plan (and so of the same quota; owner, 2026-11-25, PC-111)
                           "quota_weak_readings": 20}          # an estimate resting on fewer readings is marked weak
-CARD_SETTING_DEFAULTS = {"churn_colour": "size", "quality_thresholds": QUALITY_DEFAULTS, **QUOTA_SETTING_DEFAULTS}  # churn: what the overview showed before the option moved to Settings
+QUEUE_REFRESH_DEFAULT, QUEUE_REFRESH_MIN = 120, 60  # PC-130: the Task Queue pane's refresh (owner, 2026-11-25: every 2 min); the page may narrow it to 60 s
+QUEUE_BUDGET_RESERVE = 100  # below this many calls left in the hourly cap, the Queue pane falls back to the hourly refresh
+CARD_SETTING_DEFAULTS = {"churn_colour": "size", "quality_thresholds": QUALITY_DEFAULTS, **QUOTA_SETTING_DEFAULTS,  # churn: what the overview showed before the option moved to Settings
+                         "queue_refresh_s": QUEUE_REFRESH_DEFAULT}
 
 
 def _is_num(v):
@@ -1292,7 +1295,31 @@ def validate_card_settings(form, strict=True):
     v = form.get("churn_colour")
     if v not in CARD_CHURN_COLOURS:
         raise ValueError("churn colour must be one of: " + ", ".join(CARD_CHURN_COLOURS))
-    return {"churn_colour": v, "quality_thresholds": validate_thresholds(form.get("quality_thresholds"), strict), **validate_quota_settings(form, strict)}
+    return {"churn_colour": v, "quality_thresholds": validate_thresholds(form.get("quality_thresholds"), strict), **validate_quota_settings(form, strict),
+            "queue_refresh_s": validate_queue_refresh(form.get("queue_refresh_s"), strict)}
+
+
+def validate_queue_refresh(v, strict=True):
+    """queue_refresh_s: whole seconds, at least QUEUE_REFRESH_MIN; missing -> the default. strict: ValueError on a bad value, else the default."""
+    if v in (None, ""):
+        return QUEUE_REFRESH_DEFAULT
+    if isinstance(v, str) and re.fullmatch(r"\s*\d+\s*", v):
+        v = int(v)
+    if isinstance(v, int) and not isinstance(v, bool) and v >= QUEUE_REFRESH_MIN:
+        return v
+    if strict:
+        raise ValueError(f"Task Queue refresh must be a whole number of seconds, at least {QUEUE_REFRESH_MIN}")
+    return QUEUE_REFRESH_DEFAULT
+
+
+def queue_interval(setting, remaining, paused_until, now, slow=3600, reserve=QUEUE_BUDGET_RESERVE):
+    """The Task Queue pane's task-list refresh interval -> (seconds, reason or None). The setting while the hourly call budget allows it;
+    the hourly interval (slow) while a rate-limit pause is on or fewer than `reserve` calls are left of the Cockpit's own cap."""
+    if paused_until and now < paused_until:
+        return slow, "GitHub rate limit"
+    if remaining < reserve:
+        return slow, "call budget low"
+    return setting, None
 
 
 def validate_quota_settings(form, strict=True):

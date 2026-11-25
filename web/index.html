@@ -356,10 +356,50 @@ async function reload(pane){
   if(mine===PROJ)render();
 }
 let staleTimer=0;
+/* queue-poll:start (PC-130) The Task Queue pane asks /api/queuepoll every queue_refresh_s seconds while its tab is visible and open:
+   one request in flight at a time, none while hidden or on another tab, an immediate one when the tab shows again. Pure: every effect
+   (clock, timer, request, visibility, drawing) is injected, so the rhythm is tested with a fake clock and a fake server. */
+function queuePoller(o){
+  const P={busy:false,timer:null,error:null};
+  P.on=()=>o.visible()&&o.active();
+  P.stop=()=>{if(P.timer!=null)o.clearTimer(P.timer);P.timer=null;};
+  P.schedule=()=>{P.stop();if(P.on())P.timer=o.setTimer(P.tick,o.every()*1000);};
+  P.tick=async()=>{
+    P.stop();if(P.busy||!P.on())return;
+    P.busy=true;
+    try{const r=await o.fetch();P.error=null;o.apply(r);}
+    catch(e){P.error={msg:String(e&&e.message||e),at:o.now()};o.fail(P.error);}  /* the last data stays; the page says it is stale */
+    finally{P.busy=false;P.schedule();}
+  };
+  P.sync=()=>{if(!P.on())P.stop();else if(P.timer==null&&!P.busy)P.tick();};  /* after a render: start on entering the tab, stop on leaving it */
+  P.wake=()=>{if(P.on()){if(!P.busy)P.tick();}else P.stop();};  /* visibility change: shown -> refresh now, hidden -> quiet */
+  return P;
+}
+/* queue-poll:end */
+let QP=null,QPEND=null;  /* the last poll's meta (every, interval, slowed, nextAt, error) and a newer task state held back while a drawer or form is open */
+const editing=()=>!!(UI.drawer||UI.armed||(document.activeElement&&document.activeElement.closest&&document.activeElement.closest('#app form,#app input,#app textarea,#app select')));
+function patch(id,html){const el=document.getElementById(id);if(el)el.outerHTML=html;}
+function takeState(s){QPEND=null;if(D&&D.source.fetchedAt>s.source.fetchedAt)return;D=s;TODAY=D.today;MODULES=D.modules;}  /* never over a newer copy (a Refresh click) */
+function qApply(r){
+  if(r._proj!==PROJ)return;  /* the user switched project meanwhile */
+  QP=r;const k=x=>JSON.stringify(Object.assign({},x,{asOf:0}));
+  const live=(r.local&&(!QL||k(r.local)!==k(QL)))||JSON.stringify(r.ci||null)!==JSON.stringify(CI||null);
+  if(r.local)QL=r.local;if(r.ci)CI=r.ci;
+  if(r.state)QPEND=r.state;
+  if(QPEND&&!editing()){takeState(QPEND);render();return;}  /* the task list changed and nothing is open that could be lost: redraw */
+  if(live)patch('qlive',qLive());  /* else only the parts that changed, so an open drawer, editor or draft is untouched */
+  patch('pbar',paneBar(UI.route));
+}
+/* queue-apply:end */
+const QPOLL=queuePoller({visible:()=>document.visibilityState==='visible',active:()=>UI.route==='backlog',now:()=>Date.now()/1000,
+  every:()=>(QP&&QP.every)||(CSET&&CSET.values&&CSET.values.queue_refresh_s)||120,setTimer:(f,ms)=>setTimeout(f,ms),clearTimer:t=>clearTimeout(t),
+  fetch:async()=>{const mine=PROJ,c=QPEND||D,r=await api('/api/queuepoll?since='+(c?c.source.fetchedAt:0));r._proj=mine;return r;},
+  apply:qApply,fail:()=>patch('pbar',paneBar(UI.route))});
+document.addEventListener('visibilitychange',()=>QPOLL.wake());
 async function pickProject(name){
   if(name===PROJ)return;
   PROJ=name;try{localStorage.setItem('cockpit-project',name);}catch(e){}
-  D=null;FEED=[];ACT=[];MODULES=[];CODE={wired:false,modules:{}};RULES={configured:false};META=NOMETA();REV=null;  /* page caches of the old project */
+  D=null;QP=null;QPEND=null;QPOLL.stop();FEED=[];ACT=[];MODULES=[];CODE={wired:false,modules:{}};RULES={configured:false};META=NOMETA();REV=null;  /* page caches of the old project */
   for(const k in SVGC)delete SVGC[k];for(const k in MODDOC)delete MODDOC[k];
   Object.assign(UI,{filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',rulesGroup:'all',codeMod:'unassigned',err:''});
   render();await reload(false);
@@ -552,12 +592,13 @@ function vCockpit(){
 function paneBar(R){
   /* every pane that shows GitHub-sourced data says how old it is and has its own Refresh (the only thing that bypasses the hourly refresh) */
   let at=null,after=null;
+  if(R==='backlog'&&(QP||QPOLL.error))return queueBar();
   if(PANE_STATE.includes(R)&&D){at=D.source.fetchedAt;after=D.refreshAfter;}
   else if(R==='questions'){const a=Q.projects.filter(p=>p.age_s!=null).map(p=>Date.now()/1000-p.age_s);if(a.length){at=Math.min(...a);after=at+3600;}}
   else if(R==='settings'&&UI.setSec==='policies'&&PRS.at){at=PRS.at;after=at+3600;}
   else if(!(R==='cockpit'||R==='backlog'||R==='timeline'||R==='questions'||R==='settings'))return '';
   else if(R==='settings'&&UI.setSec!=='policies')return '';
-  return '<div class="page" style="padding-bottom:0"><div class="row" style="gap:10px"><span class="muted" style="font-size:13px" title="GitHub data is refreshed lazily, at most once an hour; Refresh fetches this pane\'s data now">'+(at?'data from '+tm(at)+(after?', next refresh after '+tm(after):''):'no data yet')+'</span>'+(R==='backlog'?'<span class="muted" style="font-size:13px" data-zone>'+zoneNote()+'</span>':'')+'<button class="btn small" data-act="refresh" data-pane="'+R+'">Refresh</button></div></div>';
+  return '<div class="page" id="pbar" style="padding-bottom:0"><div class="row" style="gap:10px"><span class="muted" style="font-size:13px" title="GitHub data is refreshed lazily, at most once an hour; Refresh fetches this pane\'s data now">'+(at?'data from '+tm(at)+(after?', next refresh after '+tm(after):''):'no data yet')+'</span>'+(R==='backlog'?'<span class="muted" style="font-size:13px" data-zone>'+zoneNote()+'</span>':'')+'<button class="btn small" data-act="refresh" data-pane="'+R+'">Refresh</button></div></div>';
 }
 /* The age banner (owner, offline behaviour): the last good state with its age, the case (rate limit with its retry time, rejected token,
    unreachable), that no new task starts from it when it is over an hour old, and why the steering actions are off. */
@@ -575,6 +616,12 @@ function disableSteering(why){
     if(GH_ACTS.includes(a)||(a==='arm'&&b.dataset.a!=='compliance')){b.disabled=true;b.title='Off: '+why;}});
   ['block','change','edit','moddl','new','release'].forEach(f=>document.querySelectorAll('#app [data-form='+f+'] button:not([type=button])').forEach(b=>{b.disabled=true;b.title='Off: '+why;}));
 }
+function queueBar(){  /* the Task Queue pane: the data's actual age, the next refresh, a slowed or failed refresh (PC-130) */
+  const q=QP||{},at=q.fetchedAt||(D&&D.source.fetchedAt),e=QPOLL.error;
+  const age=at?'data from '+tm(at)+' ('+ageMin(Math.max(0,Math.round(Date.now()/1000-at)))+' old)':'no task data yet';
+  const nx=q.slowed?'<span class="warnline">refresh slowed: '+esc(q.slowed)+', next at '+tm(q.nextAt)+'</span>':(q.nextAt?'refreshed every '+ageMin(q.interval)+', next at '+tm(q.nextAt):'');
+  const st=e?' <span class="warnline">refresh failed at '+tm(e.at)+' ('+esc(e.msg)+'); showing the last data</span>':(q.error?' <span class="warnline">task list unavailable ('+esc(q.error)+')</span>':'');
+  return '<div class="page" id="pbar" style="padding-bottom:0"><div class="row" style="gap:10px"><span class="muted" style="font-size:13px" title="While this tab is open and visible the page asks for fresh queue data on its own; Refresh fetches the task list now">'+age+(nx?', '+nx:'')+st+'</span><button class="btn small" data-act="refresh" data-pane="backlog">Refresh</button></div></div>';}
 function ageMin(s){return s<90?s+' s':s<5400?Math.round(s/60)+' min':Math.round(s/3600)+' h';}
 function ageText(d){return d<1?'today':d===1?'1 day':d<60?d+' days':Math.round(d/30)+' months';}
 function vQuestions(){
@@ -681,16 +728,17 @@ function ciLine(c){
   const w={green:'passed',red:'failed ('+esc(c.conclusion||'')+')',running:'running',other:esc(c.conclusion||'no result'),none:'no run recorded',unknown:'unknown: '+esc(c.error||'GitHub unavailable')}[c.state]||esc(c.state);
   return '<p class="'+(c.state==='red'?'warnline':'muted')+'" style="font-size:12px;margin:6px 0 0">CI on main: '+w+t+(c.sha?' <span class="mono">'+esc(c.sha.slice(0,7))+'</span>':'')+a+'.</p>';
 }
+function qLive(){return '<div id="qlive">'+block('Being processed now',vQueueLocal)+'</div>';}
 function vQueueLocal(){
   const nf=t=>D&&D.tasks.find(x=>x.key===t),L=QL;
   if(!L)return '<div class="card"><h2>Being processed now</h2><span class="muted">The Dispatcher files could not be read.</span>'+ciLine(CI)+'</div>';
   return '<div class="card"><div class="row" style="gap:10px"><h2>Being processed now</h2><span class="muted" style="font-size:13px" title="Read from the Dispatcher\'s files on every page load; the task table below is GitHub data'+(D?' from '+tmTxt(D.source.fetchedAt):'')+', with newer Dispatcher events marked live">live, '+tmTxt(L.asOf)+'</span></div>'+(L.workers.length?L.workers.map(w=>{const t=nf(w.task);return '<div class="row" style="gap:10px;margin-top:8px"><b class="mono">'+esc(w.worker)+'</b><b class="mono">'+esc(w.task||'?')+'</b>'+(t?'<button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button>':'')+'<span class="muted">launched '+tm(w.launched)+(w.started?'':' · starting')+'</span></div>';}).join(''):'<p class="muted" style="margin:8px 0 0">No Worker is running now.</p>')
    +'<p class="muted" style="font-size:12px;margin:10px 0 0">From the Dispatcher: '+(L.settings.values.enabled?'on':'off')+', '+L.settings.values.workers+' Worker'+(L.settings.values.workers===1?'':'s')+' at most, every '+L.settings.values.interval_minutes+' min (settings in the Settings tab).</p>'
    +bkLine(L.backup)+ciLine(CI)
-   +(L.log.length?'<details style="margin-top:8px"><summary class="muted">Processing log, newest '+L.log.length+'</summary><div class="mono" style="font-size:12px;margin-top:6px">'+L.log.map(r=>tm(r.time)+' '+esc(r.heartbeat?r.heartbeat:[r.task,r.state,r.reason,r.worker].filter(Boolean).join(' '))).join('<br>')+'</div></details>':'')+'</div>';
+   +(L.log.length?'<details id="qlog" style="margin-top:8px"'+(UI.qlogOpen?' open':'')+'><summary class="muted">Processing log, newest '+L.log.length+'</summary><div class="mono" style="font-size:12px;margin-top:6px">'+L.log.map(r=>tm(r.time)+' '+esc(r.heartbeat?r.heartbeat:[r.task,r.state,r.reason,r.worker].filter(Boolean).join(' '))).join('<br>')+'</div></details>':'')+'</div>';
 }
 function vBacklog(){
-  if(!D)return '<div class="page">'+block('Being processed now',vQueueLocal)+'<p class="muted">The task list needs GitHub and is not available yet.</p></div>';
+  if(!D)return '<div class="page">'+qLive()+'<p class="muted">The task list needs GitHub and is not available yet.</p></div>';
   const rq=ranked(D),nx=rq[0];
   const f=UI.filter;let ts=D.tasks.slice();
   if(UI.mod!=='all')ts=ts.filter(t=>UI.ex?t.module===UI.mod:inMod(t.module,UI.mod));
@@ -698,7 +746,7 @@ function vBacklog(){
   ts.sort((a,b)=>sortKey(a)-sortKey(b)||((a.prio||9)-(b.prio||9))||((eff(D,a).d||'9').localeCompare(eff(D,b).d||'9'))||a.key.localeCompare(b.key,undefined,{numeric:true}));
   const fl=['all','embryo','released','wip','unmerged','failed','merged','cancelled','blocked'];
   const mp=modPage();
-  let h='<div class="page">'+(mp?block('Module filter',()=>modFilter(UI.mod,'modf','all modules','all of {}',true))+block('Module page',()=>vModPage(UI.mod))+'<h2>Tasks</h2>':'')+block('Being processed now',vQueueLocal)+block('Next up',()=>'<div class="card">'+'<p style="margin:12px 0 0">'+(nx?'Next up: <button class="linkbtn" data-act="open" data-k="'+nx.key+'"><b>'+esc(nx.key)+'</b> '+esc(nx.title)+'</button> <span class="muted">'+(nx.prio?'P'+nx.prio:'no priority')+' · '+(eff(D,nx).d?'due '+eff(D,nx).d:'no deadline')+' · unblocks '+blocksCount(D,nx)+' · '+nx.cls+'</span> '+(SIM()?'<button class="btn small" data-act="take" data-k="'+nx.key+'">Simulate: Orchestrator takes it</button>':''):'<span class="muted">Nothing released and unblocked.</span>')+'</p>'
+  let h='<div class="page">'+(mp?block('Module filter',()=>modFilter(UI.mod,'modf','all modules','all of {}',true))+block('Module page',()=>vModPage(UI.mod))+'<h2>Tasks</h2>':'')+qLive()+block('Next up',()=>'<div class="card">'+'<p style="margin:12px 0 0">'+(nx?'Next up: <button class="linkbtn" data-act="open" data-k="'+nx.key+'"><b>'+esc(nx.key)+'</b> '+esc(nx.title)+'</button> <span class="muted">'+(nx.prio?'P'+nx.prio:'no priority')+' · '+(eff(D,nx).d?'due '+eff(D,nx).d:'no deadline')+' · unblocks '+blocksCount(D,nx)+' · '+nx.cls+'</span> '+(SIM()?'<button class="btn small" data-act="take" data-k="'+nx.key+'">Simulate: Orchestrator takes it</button>':''):'<span class="muted">Nothing released and unblocked.</span>')+'</p>'
    +'<p class="muted" style="font-size:12px;margin:6px 0 0">Ranking (column #): your priority, then deadline, then tasks that unblock the most, then must before nice.</p></div>')
    +'<div class="row spread"><div><h1>Task Queue</h1><span class="muted">'+ts.length+' of '+D.tasks.length+' tasks</span></div>'+(ST()?'<button class="btn primary" data-act="new">New task</button>':'')+'</div>';
   h+='<div class="filters" role="group" aria-label="Stage filter">'+fl.map(x=>stageChip(x,f===x)).join('')+'</div>'+stageLegend();
@@ -771,6 +819,8 @@ function cardSettingsForm(){
    +'<span class="muted" style="font-size:12px">The first day of the current plan (UTC): quota percentages are estimated only for windows from this day on; earlier ones show “no readings, other plan”.</span></div>'
    +'<div class="field"><label for="s_quota_weak_readings">Readings for a firm estimate</label><input id="s_quota_weak_readings" name="quota_weak_readings" type="number" step="1" min="1" value="'+esc(String(CSET.values.quota_weak_readings||''))+'"'+(ro?' disabled':'')+'>'
    +'<span class="muted" style="font-size:12px">An estimate resting on fewer readings is marked weak.</span></div>'
+   +'<h3>Task Queue</h3><div class="field"><label for="s_queue_refresh_s">Refresh the queue every (seconds)</label><input id="s_queue_refresh_s" name="queue_refresh_s" type="number" step="1" min="60" value="'+esc(String(CSET.values.queue_refresh_s||''))+'"'+(ro?' disabled':'')+'>'
+   +'<span class="muted" style="font-size:12px">While the Task Queue tab is open and visible, its task list is fetched from GitHub this often (at least 60 s); when the hourly call budget runs low or GitHub pauses the Cockpit, it falls back to once an hour.</span></div>'
    +(ro?'':'<div><button class="btn primary">Save</button></div>')+'</form>';}
 /* Settings > Action log (PC-132): the last events of the project's action log (read only), newest first, filtered on the server; failures highlighted,
    a failed or refused row links to its task. */
@@ -1179,6 +1229,7 @@ function drawerNew(p){
 
 /* ---------- render and actions ---------- */
 function render(){
+  if(QPEND&&!UI.drawer)takeState(QPEND);
   if(UI.route==='how'){UI.route='code';UI.codeTab='flowchart';}
   if(UI.route==='rules'){UI.route='settings';UI.setSec='policies';}  /* old route */
   const R=UI.route;
@@ -1210,6 +1261,7 @@ function render(){
   document.getElementById('app').innerHTML=h;
   if(D&&D.steerBlock)disableSteering(D.steerBlock);
   hydrate();
+  QPOLL.sync();
 }
 let toastTimer=null,armTimer=null;
 /* kind: '' (news), 'refused' (the server said no) or 'net' (the Cockpit was not reached); ms 0 = stays until closed; retry = the action Retry sends again */
@@ -1264,6 +1316,7 @@ window.addEventListener('error',e=>note('script','','',String(e.message||e.error
 window.addEventListener('unhandledrejection',e=>note('script','','',String(e.reason&&e.reason.message||e.reason||'unhandled rejection')));
 setInterval(flush,30000);  /* sends the events kept while the server was unreachable */
 document.addEventListener('input',function(e){const f=e.target.closest('[data-form=edit]');if(f&&UI.drawer)UI.drawer.draft={title:f.elements.title.value,body:f.elements.body.value};});
+document.addEventListener('toggle',function(e){if(e.target.id==='qlog')UI.qlogOpen=e.target.open;},true);  /* the log stays open across refreshes */
 document.addEventListener('change',function(e){if(e.target.id==='psel')pickProject(e.target.value);});
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&UI.drawer){UI.drawer=null;render();}});
 document.addEventListener('submit',async function(e){
@@ -1279,13 +1332,13 @@ document.addEventListener('submit',async function(e){
   else if(kind==='block')fd.get('b')&&post({action:'block',n:t.number,b:num(fd.get('b'))});
   else if(kind==='settings'){const b={action:'settings',enabled:f.elements.enabled.checked};
     SETROWS.slice(1).forEach(r=>{b[r[0]]=fd.get(r[0]);});post(b);}
-  else if(kind==='cardsettings')post({action:'cardsettings',churn_colour:fd.get('churn_colour'),quality_thresholds:qThRead(fd),quota_plan_start:fd.get('quota_plan_start'),quota_weak_readings:fd.get('quota_weak_readings')});
+  else if(kind==='cardsettings')post({action:'cardsettings',churn_colour:fd.get('churn_colour'),quality_thresholds:qThRead(fd),quota_plan_start:fd.get('quota_plan_start'),quota_weak_readings:fd.get('quota_weak_readings'),queue_refresh_s:fd.get('queue_refresh_s')});
   else if(kind==='alog'){UI.alog={action:fd.get('action')||'',outcome:fd.get('outcome')||'',task:(fd.get('task')||'').trim()};ALOG=null;render();loadAlog();}
   else if(kind==='moddl')post({action:'moddl',module:f.dataset.m,d:fd.get('d')||''});
   else if(kind==='new'){const title=fd.get('title');
     if(await post({action:'new',title:title,desc:fd.get('desc'),module:fd.get('module'),type:fd.get('type'),cls:fd.get('cls'),parent:fd.get('parent')||''})){
       const nt=D.tasks.filter(x=>x.title===title).sort((a,b)=>b.number-a.number)[0];UI.drawer=nt?{mode:'task',key:nt.key}:null;UI.route='backlog';UI.filter='all';render();}}
 });
-setInterval(()=>{if(document.visibilityState==='visible'&&!UI.drawer&&D)reload(false);},180000);
+setInterval(()=>{if(document.visibilityState==='visible'&&!editing()&&D&&UI.route!=='backlog')reload(false);},180000);  /* the Task Queue has its own poll (PC-130) */
 boot();
 </script>

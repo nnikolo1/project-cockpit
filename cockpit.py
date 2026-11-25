@@ -1278,7 +1278,43 @@ def live_state(p, S, fresh=False):
 def get_state_served(p, fresh=False):
     """The state for the page: `stale` is true while a newer copy is being fetched in the background, so the page asks again shortly;
     `staleNote` is set when the last refresh failed and an older copy is shown (its age, the reason and when GitHub is tried again)."""
-    S = live_state(p, get_state(fresh=fresh, p=p), fresh)
+    return _served(p, live_state(p, get_state(fresh=fresh, p=p), fresh))
+
+
+def gh_calls_left(now=None):
+    """How many gh calls the Cockpit's own hourly cap still allows now."""
+    now = time.time() if now is None else now
+    with _gh_lock:
+        return GH_CALLS_PER_HOUR - sum(1 for t in _gh_calls if t > now - 3600)
+
+
+def get_queue_poll(p, since=0, now=None):
+    """PC-130: the Task Queue pane's light poll (the page asks every queue_refresh_s while the tab is visible). Always the local part
+    (Workers, Dispatcher line, processing log) and the CI line (its own hourly cache); the task state is refreshed from GitHub when older
+    than the pane's interval, which falls back to the hourly one while a rate-limit pause is on or the call budget is low (`slowed`).
+    The state itself is sent only when it differs from the copy the page has (`since` = its fetchedAt); a failed refresh keeps the old copy."""
+    now = time.time() if now is None else now
+    every = get_card_settings(p)["values"]["queue_refresh_s"]
+    interval, slowed = L.queue_interval(every, gh_calls_left(now), _gh_pause["until"], now, GH_REFRESH_S)
+    k, S, err = pk(p, "state"), None, None
+    t = _cache.get(k, (None,))[0]
+    if t is not None and now - t > interval and not OFFLINE:
+        _expire(k)  # due: fetch now, in this request (the page waits for it; one request in flight at a time)
+    try:
+        S = cached(k, lambda: build_state(p), interval, persist=True, disk_fresh=DISK_FRESH_S, queue=True)
+    except Exception as ex:
+        log.warning("queue poll of %s: no state (%s)", p.get("name", ""), str(ex)[:120])
+        err = str(ex)[:200]
+    at = S["source"].get("fetchedAt", 0) if S else 0
+    out = dict(local=get_queue(p), ci=get_ci(p), every=every, interval=interval, slowed=slowed, fetchedAt=at or None,
+               nextAt=max(at + interval, now) if at else None, staleNote=stale_note(p), error=err)
+    if S and at != since:
+        out["state"] = _served(p, live_state(p, S))
+    return out
+
+
+def _served(p, S):
+    """A cached state as the page gets it (modules in size order, steering off in an offline copy, its refresh flags)."""
     if OFFLINE:  # the copy was taken from a steering instance: steering is off here whatever the cached state says
         S = dict(S, source=dict(S.get("source", {}), steering=False, simulate=False))
     if "modules" in S:
@@ -1618,6 +1654,8 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, get_card_settings(p))
             if u.path == "/api/queue":
                 return self.send(200, get_queue(p))
+            if u.path == "/api/queuepoll":
+                return self.send(200, get_queue_poll(p, since=_since(q)))
             if u.path == "/api/ci":
                 return self.send(200, get_ci(p))
             if u.path == "/api/usage":
@@ -1694,6 +1732,14 @@ def serve(host, port, warm_up):
             WARM["on"] = False
     threading.Thread(target=go, daemon=True).start()
     return srv
+
+
+def _since(q):
+    """The `since` query value (the fetchedAt of the page's copy) as a number; 0 when missing or not a number."""
+    try:
+        return float(q.get("since", ["0"])[0])
+    except ValueError:
+        return 0
 
 
 def load_token(path=None):
