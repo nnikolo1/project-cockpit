@@ -1,6 +1,6 @@
 # 0022. Policy packs stored where Claude reads them; the module map is a setting
 
-Status: accepted in direction (owner, 2026-11-25); details open
+Status: DRAFT, not decided: a record of the owner thinking aloud (2026-11-25); nothing here binds the code or the tasks until the owner says it is decided
 Date: 2026-11-25
 Modules: internal/agents, devops/policy
 
