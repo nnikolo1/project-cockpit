@@ -59,4 +59,4 @@ def test_a_block_that_throws_becomes_an_error_card_and_the_others_render():
 def test_every_tab_and_the_queue_cards_are_guarded():
     assert "h+=block(R,V,true)" in PAGE
     assert "x.replace('T'" not in PAGE.replace(PAGE[PAGE.index("/* safe-block:start"):PAGE.index("/* safe-block:end */")], "")
-    assert PAGE.count("block('Being processed now',vQueueLocal)") == 2
+    assert PAGE.count("block('Being processed now',vQueueLocal)") == 1 and PAGE.count("qLive()") >= 3  # both queue views and the poll's patch (PC-130)
