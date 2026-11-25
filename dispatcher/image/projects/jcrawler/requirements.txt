@@ -1,0 +1,9 @@
+# Dependencies the CI job installs (the project has no runtime requirements file; deps are otherwise installed ad hoc).
+# Heavy optional packages (torch, sentence_transformers, boto3, azure) are NOT installed: tests/ranker is excluded from CI for now.
+pytest
+pytest-cov
+httpx
+numpy
+python-docx
+pypdf
+playwright

@@ -1,0 +1,6 @@
+# A project's own Workers' image (queue-interfaces.md: Runtime.image_for). Build context = this folder:
+#   container build --dns 1.1.1.1 -t cockpit-worker-jcrawler:latest -f Containerfile .   (or Runtime.build_project_image)
+# Workers have no network at run time, so the project's test dependencies are installed here.
+FROM cockpit-worker:latest
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt

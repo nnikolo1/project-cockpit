@@ -57,6 +57,7 @@ class Config:
     data_folder: str = os.path.expanduser("~/Library/Application Support/com.apple.container")  # size shown in the heartbeat
     runaway_minutes: int = 40           # 3i; the in-guest backstop is twice this (4e)
     build_dns: str = "1.1.1.1"          # name resolution of the image build fails with the tool's default (first real run)
+    recipes_dir: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "image", "projects")  # <project>/Containerfile = a project's own image recipe
     synopsis_dir: str = None            # <queue root>/synopsis: the projects' session synopses (PC-70); None = none is copied
 
 
@@ -186,6 +187,26 @@ class Runtime:
                             timeout=BUILD_TIMEOUT)
         if rc:
             raise ContainerError(f"image build failed: {out[-500:]}")
+
+    def image_for(self, project):
+        """The image tag for a project's container: `<image name>-<project>:latest` when the project has a recipe
+        (`<recipes_dir>/<project>/Containerfile`), else the base image `cfg.image` (contract: queue-interfaces.md)."""
+        if project and os.path.isfile(os.path.join(self.cfg.recipes_dir, str(project), "Containerfile")):
+            return f"{self.cfg.image.rsplit(':', 1)[0]}-{project}:latest"
+        return self.cfg.image
+
+    def build_project_image(self, project):
+        """Build the project's image from its recipe folder (the build context); the recipe starts FROM the base image.
+        Workers have no network at run time, so the project's dependencies are installed here."""
+        tag = self.image_for(project)
+        if tag == self.cfg.image:
+            raise ContainerError(f"no image recipe for project {project!r} in {self.cfg.recipes_dir}")
+        ctx = os.path.join(self.cfg.recipes_dir, str(project))
+        rc, out = self.call("build", "--dns", self.cfg.build_dns, "-t", tag, "-f", os.path.join(ctx, "Containerfile"), ctx,
+                            timeout=BUILD_TIMEOUT)
+        if rc:
+            raise ContainerError(f"project image build failed: {out[-500:]}")
+        return tag
 
     # --- egress check (4s) -------------------------------------------------------------------------------
     def egress_blocked(self, user, host="1.1.1.1", port=443):
