@@ -1,6 +1,6 @@
 # PC-33: sorting the rules of the owner's projects (worked interactively with the owner)
 
-Status: in progress, decided batch by batch (owner, 2026-11-25)
+Status: sorting complete, all four batches decided (owner, 2026-11-25); what moves into a template, and in what form, is the next step
 Date: 2026-11-25
 Modules: internal/agents
 
@@ -62,11 +62,11 @@ Verdicts: **G** generic (opinionated but fit for any developer using Claude Code
 | 40 | Batch pushes when hosted CI minutes are metered | S | the private repository |
 | 41 | Verify "untracked" or "missing" claims with a real check before stating them | G | folded into the evidence rule (21) |
 
-## Batch 4: the Cockpit's task and release workflow, and the skills (proposed; the owner has decided only the point below)
+## Batch 4: the Cockpit's task and release workflow, and the skills (decided by the owner, 2026-11-25)
 
 Decided by the owner, 2026-11-25: the core (C) rules reach the Claude of a project that uses the Cockpit as a short, generated "Cockpit workflow" section of the managed block (PC-92), derived from the constitution, which stays the single source; a project does not describe the workflow itself.
 
-Proposed, not yet answered by the owner (rows 42 to 58 and the skills):
+Rows 42 to 58 and the skills, agreed by the owner as a whole (2026-11-25):
 
 | # | Rule | Proposed |
 |---|---|---|
