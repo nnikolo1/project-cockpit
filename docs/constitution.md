@@ -64,6 +64,10 @@ Only the Python version installed on the owner's machine is supported and tested
 
 A released task that is blocked by a task which is not yet merged is never assigned to a Worker (owner, 2026-11-25, constitutional amendment): a task's blockers are its relations "blocked by"; the task counts as blocked until every blocker is merged (a blocker that is open in any other state, failed or cancelled keeps it blocked until it is merged or the owner removes the relation); the Dispatcher skips blocked tasks when it chooses, and the Cockpit shows them as blocked. A blocked task may be released: release states the owner's decision, the blockers state the order.
 
+## Design stance: a tool like git, for several repositories (owner, 2026-11-25)
+
+In every design discussion for the Project cockpit, think of it as a tool similar to git: a tool in its own right that is used as part of the tooling of other projects and must support several code repositories of the same owner at once (owner, 2026-11-25, standing rule). A design that assumes one project, or the Cockpit's own repository as the only case, is corrected before it is proposed: where data lives, what a setting applies to, what a command or an API takes, and what a view shows are all stated per project, with the single-project setup as the special case.
+
 ## Generated data stays out of git (owner, 2026-11-25)
 
 Data that is derived or produced by processing (reports of checks, statistics, snapshots, logs, caches) belongs to the Cockpit's data folder, not to a project's git repository; a repository holds what a person decided and wrote (decisions, documents, the module map, policies). A generated file is written into a repository only when the owner has decided so for that file.
