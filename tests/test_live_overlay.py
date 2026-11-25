@@ -101,6 +101,7 @@ def test_served_state_refreshes_once_on_a_newer_event_and_respects_pause(cockpit
     C._gh_pause.update(until=now + 600)              # a rate-limit pause: no refresh
     S = C.live_state(p, old)
     assert not builds and S["tasks"][0]["stage"] == "unmerged" and S["tasks"][0]["live"]
+    assert S["openCounts"]["all"] == dict(n=1, tip="1 unmerged")   # PC-128: the module chips count the overlaid stage
     C._gh_pause.update(until=0.0)
     C.live_state(p, old)
     assert done.wait(5) and len(builds) == 1

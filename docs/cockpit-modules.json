@@ -80,6 +80,7 @@
   {"path": "tests/test_ui_actions.py", "module": "internal", "basis": "the enumeration test of tools/ui_actions.py: every UI action needs a test; the test follows its tool"},
   {"path": "tests/test_ui_actions_page.py", "module": "githubclient", "basis": "page-level tests of the UI actions of web/index.html (a fake server)"},
   {"path": "tests/test_ui_actions_server.py", "module": "githubclient", "basis": "server-side tests of the state-changing actions in cockpit.py (happy path and refusal)"},
+  {"path": "tests/test_open_chips.py", "module": "githubclient", "basis": "tests the open-issue counts of the Task Queue module chips (logic.py, page)"},
   {"path": "tests/conftest.py", "module": "githubclient", "basis": "the shared test guard that keeps cockpit.py's data folder (the action log) in a temporary folder"},
   {"path": "tests/test_edit_text.py", "module": "githubclient", "basis": "tests the edit-text action planning in cockpit.py and logic.py; tests follow the code"},
   {"path": "tests/test_cache.py", "module": "githubclient", "basis": "tests the cache in cockpit.py"},

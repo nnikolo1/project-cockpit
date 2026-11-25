@@ -69,6 +69,7 @@ h1{font-size:22px;margin:0;font-weight:600}h2{font-size:15px;margin:0;font-weigh
 .filters{display:flex;gap:8px;flex-wrap:wrap}
 .f{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 12px;cursor:pointer;font-size:13px}
 .f[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.oc{font-size:11px;font-variant-numeric:tabular-nums}.f[aria-pressed="true"] .oc{color:inherit}
 /* Stage colours (PC-127): one hue per stage, tokens --s-<stage> (ink) and --s-<stage>-bg (tint) in both themes; the word always stays in the pill. */
 .s-embryo{--c:var(--s-embryo);--cb:var(--s-embryo-bg)}.s-released{--c:var(--s-released);--cb:var(--s-released-bg)}.s-wip{--c:var(--s-wip);--cb:var(--s-wip-bg)}
 .s-unmerged{--c:var(--s-unmerged);--cb:var(--s-unmerged-bg)}.s-failed{--c:var(--s-failed);--cb:var(--s-failed-bg)}.s-merged{--c:var(--s-merged);--cb:var(--s-merged-bg)}
@@ -276,15 +277,20 @@ const lines=m=>m.lines.toLocaleString('en-US')+' lines';
 const sizeSum=m=>m.lines==null?'<span class="muted">size: no data</span> ':'<span class="muted">'+lines(m)+'</span> ';
 const sizeNote=m=>m.lines!=null?' · '+lines(m):'';
 /* Two chip rows: the top-level modules, then (indented) the sub-modules of the selected one. ex = only tasks at the module level itself. */
+/* The Task Queue's chips (act modf) carry the open issues of the module, sub-modules rolled up, with the breakdown by stage as tooltip
+   (PC-128, counted by logic.open_counts on the server); the other views keep the code lines. */
 function modFilter(cur,act,first,allOf,unsorted,extra){
-  const top=cur.split('/')[0];
-  const b=(v,l,on,x)=>'<button class="f" data-act="'+act+'" data-v="'+v+'"'+(x?' data-x="1"':'')+' aria-pressed="'+on+'">'+l+'</button>';
+  const top=cur.split('/')[0],oc=act==='modf'&&D&&D.openCounts;
+  const cnt=id=>{const o=oc[id]||{n:0,tip:'no open issue'};return ' <span class="oc'+(o.n?'':' muted')+'">'+o.n+' open</span>';};
+  const tip=id=>oc?' title="'+esc((oc[id]||{tip:'no open issue'}).tip)+'"':'';
+  const b=(v,l,on,x)=>'<button class="f" data-act="'+act+'" data-v="'+v+'"'+(x?' data-x="1"':'')+(x?'':tip(v))+' aria-pressed="'+on+'">'+l+'</button>';
+  const size=m=>oc?cnt(m.id):(m.lines!=null?' <span class="muted" style="font-size:11px">'+lines(m)+'</span>':'');
   const tops=MODULES.filter(m=>!m.parent).concat((extra||[]).filter(e=>!MODULES.some(m=>m.id===e.id)));
-  let h='<div class="filters" role="group" aria-label="Module filter">'+(first?b('all',first,cur==='all'):'')+tops.map(m=>b(m.id,esc(m.short)+(m.lines!=null?' <span class="muted" style="font-size:11px">'+lines(m)+'</span>':''),cur!=='all'&&top===m.id)).join('')+'</div>';
+  let h='<div class="filters" role="group" aria-label="Module filter">'+(first?b('all',first+(oc?cnt('all'):''),cur==='all'):'')+tops.map(m=>b(m.id,esc(m.short)+size(m),cur!=='all'&&top===m.id)).join('')+'</div>';
   const tm=MODULES.find(m=>m.id===top);
   if(cur!=='all'&&tm&&tm.children.length){const ex=UI.ex&&act==='modf';
-    h+='<div class="filters sub" role="group" aria-label="Sub-module filter">'+b(top,allOf.replace('{}',esc(tm.short)),cur===top&&!ex)
-     +tm.children.map(c=>MODULES.find(m=>m.id===c)).map(c=>b(c.id,esc(c.short),inMod(cur,c.id))).join('')
+    h+='<div class="filters sub" role="group" aria-label="Sub-module filter">'+b(top,allOf.replace('{}',esc(tm.short))+(oc?cnt(top):''),cur===top&&!ex)
+     +tm.children.map(c=>MODULES.find(m=>m.id===c)).map(c=>b(c.id,esc(c.short)+(oc?cnt(c.id):''),inMod(cur,c.id))).join('')
      +(unsorted&&STAGES.some(s=>tm.counts[s])?b(top,'(unsorted)',ex,true):'')+'</div>';}
   return h;}
 const pq=p=>PROJ?p+(p.includes('?')?'&':'?')+'project='+encodeURIComponent(PROJ):p;
