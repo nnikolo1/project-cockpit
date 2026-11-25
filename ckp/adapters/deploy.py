@@ -41,7 +41,7 @@ class GitDeployAdapter:
 
     def facts(self, project, tag, env):
         try:
-            dirty = bool(self.run(["git", "-C", str(self.repo_dir), "status", "--porcelain"]).strip())
+            dirty = bool(self.run(["git", "-C", str(self.repo_dir), "status", "--porcelain", "--untracked-files=no"]).strip())
             pushed = self._sha("HEAD") == self._sha("origin/main")
         except Exception as e:  # noqa: BLE001
             log.warning("git facts unavailable: %s", e)

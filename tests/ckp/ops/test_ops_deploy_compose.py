@@ -128,3 +128,11 @@ def test_cli_refuses_an_unknown_environment(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("CP_HOME", str(tmp_path / "cphome"))
     assert cli.main(["deploy", "--project", "p", "--repo", "o/p", "--repo-dir", str(tmp_path), "--tag", "v2026.11.25-1"]) == 1
     assert "no environment" in json.loads(capsys.readouterr().out)["error"]
+
+
+def test_untracked_files_do_not_make_the_clone_dirty_but_changed_tracked_files_do(repo, tmp_path):
+    ad = adapter(repo, tmp_path, FakeProcess(), FakeGithub())
+    (repo / ".DS_Store").write_text("x")
+    assert ad.facts("p", "v2026.11.25-2", ENV)["clean"] is True
+    (repo / "web.txt").write_text("changed")
+    assert ad.facts("p", "v2026.11.25-2", ENV)["clean"] is False
