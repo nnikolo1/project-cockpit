@@ -22,3 +22,8 @@ def no_stagger(monkeypatch):
 def _private_data_dir(tmp_path, monkeypatch):
     if "cockpit" in sys.modules:
         monkeypatch.setattr(sys.modules["cockpit"], "DATA_DIR", tmp_path / "cockpit-data")
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "ui_action(*ids): the UI actions a test exercises (server:x, page:x, form:x; /refused: its refusal); "
+                                       "tools/ui_actions.py reads them, tests/test_ui_actions.py fails for an action no test names")

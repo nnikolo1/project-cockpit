@@ -31,21 +31,23 @@ def test_validate_missing_key_is_refused():
         L.validate_settings(form, DEFAULTS, 6)
 
 
+@pytest.mark.ui_action("server:settings")
 def test_missing_file_shows_defaults_and_save_creates_it_private(tmp_path, monkeypatch):
     monkeypatch.setattr(C, "DATA_DIR", tmp_path)
     monkeypatch.setitem(C.CFG, "steer", True)
     assert C.get_settings(P)["values"] == DEFAULTS
     code, body = C.do_act(dict(action="settings", **{**OK, "workers": 2, "runaway_minutes": 50}), p=P)
     f = C.settings_path(P)
-    assert code == 200 and f == tmp_path / "proj" / "dispatcher-settings.json"
+    assert code == 200 and body["msg"] == "settings saved" and f == tmp_path / "proj" / "dispatcher-settings.json"
     assert stat.S_IMODE(f.stat().st_mode) == 0o600 and not list(f.parent.glob("*.tmp"))
     assert load_settings(f)["workers"] == 2 and C.get_settings(P)["values"]["runaway_minutes"] == 50
 
 
+@pytest.mark.ui_action("server:settings/refused")
 def test_refused_value_is_400_and_writes_nothing(tmp_path, monkeypatch):
     monkeypatch.setattr(C, "DATA_DIR", tmp_path)
     monkeypatch.setitem(C.CFG, "steer", True)
-    assert C.do_act(dict(action="settings", **{**OK, "idle_minutes": 5}), p=P)[0] == 400
+    assert C.do_act(dict(action="settings", **{**OK, "idle_minutes": 5}), p=P) == (400, dict(error="no-activity limit must be at least 10 minutes"))
     assert not C.settings_path(P).exists()
 
 
@@ -64,16 +66,17 @@ def test_card_settings_validation():
             L.validate_card_settings(bad)
 
 
+@pytest.mark.ui_action("server:cardsettings", "server:cardsettings/refused")
 def test_card_settings_default_save_and_read_only(tmp_path, monkeypatch):
     monkeypatch.setattr(C, "DATA_DIR", tmp_path)
     monkeypatch.setitem(C.CFG, "steer", True)
     assert C.get_card_settings(P)["values"] == L.CARD_SETTING_DEFAULTS
-    code, _ = C.do_act(dict(action="cardsettings", churn_colour="absolute"), p=P)
+    code, body = C.do_act(dict(action="cardsettings", churn_colour="absolute"), p=P)
     f = C.card_settings_path(P)
-    assert code == 200 and f == tmp_path / "proj" / "cockpit-settings.json"
+    assert code == 200 and body["msg"] == "card settings saved" and f == tmp_path / "proj" / "cockpit-settings.json"
     assert stat.S_IMODE(f.stat().st_mode) == 0o600 and not list(f.parent.glob("*.tmp"))
     assert C.get_card_settings(P)["values"] == dict(L.CARD_SETTING_DEFAULTS, churn_colour="absolute")
-    assert C.do_act(dict(action="cardsettings", churn_colour="x"), p=P)[0] == 400
+    assert C.do_act(dict(action="cardsettings", churn_colour="x"), p=P) == (400, dict(error="churn colour must be one of: size, absolute"))
     assert C.get_card_settings(P)["values"] == dict(L.CARD_SETTING_DEFAULTS, churn_colour="absolute")
     f.write_text("not json")
     assert C.get_card_settings(P)["values"] == L.CARD_SETTING_DEFAULTS
