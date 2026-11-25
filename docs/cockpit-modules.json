@@ -102,6 +102,7 @@
   {"path": "tests/test_queue_local_times.py", "module": "githubclient", "basis": "tests the launch time shown for running Workers in the Task Queue view"},
   {"path": "tests/test_safe_render.py", "module": "cockpitwebpage", "basis": "tests the page's time helper and the per-block error guard in web/index.html (PC-114)"},
   {"path": "tests/test_projects.py", "module": "githubclient", "basis": "tests the --projects handling in cockpit.py"},
+  {"path": "tests/test_stage_pills.py", "module": "cockpitwebpage", "basis": "tests the colour-coded stage pills, filter chips, tokens and tooltips in web/index.html (PC-127)"},
   {"path": "tests/test_workflow.py", "module": "cockpitwebpage", "basis": "guards the Workflow page (web/index.html) against going stale; tests follow the code"},
   {"path": "tests/test_usage.py", "module": "githubclient", "basis": "tests usage_report in logic.py and the usage endpoint in cockpit.py; tests follow the code"},
   {"path": "tests/test_settings.py", "module": "githubclient", "basis": "tests the settings validation in logic.py and the settings action in cockpit.py; tests follow the code"},
