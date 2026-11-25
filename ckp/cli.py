@@ -41,6 +41,9 @@ def cmd_deploy(a, adapter=None, today=None):
     ad = adapter or GitDeployAdapter(a.project, a.repo, a.repo_dir, a.env)
     tag = a.tag or git_adapter.next_tag(a.repo_dir, today or dt.date.today())
     if a.apply and not a.tag:
+        pre = core_deploy.deploy(a.project, tag, envs[a.env], ad, dry_run=True)   # readiness first: a refused deploy leaves no tag behind
+        if not pre["ok"]:
+            return _out(pre)
         git_adapter.tag(a.repo_dir, tag, "HEAD")
         try:
             git_adapter.push_tag(a.repo_dir, tag)

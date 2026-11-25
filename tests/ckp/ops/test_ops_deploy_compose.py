@@ -156,3 +156,13 @@ def test_cli_prints_a_failure_as_a_result(tmp_path, monkeypatch, capsys, repo):
     args = cli.build_parser().parse_args(["deploy", "--project", "p", "--repo", "o/p", "--repo-dir", str(repo), "--tag", "v2026.11.25-2"])
     assert cli.cmd_deploy(args, adapter=Boom()) == 1
     assert "RuntimeError: boom" in json.loads(capsys.readouterr().out)["error"]
+
+
+def test_a_refused_apply_leaves_no_tag_behind(tmp_path, monkeypatch, capsys, repo):
+    monkeypatch.setenv("CP_HOME", str(tmp_path / "cphome"))
+    store_env.save("p", {"production": ENV})
+    (repo / "web.txt").write_text("changed but not committed")   # a dirty clone is refused by the readiness check
+    tags_before = subprocess.run(["git", "-C", str(repo), "tag"], capture_output=True, text=True).stdout
+    args = cli.build_parser().parse_args(["deploy", "--project", "p", "--repo", "o/p", "--repo-dir", str(repo), "--apply"])
+    assert cli.cmd_deploy(args, adapter=adapter(repo, tmp_path, FakeProcess(), FakeGithub())) == 1
+    assert subprocess.run(["git", "-C", str(repo), "tag"], capture_output=True, text=True).stdout == tags_before
