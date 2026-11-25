@@ -305,20 +305,68 @@
     "retention": "kept until the owner deletes them (git history)"
    }
   },
-  "internal/devops": {
+  "devops": {
+   "files": [],
+   "logging": [],
+   "policy": {
+    "backup": "the git repository and its remote; nothing else to back up",
+    "retention": "kept until the owner deletes them (git history)"
+   }
+  },
+  "devops/installation": {
+   "files": [],
+   "logging": [],
+   "policy": {
+    "backup": "the git repository and its remote; nothing else to back up",
+    "retention": "kept until the owner deletes them (git history)"
+   }
+  },
+  "devops/ci": {
+   "files": [],
+   "logging": [],
+   "policy": {
+    "backup": "the git repository and its remote; nothing else to back up",
+    "retention": "kept until the owner deletes them (git history)"
+   }
+  },
+  "devops/monitoring": {
+   "files": [],
+   "logging": [],
+   "policy": {
+    "backup": "nothing persisted yet (no file is wired); the declaration follows when PC-84 builds it",
+    "retention": "nothing persisted yet (no file is wired)"
+   }
+  },
+  "devops/policy": {
+   "files": [],
+   "logging": [],
+   "policy": {
+    "backup": "the git repository and its remote; nothing else to back up",
+    "retention": "kept until the owner deletes them (git history)"
+   }
+  },
+  "devops/deployment": {
+   "files": [],
+   "logging": [],
+   "policy": {
+    "backup": "the git repository and its remote; nothing else to back up",
+    "retention": "kept until the owner deletes them (git history)"
+   }
+  },
+  "devops/backup": {
    "files": [
     {
      "path": "~/.local/share/project-cockpit/<project>/backup-status.json",
      "kind": "file",
      "personal_data": false,
-     "written_by": "internal/devops (tools/project_backup.py)",
+     "written_by": "devops/backup (tools/project_backup.py)",
      "note": "the status record of the last daily backup (time, ok, archive path, size, number of files, reason, last good time); replaced atomically after every run; read by the gap checker (kind backup) and the Task Queue tab"
     },
     {
      "path": "~/.local/share/project-cockpit/<project>/transcripts",
      "kind": "dir",
      "personal_data": true,
-     "written_by": "internal/devops (tools/project_backup.py)",
+     "written_by": "devops/backup (tools/project_backup.py)",
      "volume": true,
      "note": "SENSITIVE: the mirror of the coding tool's raw session transcripts of the project (owner, 2026-11-24): conversation text, may hold secrets or personal data; new and grown files are copied, nothing is ever deleted (the tool deletes old ones); goes only into the owner's own Drive"
     },
@@ -326,7 +374,7 @@
      "path": "<the --drive folder>/project_cockpits/<project>/",
      "kind": "dir",
      "personal_data": true,
-     "written_by": "internal/devops (tools/project_backup.py)",
+     "written_by": "devops/backup (tools/project_backup.py)",
      "note": "one dated archive a day (<project>-YYYY-MM-DD.tar.gz, a taken name gets -2, -3, ...), written create-only into the folder the Drive desktop app syncs; holds the transcripts, so personal data; never edited or deleted by the job"
     }
    ],
