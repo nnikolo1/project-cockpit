@@ -13,7 +13,7 @@ node = pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
 
 ORDER = ["windows", "heatmap", "readings", "estimates", "sessions", "days", "quota", "projects", "fit", "tasks"]
 TITLE = {"windows": "Usage per 5-hour window", "heatmap": "Tokens per day", "readings": "Today’s readings", "estimates": "Quota per vendor window", "sessions": "Interactive sessions",
-         "days": "Usage per day", "quota": "Vendor quota used", "projects": "All projects (last 90 days)", "fit": "How these numbers fit", "tasks": "Per task"}
+         "days": "Usage per day", "quota": "Vendor quota used", "projects": "Per project, by month", "fit": "How these numbers fit", "tasks": "Per task"}
 
 
 def usage_order():
@@ -48,4 +48,4 @@ def test_cards_render_in_the_list_order():
 @node
 def test_an_absent_card_leaves_no_gap():
     t = titles({}, blank=("usageTable", "projectsCard"))
-    assert t[0] == TITLE["heatmap"] and not any(x.startswith(("Usage per", "All projects")) for x in t) and t[-1] == TITLE["tasks"]
+    assert t[0] == TITLE["heatmap"] and not any(x.startswith(("Usage per", "Per project")) for x in t) and t[-1] == TITLE["tasks"]

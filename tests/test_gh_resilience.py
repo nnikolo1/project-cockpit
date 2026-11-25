@@ -290,7 +290,7 @@ def test_local_tabs_are_served_without_github(no_github):
     (d / "proxy-usage.jsonl").write_text(json.dumps(dict(ts="2026-01-01T10:00:00+00:00", worker="w1", input_tokens=5, output_tokens=1)) + "\n")
     C._cache.clear()
     u = C.usage_served(P)
-    assert u["days"] and u["projects"][0]["name"] == "proj"
+    assert u["days"] and u["monthly"]["projects"][0]["name"] == "proj"
     assert C.get_settings(P)["values"] and C.get_card_settings(P)["values"]
     assert C.get_queue(P)["workers"] == []
     assert C.get_rules(P) == dict(configured=False)

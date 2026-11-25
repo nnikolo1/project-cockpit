@@ -79,6 +79,14 @@ def projects_from_file(data):
             p["meta"] = os.path.expanduser(e["meta"])  # optional: absent means the default folder, see meta_dir()
         if e.get("stats_cache"):
             p["stats_cache"] = os.path.expanduser(e["stats_cache"])  # optional: the tool's statistics cache, for "How these numbers fit"
+        if e.get("start_month") is not None:  # optional: the month the project started; Token Usage shows nothing of it before (PC-113)
+            if not (isinstance(e["start_month"], str) and re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", e["start_month"])):
+                raise ValueError(f"--projects: project {name!r}: start_month must be YYYY-MM (got {e['start_month']!r})")
+            p["start_month"] = e["start_month"]
+        if e.get("transcript_sources") is not None:  # optional: the project's transcript folders (source labels); default: the folder rule
+            if not (isinstance(e["transcript_sources"], list) and all(isinstance(x, str) and x for x in e["transcript_sources"])):
+                raise ValueError(f"--projects: project {name!r}: transcript_sources must be a list of folder names")
+            p["transcript_sources"] = list(e["transcript_sources"])
         try:
             p["code_collect"] = L.collect_command(e.get("code_collect"))  # the snapshot's collector command, run by the daily refresh
         except ValueError as ex:
@@ -688,8 +696,9 @@ def usage_served(p):
     return cached(pk(p, "usage"), lambda: get_usage(p), 15, swr=True)
 
 
-def get_usage(p, data_dir=None, projects=None):
-    """The selected project's report plus `estimates` (the quota per vendor window, measured or estimated), `summary` (its 90-day row) and `projects` (one row per project the Cockpit serves; no counts = no data)."""
+def get_usage(p, data_dir=None, projects=None, today=None):
+    """The selected project's report plus `estimates` (the quota per vendor window, measured or estimated) and `monthly`: every project the Cockpit serves per month (L.monthly_by_project), from each one's
+    proxy file and processing log and from the transcript and statistics-cache files of all their data folders."""
     rep = _usage_one(p, data_dir)
     d = (data_dir or DATA_DIR) / (p.get("name") or p["repo"].split("/")[-1])
     rep["sessions"] = L.transcript_report(_read_text(d / TRANSCRIPT_FILE), rep["quota"], _read_text(d / AGGREGATE_FILE))
@@ -699,8 +708,14 @@ def get_usage(p, data_dir=None, projects=None):
         qs = {}
     rep["estimates"] = L.quota_estimates(_read_text(d / QUOTA_FILE), _read_text(d / USAGE_FILE), _read_text(d / TRANSCRIPT_FILE),
                                          qs if isinstance(qs, dict) else {})
-    rep["summary"] = L.usage_summary(rep)
-    rep["projects"] = [dict(name=n, **(L.usage_summary(_usage_one(q, data_dir)) or {})) for n, q in (projects or PROJECTS or {p.get("name", ""): p}).items()]
+    ps = list((projects or PROJECTS or {p.get("name", ""): p}).values())
+    folders = [(data_dir or DATA_DIR) / (q.get("name") or q["repo"].split("/")[-1]) for q in ps]
+    rep["monthly"] = L.monthly_by_project(
+        [dict(name=q.get("name") or q["repo"].split("/")[-1], dir=pathlib.Path(q["git"]).name if q.get("git") else q.get("name") or q["repo"].split("/")[-1],
+              sources=q.get("transcript_sources"), start=q.get("start_month"), usage=_read_text(f / USAGE_FILE), plog=_read_text(f / PLOG_FILE))
+         for q, f in zip(ps, folders)],
+        [_read_text(f / TRANSCRIPT_FILE) for f in folders], [_read_text(f / AGGREGATE_FILE) for f in folders],
+        today or dt.datetime.now(dt.timezone.utc).date())
     rep["reconcile"] = _reconcile_card(d, p.get("stats_cache"))
     return rep
 
