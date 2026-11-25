@@ -94,3 +94,34 @@ def test_planned_steps_name_a_task_or_say_none():
         for line in section((ROOT / f).read_text(), head).splitlines():
             for m in re.finditer(r"planned[^.;)]*", line, re.I):
                 assert re.search(r"PC-(\d+|nn)|no task yet", m.group(0)), f"{f}: planned step without a task: {line.strip()[:120]}"
+
+
+def installer():
+    sys.path.insert(0, str(ROOT / "tools"))
+    import install
+    return install
+
+
+def test_readme_shows_the_one_command_first():
+    """PC-100: the first command of the README's Install section after the clone is the installer."""
+    cmds = [c for _, c, _ in commands(section((ROOT / "README.md").read_text(), "## Install\n")) if not c.startswith(("git ", "cd "))]
+    assert cmds[0].startswith("python3 tools/install.py")
+
+
+def test_installer_options_match_the_readme():
+    """Every option of the one command is shown in the README's command line, and nothing else is."""
+    line = next(c for _, c, _ in commands(section((ROOT / "README.md").read_text(), "## Install\n")) if c.startswith("python3 tools/install.py"))
+    shown = set(re.findall(r"--[a-z][\w-]*", line))
+    actual = {o for a in installer().parser()._actions for o in a.option_strings if o.startswith("--") and o != "--help"}
+    assert shown == actual
+
+
+def test_planned_steps_are_the_installers():
+    """Each "planned: PC-nn" of the install sections is a step the installer skips with that line, and its tool is still missing."""
+    tasks = dict(installer().PLANNED.values())
+    for f, head in SECTIONS:
+        text = section((ROOT / f).read_text(), head)
+        assert "no task yet" not in text, f"{f}: a step without a task"
+        for n in re.findall(r"planned: (PC-\d+)", text, re.I):
+            assert n in tasks, f"{f}: planned {n} is not a step the installer skips"
+            assert tasks[n] is None or not (ROOT / tasks[n]).exists(), f"{f}: {n} has landed ({tasks[n]}): wire it into tools/install.py"

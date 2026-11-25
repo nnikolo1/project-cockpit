@@ -10,6 +10,25 @@ How to run the cockpit, and how far the Manager / Orchestrator / Worker separati
 
 One ordered path from "I have a project" to "the Cockpit shows it, the daily job and the Task Queue run for it". The README has the same steps in a nutshell; this is the detail. Markers: **by hand** (a person does it; the wrinkle rule of the constitution wants it automated or covered by an open task), **planned: PC-nn** (the command does not exist yet; do not expect it to work). Examples use the project `widgets`, the repo `acme/widgets` cloned at `~/src/widgets`, the Cockpit at `~/src/project-cockpit`.
 
+### 0. The one command
+
+    python3 tools/install.py [--dry-run] [--self-test]
+
+Run from the clone (step 2). It does steps 1 and 3 to 7 below in order, interactively, and is idempotent. Each question has a default; a yes/no question shows its default in capitals (`[y/N]`, `[Y/n]`).
+
+| Order | What it does | Writes or runs (after the plan is confirmed) | Expected output |
+|---|---|---|---|
+| 1 | The latest `python3.N` on PATH, else the running one | nothing | `python: PATH`; a `warning: Python 3.N ... is not the tested version 3.14` line when it is not 3.14; below 3.10 it stops with what to install (exit 2) |
+| 2 | git, `gh`, `gh auth status`, the model credential (default `~/.config/project-cockpit/model-token` or `~/.local/share/project-cockpit/model-token`, or the typed path) | `~/.config/project-cockpit/install.json` (0600): the credential's path and the project folders, never a secret | `git: found`, `gh: found`, `gh login: found`, `model credential: found (PATH)`; anything else stops the run with `stopped, fix these first:` and one fix per line (exit 2) |
+| 3 | Asks for the parent folders (default: those of `~/src`, `~/code`, `~/projects`, `~/dev`, ... that exist) and reads each sub-folder's `.git/config` | nothing | `Projects found:` and one line per clone: its GitHub `OWNER/NAME`, `no GitHub remote, skipped` or `(already installed)` |
+| 4 | Per new project: `install the Cockpit in OWNER/NAME?` (default no) | `kit/setup.sh OWNER/NAME`; the entry in `~/.config/project-cockpit/projects.json`; the first collectors (step 6); `project_sync init` is skipped (planned: PC-92) | a declined project is not touched |
+| 5 | The viewer service (default yes) | the LaunchAgent `~/Library/LaunchAgents/com.project-cockpit.viewer.plist` (macOS) or the unit `~/.config/systemd/user/project-cockpit.service` (Linux), then `launchctl bootstrap` or `systemctl --user enable --now` | `viewer service: already installed` on a second run |
+| 5 | The daily upkeep job | nothing (planned: PC-91) | `daily upkeep job: planned: PC-91: skipped` |
+| 5 | The Dispatcher and the quota collector, macOS with the `container` tool only (default yes) | the two launchd jobs of the one queue under `~/.local/share/project-cockpit/task-queue/launchd/`, loaded quota collector first | `Dispatcher: already installed` on a second run; the image build stays by hand (5) |
+| 7 | The self-test | runs the gap check per project | `ready`, or `missing:` and one `- WHAT: FIX` line each (exit 1) |
+
+Before doing anything it prints `Plan:` with every file it writes and every command it runs, and asks `Carry out these N steps?`; `--dry-run` stops after the plan (`dry run: nothing was written or run`). A command that fails prints the exact lines to run by hand. `--self-test` runs step 7 alone. Tests: `tests/tools/test_install.py` (steps, whole-run scenarios in a sandbox, no-leak) and `tests/test_install_commands.py` (drift).
+
 ### 1. Prerequisites (by hand)
 
 | What | Why | Check (expected output) |
@@ -23,7 +42,7 @@ One ordered path from "I have a project" to "the Cockpit shows it, the daily job
 | The owner's status-line script writing `~/.local/share/pmpoc/quota.json` | the quota collector reads it; without it the Budget and Token Usage pages show no quota | the file exists and changes while a session runs |
 | `"cleanupPeriodDays": 3650` in `~/.claude/settings.json` | transcripts feed the token statistics and the backups | `metadata_gaps.py` stops reporting `transcript_retention` |
 
-Created by hand and why: the `gh` login and the model credential are the owner's secrets (no tool may create them for the owner); the `claude` binary is not committed (licence and size); the status-line script lives in the owner's tool settings.
+Created by hand and why: the `gh` login and the model credential are the owner's secrets (no tool may create them for the owner); the `claude` binary is not committed (licence and size); the status-line script lives in the owner's tool settings. The one command checks every row it can and names the fix; installing software (Python, git, `gh`, the `container` tool) is outside what it may do. Only the `gh` login and the model credential are by hand by nature; the other by-hand rows (software, the `claude` binary and image, the status-line script, the retention setting, the queue's `projects` setting) need an open task each (wrinkle rule): to be filed (PC-100 note).
 
 ### 2. Get the Cockpit
 
@@ -33,16 +52,16 @@ Expected: a clone with `cockpit.py` at its root. Nothing is installed elsewhere.
 
 ### 3. Add a project
 
-**Planned: PC-92.** `python3 tools/project_sync.py init` will create the project's `.cockpit/` folder with the templates of the manifest, the module map and the footprint declaration. Until then, by hand:
+Done by the one command (0, order 4), which runs these by-hand steps 1 and 2 for each project you confirm. **Planned: PC-92.** `python3 tools/project_sync.py init` will create the project's `.cockpit/` folder with the templates of the manifest, the module map and the footprint declaration. Until then, by hand:
 
 1. Labels in the project's repo: `kit/setup.sh acme/widgets` (idempotent; prints one line per label created or updated).
 2. The project's entry in `~/.config/project-cockpit/projects.json` (format: README, "Several projects"), for example `{"default": "widgets", "projects": [{"name": "widgets", "repo": "acme/widgets", "git": "~/src/widgets", "modules": "~/src/widgets/docs/cockpit-modules.json"}]}`.
 3. A module map (`{modules:[{id,name}], assign:[{path,module}]}`, the Cockpit's own is `docs/cockpit-modules.json`) and a footprint declaration (the Cockpit's own is `docs/footprint-declared.json`) committed in the project.
 4. Optional: `kit/.github` to `.github` in the project (issue forms, policy Action), see 4, phase 1.
 
-### 4. Start the Cockpit viewer as a service (by hand)
+### 4. Start the Cockpit viewer as a service
 
-Write the LaunchAgent (macOS) or the systemd user unit (Linux) of section 5 with `--projects ~/.config/project-cockpit/projects.json --token-file ~/.local/share/project-cockpit/token`, then load it (table in 5). Expected: `launchctl print gui/$(id -u)/org.example.project-cockpit | grep state` shows `state = running`; the check of "Token, upgrade, check" answers `303`, then JSON. A trial without a service: `python3 cockpit.py --projects ~/.config/project-cockpit/projects.json` prints the `http://127.0.0.1:8795/?t=TOKEN` URL.
+Done by the one command (0, order 5). By hand: write the LaunchAgent (macOS) or the systemd user unit (Linux) of section 5 with `--projects ~/.config/project-cockpit/projects.json --token-file ~/.local/share/project-cockpit/token`, then load it (table in 5). Expected: `launchctl print gui/$(id -u)/org.example.project-cockpit | grep state` shows `state = running`; the check of "Token, upgrade, check" answers `303`, then JSON. A trial without a service: `python3 cockpit.py --projects ~/.config/project-cockpit/projects.json` prints the `http://127.0.0.1:8795/?t=TOKEN` URL.
 
 ### 5. Install the daily upkeep job and the Dispatcher
 
@@ -88,7 +107,9 @@ Expected: `code_snapshot_refresh.py` exits 0 (`fresh` or `refreshed`), or 2 with
 
 ### 7. Verify with one command
 
-**Planned (no task yet).** A self-test that reports "ready" or lists what is missing (the prerequisites of step 1, the project entry, the service answering, the jobs loaded, the gap check) does not exist. Until then: the checks of steps 1, 4, 5 and 6 one by one.
+    python3 tools/install.py --self-test
+
+Checks the prerequisites of step 1 (Python, git, `gh` and its login, the model credential's path and mode 0600, on macOS the `container` tool), the projects file and each project's clone, the viewer service loaded and answering on port 8795, the Dispatcher's two jobs loaded (macOS), the transcript retention, and runs `tools/metadata_gaps.py` per project (gaps are reported, they do not make the result "missing": a new project always has some, step 6). Prints `ready` (exit 0) or `missing:` with one fix per line (exit 1). The one command ends with it.
 
 ### 8. Upgrade and uninstall
 
