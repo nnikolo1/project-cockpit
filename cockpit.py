@@ -835,6 +835,14 @@ def save_settings(p, form):
     return "settings saved"
 
 
+def get_task(p, n, run=run_gh):
+    """The current state of one task, read from GitHub now (one call, bypassing the cached state): the page asks for it when an action of
+    its own got no answer, so that it can say what happened (PC-136)."""
+    if not str(n).isdigit():
+        raise ValueError(f"bad task number: {n!r}")
+    return L.task_lookup(json.loads(run(["api", f"repos/{p['repo']}/issues/{n}"])))
+
+
 # ---------- after an action (PC-135): the known effect at once, then a re-read of only the touched issues ----------
 REREAD_DELAY_S = 3   # the actions of a burst within this many seconds are re-read together: one call per TL_BATCH issues, not one per action
 _reread, _reread_lock = {}, threading.Lock()   # state key -> issue numbers waiting for their re-read
@@ -1789,6 +1797,11 @@ class H(BaseHTTPRequestHandler):
             p = proj(name_q or None)
             if u.path == "/api/state":
                 return self.send(200, get_state_served(p, fresh=bool(q.get("fresh"))))
+            if u.path == "/api/task":
+                try:
+                    return self.send(200, get_task(p, q.get("n", [""])[0]))
+                except ValueError as ex:
+                    return self.send(400, dict(error=str(ex)))
             if u.path == "/api/questions":
                 return self.send(200, build_questions(fresh=bool(q.get("fresh"))))
             if u.path == "/api/timeline":

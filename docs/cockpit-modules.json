@@ -76,6 +76,7 @@
   {"path": "tests/test_action_log.py", "module": "githubclient", "basis": "tests the action log in cockpit.py and logic.py and its endpoints (PC-132); tests follow the code"},
   {"path": "tests/test_queue_refresh.py", "module": "githubclient", "basis": "tests the Task Queue pane's two-minute poll, its budget guard and the page's polling (cockpit.py, logic.py, page)"},
   {"path": "tests/test_refresh_after_action.py", "module": "githubclient", "basis": "tests the known effect of an action on the cached state and the re-read of the touched issues (cockpit.py, logic.py, page)"},
+  {"path": "tests/test_action_feedback.py", "module": "githubclient", "basis": "tests the visible outcome, busy state and no-answer lookup of actions (cockpit.py, logic.py, page)"},
   {"path": "tests/conftest.py", "module": "githubclient", "basis": "the shared test guard that keeps cockpit.py's data folder (the action log) in a temporary folder"},
   {"path": "tests/test_edit_text.py", "module": "githubclient", "basis": "tests the edit-text action planning in cockpit.py and logic.py; tests follow the code"},
   {"path": "tests/test_cache.py", "module": "githubclient", "basis": "tests the cache in cockpit.py"},

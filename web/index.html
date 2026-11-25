@@ -82,6 +82,10 @@ table{border-collapse:collapse;width:100%;min-width:860px}
 th{text-align:left;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;padding:10px 12px;border-bottom:1px solid var(--line)}
 td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
 tr:last-child td{border-bottom:0}
+tr.gone td:nth-child(3) .linkbtn{text-decoration:line-through}
+.note{display:flex;align-items:center;justify-content:space-between;gap:10px;border-left:4px solid var(--accent)}.note.bad{border-left-color:var(--danger)}.note.unknown{border-left-color:var(--warn,var(--danger))}
+.spin{display:inline-block;width:10px;height:10px;margin-right:6px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;vertical-align:-1px;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.spin{animation:none;border-right-color:currentColor;opacity:.5}}
+.btn[disabled]{opacity:.7;cursor:progress}
 tr.blocked{background:var(--danger-tint)}tr.blocked td:first-child{box-shadow:inset 3px 0 0 var(--danger)}
 .linkbtn{background:none;border:0;padding:0;text-align:left;cursor:pointer;color:var(--ink)}
 .linkbtn:hover{text-decoration:underline}
@@ -257,7 +261,7 @@ let COMP={steering:false,projects:[]},compTimer=0;  /* /api/compliance: every pr
 let USE=null,SET=null,CSET=null,ALOG=null,D=null,CODE={wired:false,modules:{}},FEED=[],ACT=[],MODULES=[],RULES={configured:false},META=NOMETA();
 const SVGC={};
 const MODDOC={};  /* module page content (/api/moduledoc) by project:id */
-const UI={route:'cockpit',filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',tlType:'all',setSec:'dispatcher',alog:{action:'',outcome:'',task:''},rulesGroup:'all',qProj:'all',codeMod:'unassigned',codeTab:'quality',fit:{deps:true,erd:true,js:true,flow:false},toast:'',err:'',armed:null};
+const UI={route:'cockpit',filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',tlType:'all',setSec:'dispatcher',alog:{action:'',outcome:'',task:''},rulesGroup:'all',qProj:'all',codeMod:'unassigned',codeTab:'quality',fit:{deps:true,erd:true,js:true,flow:false},toast:'',err:'',armed:null,busy:null,note:null};
 const ST=()=>!!(D?D.source.steering:(SET&&SET.steering));
 const SIM=()=>!!(D&&D.source.simulate);
 const nd=(v,f)=>v==null?'<span class="muted">no data</span>':(f?f(v):v);
@@ -380,7 +384,7 @@ function queuePoller(o){
 let QP=null,QPEND=null;  /* the last poll's meta (every, interval, slowed, nextAt, error) and a newer task state held back while a drawer or form is open */
 const editing=()=>!!(UI.drawer||UI.armed||(document.activeElement&&document.activeElement.closest&&document.activeElement.closest('#app form,#app input,#app textarea,#app select')));
 function patch(id,html){const el=document.getElementById(id);if(el)el.outerHTML=html;}
-function takeState(s){QPEND=null;if(D&&D.source.fetchedAt>s.source.fetchedAt)return;D=s;TODAY=D.today;MODULES=D.modules;}  /* never over a newer copy (a Refresh click) */
+function takeState(s){QPEND=null;if(D&&D.source.fetchedAt>s.source.fetchedAt)return;setState(s);}  /* never over a newer copy (a Refresh click) */
 function qApply(r){
   if(r._proj!==PROJ)return;  /* the user switched project meanwhile */
   QP=r;const k=x=>JSON.stringify(Object.assign({},x,{asOf:0}));
@@ -397,7 +401,7 @@ const QPOLL=queuePoller({visible:()=>document.visibilityState==='visible',active
   fetch:async()=>{const mine=PROJ,c=QPEND||D,r=await api('/api/queuepoll?since='+(c?c.source.fetchedAt:0));r._proj=mine;return r;},
   apply:qApply,fail:()=>patch('pbar',paneBar(UI.route))});
 document.addEventListener('visibilitychange',()=>QPOLL.wake());
-function setState(s){D=s;TODAY=D.today;MODULES=D.modules;}
+function setState(s){D=s;applyFx(D);TODAY=D.today;MODULES=D.modules;}
 /* an open form is never redrawn under the owner's hands: a field of a form has the focus, or the task editor is open */
 const busy=()=>{const a=document.activeElement;return !!(UI.drawer&&UI.drawer.edit)||!!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&a.closest('form'));};
 async function poll(){  /* the server is fetching a newer copy (a full load, or the re-read after an action): take it when it is there */
@@ -447,33 +451,81 @@ function problem(action,msg){  /* the recent-problems list (footer): the last PR
   try{localStorage.setItem('cockpit-problems',JSON.stringify(PROBLEMS));}catch(e){}}
 const newAid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,10);
 const sleep=s=>new Promise(r=>setTimeout(r,s*1000));
-async function sendAct(body){  /* one try -> the answer; throws Refusal (an HTTP answer that is not ok) or the fetch's own TypeError (not reached) */
-  const r=await fetch(pq('/api/act'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+async function sendAct(body,signal){  /* one try -> the answer; throws Refusal (an HTTP answer that is not ok) or the fetch's own TypeError (not reached) */
+  const r=await fetch(pq('/api/act'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:signal});
   let j={};try{j=await r.json();}catch(e){}
   if(!r.ok){const x=new Refusal(j.error||('HTTP '+r.status));x.logged=!!j.error;throw x;}  /* an answer with its own reason is logged by the server */
   return j;}
 const NET_MSG=(i)=>'The Cockpit could not be reached (it may be restarting). Nothing was changed. Retrying in '+NET_WAIT_S+' s (try '+(i+1)+' of '+NET_TRIES+').';
 const NET_FINAL='The Cockpit could not be reached after '+NET_TRIES+' tries (it may be restarting or stopped). The action did not reach it, or it was cut off by a restart; Retry sends it again and the Cockpit never applies it twice.';
 const REACHED=' (it had reached the Cockpit before the connection broke and was applied once, not again)';
-async function post(body){  /* body without aid: a new action; with aid (the Retry button): the same action again */
+/* action-feedback:start (PC-136): every action shows its outcome until dismissed or the next action; the row shows the effect at once.
+   UI.busy: the id of the action in flight ('cancel:PC-126'); its button is disabled with a spinner, and no second action starts.
+   FX: the effect of a successful action per task ('<project>|<key>' -> {at, patch}), laid over every copy of the task state until a copy
+   fetched after the action arrives or the copy already shows it (the task list is cached for up to an hour).
+   No answer (network error or ACT_WAIT passed): the page asks the server for the task's state on GitHub and says what it found. */
+const FX={},ACT_WAIT=180000;
+const fxKey=k=>(PROJ||'')+'|'+k;
+function actionEffect(body,t){
+  const a=body.action;
+  if(a==='cancel')return {stage:'cancelled',closed:true,pick:false};
+  if(a==='release'){const p={stage:'released',prio:+String(body.p).replace(/^P/i,'')};if(body.d)p.deadline=body.d;return p;}
+  if(a==='change'){const p={};if(body.p)p.prio=+String(body.p).replace(/^P/i,'');if('d' in body)p.deadline=body.d||null;return p;}
+  if(a==='edit')return {title:body.title,text:body.body};
+  return null;}
+function applyFx(d){
+  if(!d)return;
+  for(const k in FX){
+    if(!k.startsWith((PROJ||'')+'|'))continue;
+    const f=FX[k],t=byKey(d,k.slice(k.indexOf('|')+1));
+    const src=d.source||{};
+    if(!t||Math.max(src.fetchedAt||0,src.rereadAt||0)>f.at){delete FX[k];continue;}  /* this copy was read from GitHub after the action (a full load or the PC-135 re-read): it wins; a copy that already shows the effect keeps the entry, so that an older copy later cannot undo it */
+    Object.assign(t,f.patch);}}
+const busyA=id=>UI.busy===id?' disabled aria-busy="true"':'';
+const spin=id=>UI.busy===id?'<span class="spin" aria-hidden="true"></span>':'';
+/* Two-click confirmation: the first click on Submit or Cancel arms the button (it asks "Confirm?"), the second click within 6 s does it. */
+function armBtn(kind,t){
+  const on=UI.armed===kind+':'+t.key,label=kind==='submit'?'Submit':'Cancel',id=kind+':'+t.key;
+  return '<button class="btn small '+(kind==='cancel'?'danger ':'')+(on?'armed':'')+'" data-act="arm" data-a="'+kind+'" data-k="'+t.key+'"'+busyA(id)+' aria-label="'+(on?'Confirm: '+label+' '+esc(t.key):label+' '+esc(t.key))+'">'+spin(id)+(on?'Confirm?':label)+'</button>';}
+/* The Submit and Cancel cells of a task row: a button only while the action applies, so a done action's button is gone. */
+const actCells=t=>'<td class="act-col">'+(t.stage==='embryo'?armBtn('submit',t):'<span class="muted">—</span>')+'</td><td class="act-col">'+(isOpen(t)?armBtn('cancel',t):'<span class="muted">—</span>')+'</td>';
+const noteHtml=()=>UI.note?'<div class="page" style="padding-bottom:0"><div class="card note '+UI.note.kind+'" role="status" aria-live="polite"><span>'+esc(UI.note.msg)+'</span> <button class="btn small" data-act="notex" aria-label="Dismiss this message">Dismiss</button></div></div>':'';
+async function lookup(body,t){
+  if(!t){UI.note={kind:'unknown',msg:'No answer from the Cockpit: it is not known whether '+body.action+' was done. Press Refresh on the pane to check.'};return;}
+  try{const s=await api('/api/task?n='+t.number);
+    const want=actionEffect(body,t),miss=want&&want.stage&&s.stage!==want.stage;
+    if(s.stage!==t.stage)FX[fxKey(t.key)]={at:Date.now()/1000,patch:s.stage==='cancelled'?{stage:s.stage,closed:true,pick:false}:{stage:s.stage}};
+    applyFx(D);
+    UI.note={kind:miss?'bad':'ok',msg:'No answer from the Cockpit, so GitHub was asked: '+t.key+' is '+(STAGE_LABEL[s.stage]||s.stage)+(body.action==='edit'?', titled “'+s.title+'”':'')+(miss?'; the '+body.action+' did not take effect.':'.')};}
+  catch(e){UI.note={kind:'unknown',msg:'No answer from the Cockpit, and the state of '+t.key+' could not be read ('+e.message+'). Press Refresh on the pane before trying again.'};}}
+async function post(body,id){  /* body without aid: a new action; with aid (the Retry button): the same action again */
+  if(UI.busy)return false;  /* one action at a time: no repeat by accident (PC-136) */
   body=Object.assign({project:PROJ,aid:newAid(),page:PAGE_ID},body);
-  const R=UI.route,mine=PROJ,t0=performance.now(),tk=body.n&&D&&D.tasks.find(x=>x.number===+body.n);
+  const R=UI.route,mine=PROJ,t0=performance.now(),t=body.n!=null&&D?D.tasks.find(x=>x.number===+body.n):null,tk=t?t.key:body.n;
+  UI.note=null;UI.busy=id||body.action+(t?':'+t.key:'');render();
+  const done=ok=>{UI.busy=null;render();return ok;};
   for(let i=1;;i++){
     let j;
-    try{j=await sendAct(body);}
-    catch(e){  /* the server logs what it answered itself; the page logs what never reached it or came back without the server's own answer (PC-132) */
-      if(e instanceof Refusal){if(!e.logged)note('refused',body.action,tk?tk.key:body.n,e.message,performance.now()-t0);problem(body.action,'Refused: '+e.message);say('Refused: '+e.message,8000,'refused');return false;}
-      note('network',body.action,tk?tk.key:body.n,'try '+i+' of '+NET_TRIES+': '+(e&&e.message||e),performance.now()-t0);
-      if(i>=NET_TRIES){problem(body.action,NET_FINAL);say(NET_FINAL,0,'net',body);return false;}
+    const ac=typeof AbortController==='function'?new AbortController():null,to=setTimeout(()=>ac&&ac.abort(),ACT_WAIT);
+    try{j=await sendAct(body,ac&&ac.signal);clearTimeout(to);}
+    catch(e){clearTimeout(to);  /* the server logs what it answered itself; the page logs what never reached it or came back without the server's own answer (PC-132) */
+      if(e instanceof Refusal){if(!e.logged)note('refused',body.action,tk,e.message,performance.now()-t0);problem(body.action,'Refused: '+e.message);
+        UI.note={kind:'bad',msg:'Refused: '+e.message};say('Refused: '+e.message,8000,'refused');return done(false);}
+      note('network',body.action,tk,'try '+i+' of '+NET_TRIES+': '+(e&&e.message||e),performance.now()-t0);
+      if(i>=NET_TRIES){problem(body.action,NET_FINAL);say(NET_FINAL,0,'net',body);UI.busy=null;await lookup(body,t);render();return false;}  /* no answer: ask what the task looks like now (PC-136) */
       say(NET_MSG(i),(NET_WAIT_S+1)*1000,'net');await sleep(NET_WAIT_S);continue;}
-    if(mine!==PROJ)return true;  /* PC-135: the known effect first, the tab where it happened from the server's current copy, the other tabs marked stale */
-    if(j.state)setState(j.state);
-    FLASH={keys:(j.issues||[]).map(n=>(D&&D.tasks.find(t=>t.number===n)||{}).key).filter(Boolean),until:Date.now()+2500};
+    if(mine!==PROJ)return done(true);  /* PC-135: the known effect first, the tab where it happened from the server's current copy, the other tabs marked stale */
+    const p=t&&actionEffect(body,t);if(p)FX[fxKey(t.key)]={at:Date.now()/1000,patch:p};  /* PC-136: until a copy fetched after the action arrives */
+    if(j.state)setState(j.state);else applyFx(D);
+    FLASH={keys:(j.issues||[]).map(n=>(D&&D.tasks.find(x=>x.number===n)||{}).key).filter(Boolean),until:Date.now()+2500};
     TABS.forEach(r=>{if(r!==R)STALE.add(r);});
+    UI.note={kind:'ok',msg:j.msg+(j.repeat?REACHED:'')+'.'};
     say(j.msg+(j.repeat?REACHED:'')+'.'+((j.issues||[]).length?' Confirming with GitHub…':''),5000);
+    UI.busy=null;
     await refreshTab(R);
     render();return true;}
 }
+/* action-feedback:end */
 function footer(){  /* the recent-problems list, so that a message that has disappeared can be read again */
   let h='<div class="page foot"><button class="btn small" data-act="problems" aria-expanded="'+!!UI.problems+'">Recent problems ('+PROBLEMS.length+')</button>';
   if(UI.problems)h+=PROBLEMS.length?'<ol class="problems">'+PROBLEMS.map(p=>'<li><span class="mono">'+esc(new Date(p.t).toLocaleString())+'</span> <b>'+esc(p.action||'')+'</b>: '+esc(p.msg)+'</li>').join('')+'</ol>'
@@ -496,11 +548,6 @@ const ruleChanges=()=>RULES.configured?RULES.changes:[];
 const unreviewed=()=>ruleChanges().filter(isUn);
 let PRS={configured:false,available:false,pending:[]};  /* /api/rulesprs: the one GitHub-sourced part of Policies, loaded on its own */
 const pendingPrs=()=>PRS.available?PRS.pending:[];
-
-/* Two-click confirmation: the first click on Submit or Cancel arms the button (it asks "Confirm?"), the second click within 6 s does it. */
-function armBtn(kind,t){
-  const on=UI.armed===kind+':'+t.key,label=kind==='submit'?'Submit':'Cancel';
-  return '<button class="btn small '+(kind==='cancel'?'danger ':'')+(on?'armed':'')+'" data-act="arm" data-a="'+kind+'" data-k="'+t.key+'" aria-label="'+(on?'Confirm: '+label+' '+esc(t.key):label+' '+esc(t.key))+'">'+(on?'Confirm?':label)+'</button>';}
 
 /* ---------- card metadata: churn, footprint, ambiguity (files written by the project side, see docs/contracts/card-metadata.md) ---------- */
 const BAND={hot:['▲','hot'],mid:['●','mid'],cold:['▽','cold'],dormant:['–','dormant']};
@@ -785,7 +832,7 @@ function vBacklog(){
   if(!mp)h+=modFilter(UI.mod,'modf','all modules','all of {}',true);
   h+='<div class="row muted" style="font-size:13px;gap:8px">Priority <span class="chip p1">P1</span><span class="chip p2">P2</span><span class="chip p3">P3</span><span class="chip p0">none yet</span> &nbsp; Blockers <span class="chip blk">blocked by</span><span class="chip blocks">blocks n</span> &nbsp; <span class="inh">↳ italic = inherited deadline</span></div>';
   h+='<div class="tblbox"><table><thead><tr><th title="Rank in the Orchestrator queue">#</th><th>ID</th><th>Title</th><th>Module</th><th>Priority</th><th>Class</th><th>Deadline</th><th>Blockers</th><th>Stage</th>'+(ST()?'<th class="act-col">Submit</th><th class="act-col">Cancel</th>':'')+'</tr></thead><tbody>';
-  ts.forEach(t=>{h+='<tr class="'+(isBlocked(D,t)?'blocked':'')+'"><td class="muted">'+(rq.indexOf(t)>=0?rq.indexOf(t)+1:'')+'</td><td class="mono">'+esc(t.key)+'</td><td><button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button> '+findingChip(t)+editedChip(t)+'</td><td>'+modCell(t.module)+'</td><td>'+prioChip(t)+'</td><td class="muted">'+t.cls+'</td><td>'+dlHtml(t)+'</td><td>'+blockHtml(t)+'</td><td>'+stageHtml(t,isBlocked(D,t))+'</td>'+(ST()?'<td class="act-col">'+(t.stage==='embryo'?armBtn('submit',t):'<span class="muted">—</span>')+'</td><td class="act-col">'+(isOpen(t)?armBtn('cancel',t):'<span class="muted">—</span>')+'</td>':'')+'</tr>';});
+  ts.forEach(t=>{h+='<tr class="'+(isBlocked(D,t)?'blocked':'')+(t.stage==='cancelled'?' gone':'')+'"><td class="muted">'+(rq.indexOf(t)>=0?rq.indexOf(t)+1:'')+'</td><td class="mono">'+esc(t.key)+'</td><td><button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button> '+findingChip(t)+editedChip(t)+'</td><td>'+modCell(t.module)+'</td><td>'+prioChip(t)+'</td><td class="muted">'+t.cls+'</td><td>'+dlHtml(t)+'</td><td>'+blockHtml(t)+'</td><td>'+stageHtml(t,isBlocked(D,t))+'</td>'+(ST()?actCells(t):'')+'</tr>';});
   if(!ts.length)h+='<tr><td colspan="'+(ST()?11:9)+'" class="muted">Nothing matches this filter.</td></tr>';
   return h+'</tbody></table></div><p class="muted" style="font-size:13px;margin:0">'+(ST()?'Submit releases an embryo as P2 without a deadline (use the task view for another priority or a deadline). Both buttons ask once more before they act. ':'')+'Only you set or move a deadline. A task without one inherits its parent’s, then its sub-module’s or module’s.</p></div>';
 }
@@ -1215,9 +1262,9 @@ function drawerTask(t){
   if(ST()&&!UI.drawer.edit){
   if(t.stage==='embryo'){
     h+='<form class="card" data-form="release" data-k="'+t.key+'" style="display:flex;flex-direction:column;gap:12px"><h2>Release this task</h2><div class="field"><span>Priority</span>'+seg('rp',2)+'<span class="muted" style="font-size:12px">1 is first. The Orchestrator ranks by priority, then deadline.</span></div>'
-     +'<div class="field"><label for="rd">Deadline (optional)</label><input id="rd" type="date" name="d"><span class="muted" style="font-size:12px">Complete by the end of this day. Leave empty to inherit from the parent or module.</span></div><button class="btn primary">Release</button></form>';
+     +'<div class="field"><label for="rd">Deadline (optional)</label><input id="rd" type="date" name="d"><span class="muted" style="font-size:12px">Complete by the end of this day. Leave empty to inherit from the parent or module.</span></div><button class="btn primary"'+busyA('release:'+t.key)+'>'+spin('release:'+t.key)+'Release</button></form>';
   }else if(t.stage==='released'||t.stage==='wip'){
-    h+='<form class="card" data-form="change" data-k="'+t.key+'" style="display:flex;flex-direction:column;gap:12px"><h2>Change</h2><div class="field"><span>Priority</span>'+seg('cp',t.prio)+'</div><div class="field"><label for="cd">Deadline</label><input id="cd" type="date" name="d" value="'+(t.deadline||'')+'"><span class="muted" style="font-size:12px">Clear it to inherit again.</span></div><div class="row"><button class="btn primary">Save changes</button></div></form>';
+    h+='<form class="card" data-form="change" data-k="'+t.key+'" style="display:flex;flex-direction:column;gap:12px"><h2>Change</h2><div class="field"><span>Priority</span>'+seg('cp',t.prio)+'</div><div class="field"><label for="cd">Deadline</label><input id="cd" type="date" name="d" value="'+(t.deadline||'')+'"><span class="muted" style="font-size:12px">Clear it to inherit again.</span></div><div class="row"><button class="btn primary"'+busyA('change:'+t.key)+'>'+spin('change:'+t.key)+'Save changes</button></div></form>';
   }else h+='<p class="muted">Finished work is not reopened. File a new task instead.</p><button class="btn" data-act="followup" data-k="'+t.key+'">File a follow-up task</button>';
   if(isOpen(t)){
     h+='<div class="card" style="display:flex;flex-direction:column;gap:10px"><h2>Blockers</h2><div class="chips">'+(t.blockedBy.length?t.blockedBy.map(k=>'<button class="chip blk" style="cursor:pointer" data-act="unblock" data-k="'+t.key+'" data-b="'+k+'" aria-label="Remove blocker '+k+'">'+esc(k)+' ×</button>').join(''):'<span class="muted">No blockers.</span>')+'</div>'
@@ -1245,7 +1292,7 @@ function editForm(t){
    +'<div class="field"><label for="eb">Text</label><textarea id="eb" name="body" rows="14">'+esc(d.body)+'</textarea></div>'
    +((t.kept||[]).length?'<div class="field"><span>Kept as it is (re-attached on save)</span><pre class="muted" style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;margin:0">'+esc(t.kept.join('\n\n'))+'</pre></div>':'')
    +'<span class="muted" style="font-size:12px">Labels keep their own controls. A saved edit makes the task’s authority analysis stale; it is analysed again before it can be released. GitHub keeps the edit history.</span>'
-   +'<div class="row"><button class="btn primary '+(on?'armed':'')+'" aria-label="'+(on?'Confirm: save the text':'Save the text')+'">'+(on?'Confirm?':'Save')+'</button><button type="button" class="btn" data-act="noedit" data-k="'+t.key+'">Cancel</button></div></form>';
+   +'<div class="row"><button class="btn primary '+(on?'armed':'')+'"'+busyA('edit:'+t.key)+' aria-label="'+(on?'Confirm: save the text':'Save the text')+'">'+spin('edit:'+t.key)+(on?'Confirm?':'Save')+'</button><button type="button" class="btn" data-act="noedit" data-k="'+t.key+'">Cancel</button></div></form>';
 }
 function drawerNew(p){
   p=p||{};
@@ -1276,7 +1323,7 @@ function render(){
      +'</div>';}
   h+='</div>';
   if(OFF)h+='<div class="page" style="padding-bottom:0"><div class="card" role="status" style="border-color:var(--warn,var(--danger))"><b class="warnline">offline copy, data from '+tm(OFF.created)+'</b> <span class="muted">No GitHub call is made; actions are off.'+(OFF.gaps&&OFF.gaps.length?' Not in the backup: '+esc(OFF.gaps.map(g=>g.pane).join(', '))+'.':'')+'</span></div></div>';
-  h+=paneBar(R);
+  h+=noteHtml()+paneBar(R);
   const LOCAL=R==='settings'||R==='usage'||R==='questions'||R==='backlog'||R==='code';  /* tabs with a local part: shown without the GitHub state */
   const GHR=PANE_STATE.includes(R);  /* only these tabs show GitHub-state banners */
   if(GHR&&D&&(D.staleNote||D.newWork===false))h+=ageBanner(D);
@@ -1308,6 +1355,7 @@ function act(a,ds){
   switch(a){
    case 'qtdefaults':{const d=(CSET.defaults||{}).quality_thresholds||{},f=document.querySelector('[data-form=cardsettings]');
      Object.keys(d).forEach(k=>['ok','warn'].forEach(x=>{const i=f.elements['qt_'+k+'_'+x];if(i)i.value=d[k][x];}));say('Defaults filled in; press Save to keep them.');break;}
+   case 'notex':UI.note=null;render();break;
    case 'setsec':UI.setSec=ds.v;if(ds.v==='actionlog')loadAlog();render();break;
    case 'go':UI.route=ds.r;if(ds.r==='how'){UI.route='code';UI.codeTab='flowchart';}if(ds.r==='rules'){UI.route='settings';UI.setSec='policies';}UI.drawer=null;render();window.scrollTo(0,0);break;
    case 'code':UI.route='code';UI.codeTab='quality';UI.codeMod=ds.m;render();window.scrollTo(0,0);break;
@@ -1337,7 +1385,7 @@ function act(a,ds){
    case 'arm':{const id=ds.a+':'+ds.k;
      if(UI.armed!==id){UI.armed=id;clearTimeout(armTimer);armTimer=setTimeout(()=>{UI.armed=null;render();},6000);render();break;}
      UI.armed=null;clearTimeout(armTimer);
-     post(ds.a==='compliance'?{action:'compliance',project:ds.k}:ds.a==='submit'?{action:'release',n:t.number,p:'P2',d:''}:{action:'cancel',n:t.number});break;}
+     post(ds.a==='compliance'?{action:'compliance',project:ds.k}:ds.a==='submit'?{action:'release',n:t.number,p:'P2',d:''}:{action:'cancel',n:t.number},id);break;}
    case 'retryact':{const b=UI.toastRetry;UI.toast='';UI.toastRetry=null;render();post(b);break;}
    case 'toastx':UI.toast='';UI.toastRetry=null;clearTimeout(toastTimer);render();break;
    case 'problems':UI.problems=!UI.problems;render();break;
@@ -1361,9 +1409,9 @@ document.addEventListener('submit',async function(e){
     UI.drawer.draft={title:fd.get('title'),body:fd.get('body')};
     if(UI.armed!=='edit:'+k){UI.armed='edit:'+k;clearTimeout(armTimer);armTimer=setTimeout(()=>{UI.armed=null;render();},6000);render();return;}
     UI.armed=null;clearTimeout(armTimer);
-    if(await post({action:'edit',n:t.number,title:fd.get('title'),body:fd.get('body')}))UI.drawer={mode:'task',key:k};render();}
-  else if(kind==='release')post({action:'release',n:t.number,p:fd.get('p'),d:fd.get('d')||''});
-  else if(kind==='change')post({action:'change',n:t.number,p:fd.get('p')||'',d:fd.get('d')||''});
+    if(await post({action:'edit',n:t.number,title:fd.get('title'),body:fd.get('body')},'edit:'+k))UI.drawer={mode:'task',key:k};render();}
+  else if(kind==='release')post({action:'release',n:t.number,p:fd.get('p'),d:fd.get('d')||''},'release:'+k);
+  else if(kind==='change')post({action:'change',n:t.number,p:fd.get('p')||'',d:fd.get('d')||''},'change:'+k);
   else if(kind==='block')fd.get('b')&&post({action:'block',n:t.number,b:num(fd.get('b'))});
   else if(kind==='settings'){const b={action:'settings',enabled:f.elements.enabled.checked};
     SETROWS.slice(1).forEach(r=>{b[r[0]]=fd.get(r[0]);});post(b);}

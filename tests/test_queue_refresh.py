@@ -210,6 +210,7 @@ APPLY = """
 let UI={route:'backlog',drawer:null,armed:null},PROJ='p',QL=null,CI=null,TODAY='',MODULES=[],renders=0,patches=[];
 let D={today:'d',modules:[],source:{fetchedAt:1}};
 const document={activeElement:null,getElementById:()=>null};
+function setState(s){D=s;TODAY=D.today;MODULES=D.modules;}  /* the page's own also lays the recent actions' effects over it (PC-136) */
 function render(){renders++;if(QPEND&&!UI.drawer)takeState(QPEND);}
 function qLive(){return 'live';}function paneBar(){return 'bar';}
 patch=(id,h)=>patches.push(id);
