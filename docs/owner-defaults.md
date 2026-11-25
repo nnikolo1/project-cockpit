@@ -85,3 +85,7 @@ Every project the Cockpit serves has a daily session report (owner, 2026-11-25, 
 ## Local policy files are never overwritten automatically (owner, 2026-11-25)
 
 Local policy files are never overwritten automatically (owner, 2026-11-25): violations the compliance check finds in a project's local policy markdown files are highlighted in the Cockpit UI, and resolving them is a human-in-the-loop procedure; the check, the daily job and every agent only read these files, a fix is the owner's own act, and a Worker may at most prepare a proposed text.
+
+## Supported platform: the installed Python (owner, 2026-11-25, standing policy)
+
+Only the Python version installed on the owner's machine is supported and tested (owner, 2026-11-25, standing policy): code is developed and tested on that one version only, there is no compatibility matrix across versions or operating systems, and the documents name that version. When the installed version changes, the documents, the install check and the test setup follow it in the same change; the install check reports any other version as unsupported (today Python 3.14).

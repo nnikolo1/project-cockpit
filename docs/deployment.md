@@ -13,7 +13,7 @@ One ordered path from "I have a project" to "the Cockpit shows it, the daily job
 | What | Why | Check (expected output) |
 |---|---|---|
 | macOS on Apple silicon | the Dispatcher runs under launchd, the Workers' image is Alpine arm64 and runs in Apple's `container` tool; the viewer alone also runs on Linux (systemd unit in 5) | `uname -sm`: `Darwin arm64` |
-| Python 3.10+, stdlib only | everything in this repository | `python3 --version`: `Python 3.10` or newer |
+| Python 3.14, stdlib only | everything in this repository | `python3 --version`: `Python 3.14` |
 | `git` and the GitHub CLI `gh`, logged in as the Manager | the Cockpit acts as the `gh` login and stores no GitHub token | `gh auth status`: `Logged in to github.com account LOGIN` |
 | Apple's `container` tool, its service started | the Workers' container | `container system status`: the service is running |
 | The model credential in a file outside git, mode 0600 (the owner's subscription token) | the Dispatcher's proxy adds it to the Workers' requests; it is never logged | `ls -l TOKENFILE`: `-rw-------` |
@@ -69,7 +69,7 @@ Expected: `code_snapshot_refresh.py` exits 0 (`fresh` or `refreshed`), or 2 with
 
 | Piece | Where | Notes |
 |---|---|---|
-| `cockpit.py` | one process, one machine | stdlib Python 3.10+, no database, no state on disk except the optional token file |
+| `cockpit.py` | one process, one machine | stdlib Python 3.14, no database, no state on disk except the optional token file |
 | `gh` CLI | same machine, same OS user | the cockpit runs `gh` and acts as whoever `gh` is logged in as; it stores no GitHub token |
 | Access token | random per start, or `--token-file PATH` (created mode 0600) | given once as `?t=TOKEN`, then an HttpOnly, SameSite=Strict cookie; hidden in the request log. The cookie has no `Secure` flag |
 | Listen address | `127.0.0.1:8795` (`--port`) | `--lan` binds `0.0.0.0`, plain HTTP: the token and cookie travel unencrypted |
