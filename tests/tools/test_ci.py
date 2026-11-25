@@ -155,3 +155,22 @@ def test_main_files_only_when_red(monkeypatch, capsys):
         monkeypatch.setattr(C.ff, "gh_run", gh)
         assert C.main(["--repo", "o/r", "--file-task"]) == code
         assert len(gh.created) == filed and json.loads(capsys.readouterr().out)["state"] == ("red" if filed else "green")
+
+
+def test_hosted_workflow_is_one_job_without_matrix_on_the_three_triggers():
+    """PC-129: tests run locally by default; the hosted run is one job on the one supported Python on Linux, on tags, by hand and
+    nightly, never on an ordinary push or pull request; documentation-only changes are filtered; an older run is cancelled."""
+    import install
+    wf = (ROOT / ".github" / "workflows" / L.CI_WORKFLOW).read_text()
+    lines = [l.split("#")[0].rstrip() for l in wf.splitlines()]
+    on = lines[lines.index("on:") + 1:lines.index("permissions:")]
+    assert {l.strip().rstrip(":") for l in on if l.startswith("  ") and not l.startswith("   ")} == {"push", "workflow_dispatch", "schedule"}
+    push = [l.strip() for l in on if l.startswith("    ")]
+    assert any(l.startswith("tags:") for l in push) and not any(l.startswith(("branches", "pull_request")) for l in push)
+    assert any(l.startswith(("paths-ignore:", "paths:")) and "docs/**" in l and "*.md" in l for l in push)
+    assert any(l.startswith("- cron:") for l in push)
+    code = "\n".join(lines)
+    assert "matrix" not in code and code.count("runs-on:") == 1 and "runs-on: ubuntu-latest" in code
+    assert 'python-version: "%d.%d"' % install.TESTED in wf and "python tools/merge_gate" in wf
+    conc = lines[lines.index("concurrency:") + 1:lines.index("concurrency:") + 3]
+    assert any("group:" in l and "github.ref" in l for l in conc) and any(l.strip() == "cancel-in-progress: true" for l in conc)
