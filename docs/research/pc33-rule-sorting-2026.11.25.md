@@ -89,3 +89,7 @@ Rows 42 to 58 and the skills, agreed by the owner as a whole (2026-11-25):
 | 58 | Restart the Cockpit after a merge, redraw the Workflow page, test isolation with two users | S |
 
 Skills: `agent-brief` G; manager review G; independent reviewer G; worker task protocol and filing a question C; `ats-investigator`, `crawl-qc` S; `code-writer` split.
+
+## Step 1 done: the base text
+
+The 32 generic rules were condensed into the base text `docs/templates/base-rules.md` (31 lines in four groups, with the conditional tags [db], [UI], [modules] and [optional]), agreed by the owner on 2026-11-25 without changes. Next steps: the generated Cockpit workflow section (step 2), the skills (step 3), the cleanup of the private project's instruction file (step 4), PC-34 (step 5).
