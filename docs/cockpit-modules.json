@@ -148,6 +148,8 @@
   {"path": "tools/merge_gate", "module": "devops/ci", "basis": "PC-94: the merge gate (full tests with node) the merge step and the CI workflow run; its test tests/tools/test_ci.py follows it"},
   {"path": "tools/ci_main.py", "module": "devops/ci", "basis": "PC-94: reads the last CI run of main and files the red-main finding once; its test tests/tools/test_ci.py follows it"},
   {"path": "tests/tools/test_ci.py", "module": "devops/ci", "basis": "PC-94: tests of the merge gate and the red-main report"},
+  {"path": "tools/pre_push.py", "module": "devops/ci", "basis": "PC-129: the pre-push hook that runs the merge gate, and its installer; its test tests/tools/test_pre_push.py follows it"},
+  {"path": "tests/tools/test_pre_push.py", "module": "devops/ci", "basis": "PC-129: tests of the pre-push hook, the gate log and the red-main report reading either result"},
   {"path": "docs/adr/0015-boot-filling-implementation-choices.md", "module": "taskqueue", "basis": "its Modules line names only taskqueue; a document clearly about one module stays with it (owner rule, 2026-11-20)"},
   {"path": "docs/adr/0016-boot-filling-authority-judgement.md", "module": "taskqueue", "basis": "its Modules line names only taskqueue; a document clearly about one module stays with it (owner rule, 2026-11-20)"},
   {"path": "docs/adr/0017-boot-filling-quota-history.md", "module": "taskqueue", "basis": "its Modules line names only taskqueue; a document clearly about one module stays with it (owner rule, 2026-11-20)"},

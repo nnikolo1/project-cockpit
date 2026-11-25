@@ -806,12 +806,12 @@ function block(name,fn,page){
     return page?'<div class="page">'+c+'</div>':c;}
 }
 /* safe-block:end */
-/* The last run of the test workflow on main: red is a warning (until the daily job files it as a finding, PC-91). */
+/* The state of main (the newer of the hosted run and the local merge gate run, marked by its source): red is a warning (until the daily job files it as a finding, PC-91). */
 function ciLine(c){
   if(!c)return '';
   const t=c.time?' started '+tm(c.time):'',a=c.url?' <a href="'+esc(c.url)+'" target="_blank" rel="noopener">run</a>':'';
   const w={green:'passed',red:'failed ('+esc(c.conclusion||'')+')',running:'running',other:esc(c.conclusion||'no result'),none:'no run recorded',unknown:'unknown: '+esc(c.error||'GitHub unavailable')}[c.state]||esc(c.state);
-  return '<p class="'+(c.state==='red'?'warnline':'muted')+'" style="font-size:12px;margin:6px 0 0">CI on main: '+w+t+(c.sha?' <span class="mono">'+esc(c.sha.slice(0,7))+'</span>':'')+a+'.</p>';
+  return '<p class="'+(c.state==='red'?'warnline':'muted')+'" style="font-size:12px;margin:6px 0 0">CI on main: '+w+(c.source?', '+esc(c.source):'')+t+(c.sha?' <span class="mono">'+esc(c.sha.slice(0,7))+'</span>':'')+a+'.</p>';
 }
 function qLive(){return '<div id="qlive">'+block('Being processed now',vQueueLocal)+'</div>';}
 function vQueueLocal(){

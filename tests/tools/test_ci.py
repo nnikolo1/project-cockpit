@@ -84,13 +84,16 @@ def test_gate_tests_a_branch_merged_into_head_and_leaves_the_tree_alone(tmp_path
 @pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
 def test_task_queue_page_shows_a_red_main_as_a_warning():
     page = (ROOT / "web" / "index.html").read_text()
+    local = L.gate_result(json.dumps(dict(state="red", reason="pytest exited with 1", sha="abc", branch="main", time="2026-11-25T10:00:00Z")))
+    states = [L.ci_run(runs(conclusion=c)) for c in ("failure", "success")] + [local]
     code = "\n".join(["const tmTxt=t=>'HH:MM',tm=tmTxt;", re.search(r"^function esc\(s\).*$", page, re.M).group(0), page[page.index("function ciLine(c){"):page.index("function vQueueLocal(){")],
-                      "process.stdout.write(JSON.stringify([%s].map(ciLine)))" % ",".join(json.dumps(L.ci_run(runs(conclusion=c))) for c in ("failure", "success"))])
+                      "process.stdout.write(JSON.stringify(%s.map(ciLine)))" % json.dumps(states)])
     r = subprocess.run(["node", "-e", code], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
-    red, green = json.loads(r.stdout)
+    red, green, local = json.loads(r.stdout)
     assert 'class="warnline"' in red and "CI on main: failed (failure)" in red and "https://x/runs/7" in red
     assert 'class="muted"' in green and "CI on main: passed" in green
+    assert 'class="warnline"' in local and "CI on main: failed (pytest exited with 1), local gate" in local and "<a " not in local
 
 
 def runs(status="completed", conclusion="failure"):
@@ -152,3 +155,22 @@ def test_main_files_only_when_red(monkeypatch, capsys):
         monkeypatch.setattr(C.ff, "gh_run", gh)
         assert C.main(["--repo", "o/r", "--file-task"]) == code
         assert len(gh.created) == filed and json.loads(capsys.readouterr().out)["state"] == ("red" if filed else "green")
+
+
+def test_hosted_workflow_is_one_job_without_matrix_on_the_three_triggers():
+    """PC-129: tests run locally by default; the hosted run is one job on the one supported Python on Linux, on tags, by hand and
+    nightly, never on an ordinary push or pull request; documentation-only changes are filtered; an older run is cancelled."""
+    import install
+    wf = (ROOT / ".github" / "workflows" / L.CI_WORKFLOW).read_text()
+    lines = [l.split("#")[0].rstrip() for l in wf.splitlines()]
+    on = lines[lines.index("on:") + 1:lines.index("permissions:")]
+    assert {l.strip().rstrip(":") for l in on if l.startswith("  ") and not l.startswith("   ")} == {"push", "workflow_dispatch", "schedule"}
+    push = [l.strip() for l in on if l.startswith("    ")]
+    assert any(l.startswith("tags:") for l in push) and not any(l.startswith(("branches", "pull_request")) for l in push)
+    assert any(l.startswith(("paths-ignore:", "paths:")) and "docs/**" in l and "*.md" in l for l in push)
+    assert any(l.startswith("- cron:") for l in push)
+    code = "\n".join(lines)
+    assert "matrix" not in code and code.count("runs-on:") == 1 and "runs-on: ubuntu-latest" in code
+    assert 'python-version: "%d.%d"' % install.TESTED in wf and "python tools/merge_gate" in wf
+    conc = lines[lines.index("concurrency:") + 1:lines.index("concurrency:") + 3]
+    assert any("group:" in l and "github.ref" in l for l in conc) and any(l.strip() == "cancel-in-progress: true" for l in conc)

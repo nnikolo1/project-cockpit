@@ -1,17 +1,27 @@
 name: test
-on: [push, pull_request]
+# Tests run locally by default: the pre-push hook runs the merge gate before every push (python3 tools/pre_push.py --install).
+# This hosted run is the backstop (owner, 2026-11-25): one job, the one supported Python (3.14, standing policy) on Linux, no matrix;
+# on tags, by hand and nightly, never on an ordinary push. Documentation-only changes run nothing.
+on:
+  push:
+    tags: ["*"]
+    paths-ignore: ["docs/**", "**/*.md"]
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  pytest:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        python: ["3.10", "3.11", "3.12", "3.13"]
-    runs-on: ${{ matrix.os }}
+  gate:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: "${{ matrix.python }}"}
+        with: {python-version: "3.14"}
+      - uses: actions/setup-node@v4
+        with: {node-version: "22"}
       - run: pip install pytest
-      - run: python -m pytest
+      - run: python tools/merge_gate

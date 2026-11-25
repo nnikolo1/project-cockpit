@@ -6,7 +6,8 @@ Interactive, in the owner's order (task PC-100, amendment 2026-11-25): (1) the l
 is not the tested 3.14 (standing policy: never refused, unless older than the floor this code needs); (2) the GitHub
 login (`gh auth status`) and the model credential file, reported found or not found by path and mode only: the file
 is never read, copied or printed, and only its path is stored; (3) the parent folders of the owner's projects, whose
-sub-folders with a GitHub remote are listed; (4) per project "install the Cockpit in this project?" (default no);
+sub-folders with a GitHub remote are listed; (4) per project "install the Cockpit in this project?" (default no;
+a yes also installs the pre-push hook that runs the merge gate, tools/pre_push.py);
 (5) the viewer service, the daily job and the Dispatcher, each after a plain confirmation. Everything it would write
 or run is listed as a plan and confirmed first; `--dry-run` prints the plan and stops. A second run finds what is
 installed and offers only what is missing. It ends with the self-test: "ready" or the list of what is missing, each
@@ -338,6 +339,8 @@ def plan(env, python, credential, cfg):
         else:
             say(f"  planned: {task}: `project_sync init` (the .cockpit/ folder) for {name} skipped")
         steps.append(Step(f"{name}: the kit labels in {repo} (kit/setup.sh, idempotent)", runs=[["bash", env.root / "kit/setup.sh", repo]]))
+        steps.append(Step(f"{name}: the pre-push hook that runs the merge gate (tools/pre_push.py, idempotent, never overwrites a hook)",
+                          runs=[[python, env.root / "tools/pre_push.py", "--install", "--repo", d]]))
     if new:
         steps.append(Step(f"register {', '.join(e['name'] for e in new)} in {env.projects_file}",
                           writes=[(env.projects_file, json.dumps(pf, indent=2) + "\n")]))
