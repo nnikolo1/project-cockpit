@@ -780,6 +780,14 @@ def save_settings(p, form):
     return "settings saved"
 
 
+def get_task(p, n, run=run_gh):
+    """The current state of one task, read from GitHub now (one call, bypassing the cached state): the page asks for it when an action of
+    its own got no answer, so that it can say what happened (PC-136)."""
+    if not str(n).isdigit():
+        raise ValueError(f"bad task number: {n!r}")
+    return L.task_lookup(json.loads(run(["api", f"repos/{p['repo']}/issues/{n}"])))
+
+
 def do_act(form, run=run_gh, state=None, p=None):
     """-> (http status, body). 403 when the app is read-only; acts on the project named in form["project"] (default project otherwise)."""
     if not CFG["steer"]:
@@ -1370,6 +1378,11 @@ class H(BaseHTTPRequestHandler):
             p = proj(name_q or None)
             if u.path == "/api/state":
                 return self.send(200, get_state_served(p, fresh=bool(q.get("fresh"))))
+            if u.path == "/api/task":
+                try:
+                    return self.send(200, get_task(p, q.get("n", [""])[0]))
+                except ValueError as ex:
+                    return self.send(400, dict(error=str(ex)))
             if u.path == "/api/questions":
                 return self.send(200, build_questions(fresh=bool(q.get("fresh"))))
             if u.path == "/api/timeline":

@@ -128,6 +128,14 @@ def stage(issue, eff):
     return "released" if "released" in eff else "embryo"
 
 
+def task_lookup(raw):
+    """One issue as the REST API returns it -> {n, stage, title}: the answer the page gets when an action of its own got no answer (PC-136).
+    The labels count as they stand; the authorship of protected labels is checked on the next full read of the state."""
+    i = dict(state=raw.get("state"), state_reason=raw.get("state_reason"), labels=[x["name"] for x in raw.get("labels") or []],
+             assignees=[x["login"] for x in raw.get("assignees") or []])
+    return dict(n=raw.get("number"), stage=stage(i, set(i["labels"])), title=raw.get("title") or "")
+
+
 FINDING = "policy-finding"
 FILED_BY = re.compile(r"<!--\s*filed-by:\s*(\S+?)\s*-->")
 
