@@ -1264,8 +1264,9 @@ function drawerTask(t){
   h+=(t.desc?'<p style="margin:0;white-space:pre-wrap;overflow-wrap:anywhere">'+esc(t.desc)+'</p>':'')+(t.evidence.length?'<div style="display:flex;flex-direction:column;gap:3px">'+t.evidence.map(x=>'<a target="_blank" rel="noopener" href="'+esc(x.url)+'">'+esc(x.text)+'</a>').join('')+'</div>':'');
   props.forEach(p=>{h+='<div class="proposal"><b>The Orchestrator proposes a change</b><span>'+(p.field==='deadline'?'Move the deadline to <b>'+esc(p.value)+'</b>.':'Set the priority to <b>P'+esc(p.value)+'</b>.')+' '+esc(p.reason)+'</span>'
     +(ST()?'<div class="row"><button class="btn primary small" data-act="accept" data-n="'+t.number+'" data-id="'+esc(p.id)+'">Accept</button><button class="btn small" data-act="dismiss" data-n="'+t.number+'" data-id="'+esc(p.id)+'">Dismiss</button></div><span style="font-size:12px">Accepting applies it as you. Only you can change priority or a deadline.</span>':'')+'</div>';});
-  if(ST())h+=UI.drawer.edit?editForm(t):'<div class="row"><button class="btn small" data-act="edit" data-k="'+t.key+'">Edit text</button></div>';
-  if(ST()&&!UI.drawer.edit){
+  const ed=ST()&&editable(t)&&UI.drawer.edit;
+  if(ST()&&editable(t))h+=ed?editForm(t):'<div class="row"><button class="btn small" data-act="edit" data-k="'+t.key+'">Edit text</button></div>';
+  if(ST()&&!ed){
   if(t.stage==='embryo'){
     h+='<form class="card" data-form="release" data-k="'+t.key+'" style="display:flex;flex-direction:column;gap:12px"><h2>Release this task</h2><div class="field"><span>Priority</span>'+seg('rp',2)+'<span class="muted" style="font-size:12px">1 is first. The Orchestrator ranks by priority, then deadline.</span></div>'
      +'<div class="field"><label for="rd">Deadline (optional)</label><input id="rd" type="date" name="d"><span class="muted" style="font-size:12px">Complete by the end of this day. Leave empty to inherit from the parent or module.</span></div><button class="btn primary"'+busyA('release:'+t.key)+'>'+spin('release:'+t.key)+'Release</button></form>';
@@ -1288,12 +1289,12 @@ function drawerTask(t){
 }
 /* "edited <time>" (GitHub's lastEditedAt; GitHub keeps the history) and a stale authority analysis, on the row and in the task view. */
 const editedChip=t=>(t.edited?' <span class="muted" style="font-size:12px" title="'+esc(t.edited)+'">edited '+ageTxt((Date.now()-Date.parse(t.edited))/36e5)+'</span>':'')+(t.analysis==='stale'?' <span class="chip" title="The text changed since the authority analysis; it is analysed again before release">analysis stale</span>':'');
+/* Only the pre-WIP states are editable (owner, 2026-11-25); the server refuses every other state too. */
+const editable=t=>(t.stage==='embryo'||t.stage==='released')&&!t.closed;
 /* The text editor: title and body go to the issue; the provenance block and the filed-by marker are shown read-only and kept by the server. */
 function editForm(t){
   const d=UI.drawer.draft||{title:t.title,body:t.text||''},on=UI.armed==='edit:'+t.key;
   return '<form class="card" data-form="edit" data-k="'+t.key+'" style="display:flex;flex-direction:column;gap:12px"><h2>Edit the text</h2>'
-   +(t.stage==='wip'?'<div class="proposal" style="background:var(--danger-tint);color:var(--danger)"><b>A Worker is working on this task.</b> It works from the text it got at launch; this edit does not reach that run and applies to the next attempt.</div>':'')
-   +(t.closed?'<div class="proposal">This task is closed. The edit is saved, but nothing reopens it.</div>':'')
    +'<div class="field"><label for="et">Title</label><input id="et" type="text" name="title" required value="'+esc(d.title)+'"></div>'
    +'<div class="field"><label for="eb">Text</label><textarea id="eb" name="body" rows="14">'+esc(d.body)+'</textarea></div>'
    +((t.kept||[]).length?'<div class="field"><span>Kept as it is (re-attached on save)</span><pre class="muted" style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;margin:0">'+esc(t.kept.join('\n\n'))+'</pre></div>':'')

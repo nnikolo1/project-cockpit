@@ -566,13 +566,15 @@ def _prio_due(t, prio, due, set_due):
     return add, remove
 
 
-WIP_NOTE = "; a Worker is working from the old text, the edit applies to the next attempt"
+EDITABLE = ("embryo", "released")   # the pre-WIP states: the only ones whose text may be edited (owner, 2026-11-25)
 STALE_NOTE = "<!-- analysis: stale -->\nThe task text was edited in the Cockpit; its authority analysis is stale until the task is analysed again."
 
 
 def _edit_text(form, t, repo):
     """Title and body of the issue from the editor. The provenance block and the filed-by marker are taken from the issue, never from the
     form (read-only there), and re-attached; labels are untouched. A saved edit records the authority analysis as stale (a comment)."""
+    if t["stage"] not in EDITABLE or t.get("closed"):
+        raise ValueError(f"{t['key']} is {'closed' if t.get('closed') else t['stage']}; only embryo and released tasks can be edited")
     title, text = (form.get("title") or "").strip(), L.split_text(form.get("body"))[0]
     if not title:
         raise ValueError("a title is required")
@@ -582,8 +584,7 @@ def _edit_text(form, t, repo):
     full = title if t["key"].startswith("#") else f"[{t['key']}] {title}"
     ops = [["api", "-X", "PATCH", f"repos/{repo}/issues/{n}", "-f", f"title={full}", "-f", f"body={L.join_text(text, t['kept'])}"],
            ["issue", "comment", n, "-R", repo, "--body", STALE_NOTE]]
-    note = WIP_NOTE if t["stage"] == "wip" else "; the task is closed" if t.get("closed") else ""
-    return ops, f"{t['key']} text saved{note}; its authority analysis is now stale"
+    return ops, f"{t['key']} text saved; its authority analysis is now stale"
 
 
 def plan_action(form, S, repo, simulate=False):
