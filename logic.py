@@ -2191,30 +2191,38 @@ def rate_limit_reset(msg, now):
     return None
 
 
-def _iso_utc(t):
-    """The Dispatcher's state stores times as epoch seconds; the page shows ISO strings. A string passes through, anything unreadable is None (PC-114)."""
+def _when(t):
+    """A time for the Task Queue page (PC-114, PC-134): epoch seconds stay a number (the browser shows them in its own zone); an ISO string gets
+    an offset: one without (the Dispatcher's processing log before PC-134) is the server machine's local time. Anything unreadable is None."""
     if isinstance(t, bool) or t is None:
         return None
     if isinstance(t, (int, float)):
         try:
-            return dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+            dt.datetime.fromtimestamp(t, dt.timezone.utc)
+            return t
         except (OverflowError, OSError, ValueError):
             return None
-    return t if isinstance(t, str) else None
+    if not isinstance(t, str):
+        return None
+    try:
+        d = dt.datetime.fromisoformat(re.sub(r"Z$", "+00:00", t))
+    except ValueError:
+        return None
+    return (d if d.tzinfo else d.astimezone()).isoformat(timespec="seconds")
 
 
 def queue_local(state_text, plog_text, limit=15):
     """The Task Queue facts that need no GitHub: the Workers the Dispatcher's state file lists as running (worker, task id, launched, started)
-    and the newest `limit` lines of the processing log (newest first). Missing or unreadable files give empty lists."""
+    and the newest `limit` lines of the processing log (newest first). Missing or unreadable files give empty lists. Times as `_when` gives them."""
     try:
         st = json.loads(state_text) if state_text else {}
     except ValueError:
         st = {}
     ws = st.get("workers") if isinstance(st, dict) and isinstance(st.get("workers"), dict) else {}
-    workers = [dict(worker=u, task=w.get("task_id"), launched=_iso_utc(w.get("launched")), started=bool(w.get("started")))
+    workers = [dict(worker=u, task=w.get("task_id"), launched=_when(w.get("launched")), started=bool(w.get("started")))
                for u, w in sorted(ws.items()) if isinstance(w, dict)]
     recs = [r for r in (_json_lines(plog_text) or []) if r.get("time")]
-    log_ = [dict(time=r["time"], task=r.get("task"), state=r.get("state"), reason=r.get("reason"), worker=r.get("worker"), heartbeat=r.get("heartbeat"))
+    log_ = [dict(time=_when(r["time"]), task=r.get("task"), state=r.get("state"), reason=r.get("reason"), worker=r.get("worker"), heartbeat=r.get("heartbeat"))
             for r in recs[-limit:]][::-1]
     return dict(workers=workers, log=log_)
 
@@ -2239,7 +2247,7 @@ def live_events(plog_text, shorts):
         m = RECONCILED.search(st)
         stage, num = LIVE_STAGE.get(st) or (m and m.group(1)), task_number(r.get("task"), shorts)
         try:
-            at = dt.datetime.fromisoformat(r.get("time")).timestamp()   # the log writes local time
+            at = dt.datetime.fromisoformat(r.get("time")).timestamp()   # with an offset, or (before PC-134) the server's local time
         except (TypeError, ValueError):
             continue
         if stage and num is not None and (num not in out or at >= out[num][0]):

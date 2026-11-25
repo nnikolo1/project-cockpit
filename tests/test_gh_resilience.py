@@ -144,16 +144,16 @@ def test_refresh_button_after_a_restart_keeps_the_disk_copy_when_github_fails(mo
 def test_task_queue_local_part_is_served_while_github_fails(monkeypatch):
     d = C.DATA_DIR / "proj"
     (d / "processing").mkdir(parents=True)
-    (d / "dispatcher-state.json").write_text(json.dumps(dict(workers=dict(worker2=dict(task_id="T-7", launched="2026-01-01T10:00:00", started=True)))))
-    (d / "processing" / "processing.jsonl").write_text("\n".join([json.dumps(dict(time="2026-01-01T10:00:00", task="T-7", state="launched", worker="worker2")), "{broken"]))
+    (d / "dispatcher-state.json").write_text(json.dumps(dict(workers=dict(worker2=dict(task_id="T-7", launched=1767261600, started=True)))))
+    (d / "processing" / "processing.jsonl").write_text("\n".join([json.dumps(dict(time="2026-01-01T10:00:00+00:00", task="T-7", state="launched", worker="worker2")), "{broken"]))
 
     def down(*a, **k):
         raise AssertionError("the Task Queue's local part called GitHub")
     monkeypatch.setattr(C, "run_gh", down)
     monkeypatch.setattr(C, "build_state", down)
     q = C.get_queue(P)
-    assert q["workers"] == [dict(worker="worker2", task="T-7", launched="2026-01-01T10:00:00", started=True)]
-    assert q["log"][0]["state"] == "launched" and "values" in q["settings"]
+    assert q["workers"] == [dict(worker="worker2", task="T-7", launched=1767261600, started=True)]
+    assert q["log"][0]["state"] == "launched" and q["log"][0]["time"] == "2026-01-01T10:00:00+00:00" and "values" in q["settings"]
 
 
 def test_task_queue_shows_the_last_ci_run_of_main_and_survives_github_failing(monkeypatch):

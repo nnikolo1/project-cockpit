@@ -17,15 +17,14 @@ node = pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
 
 
 @pytest.mark.parametrize("launched, want", [
-    (1795577286.197, "2026-11-25T"),         # epoch float, as the Dispatcher writes it
-    (0, "1970-01-01T00:00:00"),         # epoch int
-    ("2026-11-25T05:28:06+00:00", "2026-11-25T05:28:06+00:00"),  # a string passes through
+    (1795577286.197, 1795577286.197),         # epoch float, as the Dispatcher writes it: the browser converts it (PC-134)
+    (0, 0),         # epoch int
+    ("2026-11-25T05:28:06+00:00", "2026-11-25T05:28:06+00:00"),  # a string with an offset passes through
     (None, None), ([1], None), (True, None), (float("nan"), None), (1e300, None),
 ])
-def test_running_workers_carry_the_launch_time_as_a_string(launched, want):
+def test_running_workers_carry_a_readable_launch_time_or_none(launched, want):
     st = json.dumps(dict(workers={"w1": dict(task_id="PC-1", launched=launched, started=True)}))
-    got = L.queue_local(st, None)["workers"][0]["launched"]
-    assert got is None if want is None else isinstance(got, str) and got.startswith(want)
+    assert L.queue_local(st, None)["workers"][0]["launched"] == want
 
 
 def run_node(code):
@@ -39,10 +38,9 @@ def run_node(code):
 @node
 def test_time_format_never_throws():
     vals = "[1795577286.197, '2026-11-25T05:28:06+00:00', null, undefined, NaN, 1e300, {}, [], true, '']"
-    out = json.loads(run_node("console.log(JSON.stringify(%s.map(t0)))" % vals).stdout)
-    assert out[0].startswith("2026-11-25 ") and len(out[0]) == 16
-    assert out[1] == "2026-11-25 05:28"
-    assert out[2:] == ["?"] * 8
+    out = json.loads(run_node("console.log(JSON.stringify(%s.map(x=>[tmTxt(x,0),tm(x,0)])))" % vals).stdout)
+    assert all(re.fullmatch(r"2026-11-2[45] \d\d:\d\d", t) and h.endswith(">" + t + "</span>") for t, h in out[:2])   # local time, not today
+    assert out[2:] == [["?", "?"]] * 8
 
 
 @node
