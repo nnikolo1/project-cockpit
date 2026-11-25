@@ -2191,6 +2191,57 @@ def rate_limit_reset(msg, now):
     return None
 
 
+_TOKEN_MARKS = ("bad credentials", "http 401", "requires authentication", "gh auth login", "not logged in", "token is invalid", "token has expired")
+_UNREACHABLE_MARKS = ("error connecting to", "could not resolve", "no such host", "connection refused", "connection reset", "network is unreachable",
+                      "timed out", "timeout", "dial tcp", "tls handshake", "http 502", "http 503", "http 504", "eof")
+
+
+def offline_kind(msg, rate_limited=False):
+    """Why GitHub could not be read (owner, offline behaviour): 'rate_limit', 'token' (the login's token was rejected), 'unreachable'
+    (network or GitHub down) or 'error' (anything else)."""
+    m = (msg or "").lower()
+    if rate_limited or is_rate_limited(m):
+        return "rate_limit"
+    if any(x in m for x in _TOKEN_MARKS):
+        return "token"
+    if any(x in m for x in _UNREACHABLE_MARKS):
+        return "unreachable"
+    return "error"
+
+
+def offline_reason(kind, until=None, clock=None):
+    """One sentence for the page: what is wrong, and for a rate limit when GitHub is tried again (clock formats an epoch time)."""
+    if kind == "rate_limit":
+        return "GitHub rate limit reached" + (f"; next try at {clock(until)}" if until and clock else "")
+    return {"token": "GitHub rejected the login's token (run gh auth login)", "unreachable": "GitHub is unreachable"}.get(kind, "GitHub could not be read")
+
+
+NEW_WORK_MAX_AGE_S = 3600  # owner: an assistant starts no new task from state older than one hour (in-progress work may continue)
+
+
+def may_start_new(age_s):
+    """True when the task state is young enough to start a new task from it (unknown age: no)."""
+    return age_s is not None and 0 <= age_s <= NEW_WORK_MAX_AGE_S
+
+
+def stagger_plan(keys, window, jitter, rng):
+    """{key: (offset, jitter)}: the refresh slots of the GitHub resources of all projects, spread evenly over `window` seconds in sorted key
+    order, each plus its own random jitter in [0, jitter) from rng (a random.Random), so that no two refreshes fall due together."""
+    keys = sorted(set(keys))
+    out = {}
+    for i, k in enumerate(keys):
+        j = rng.uniform(0, jitter) if jitter > 0 else 0.0
+        out[k] = (i * window / len(keys) + j, j)
+    return out
+
+
+def refresh_due(fetched_at, ttl, slot, started):
+    """When a copy fetched at fetched_at may be refreshed: ttl after the fetch plus the key's jitter, and never before its staggered slot
+    after the start of the service (a restart with old copies refreshes them one after another, not in one burst)."""
+    offset, jitter = slot
+    return max(fetched_at + ttl + jitter, started + offset)
+
+
 def _iso_utc(t):
     """The Dispatcher's state stores times as epoch seconds; the page shows ISO strings. A string passes through, anything unreadable is None (PC-114)."""
     if isinstance(t, bool) or t is None:

@@ -98,6 +98,9 @@ An agent that finds a file contradicting a standing policy files a task with `to
 Only `name` and `repo` are required (optional: `project`, `manager`, `modules`, `git`, `code`, `code_collect`, `compliance`, `phases`, `meta`, `stats_cache`, `start_month` as `YYYY-MM`, `transcript_sources` as a list of transcript folder labels). With more than one project the header shows a selector (remembered in the browser); every `/api/*` call takes `?project=NAME` (default: the `default`), `/api/projects` lists `[{name, repo}]`, and only the visible project is polled.
 Rationale and limits: [ADR 0012](docs/adr/0012-several-projects-in-one-instance.md).
 
+## When GitHub cannot be read
+The last good state of every project is kept on disk and survives restarts. GitHub refreshes of all projects and resources fall in staggered slots with jitter, so a restart does not refresh everything at once. While GitHub cannot be read, the page shows the last good copy with its age and the case (rate limit with its retry time, rejected token, unreachable); the actions that write to GitHub are shown disabled with the reason and are refused, never queued. No new task is started from state over an hour old ("Next up" stays empty); work in progress continues. Rationale: [ADR 0010](docs/adr/0010-rate-limit-resilience.md).
+
 ## Daily backup to Google Drive
 `python3 tools/project_backup.py --drive DIR [--project NAME] [--projects-file F] [--data-dir D] [--cache-dir C] [--transcripts DIR ...]` writes one dated archive of a project's Cockpit data (layout: [docs/contracts/backup.md](docs/contracts/backup.md)) into `DIR/project_cockpits/NAME/`, create-only, and a status record `<data dir>/NAME/backup-status.json`. The gap checker reports a missing, failed or stale backup (kind `backup`); the Task Queue tab shows the last one. `tools/drive_retention.gs` is the Apps Script that keeps the newest 30 in Drive. Setup: [docs/deployment.md](docs/deployment.md) (Operations).
 

@@ -7,6 +7,7 @@ import logging
 import importlib.util
 import os
 import pathlib
+import random
 import re
 import secrets
 import shutil
@@ -311,6 +312,22 @@ def drop_cache(prefix):
             f.unlink(missing_ok=True)
 
 
+STAGGER_WINDOW_S = 900   # the GitHub refreshes of all projects and resources are spread over this window (owner: staggered offsets, no burst)
+STAGGER_JITTER_S = 120   # plus a random jitter per key, so that slots do not line up again
+GH_RESOURCES = ("state", "ci", "commits", "rulesprs")  # the queued GitHub resources of a project (cached(..., queue=True))
+_started, _slots = time.time(), {}
+
+
+def _slot(key):
+    """(offset, jitter) of `key` in the staggered plan of every configured project's resources; a key outside the plan gets a slot of its own."""
+    with _lock:
+        if key not in _slots:
+            keys = {pk(p, r) for p in (PROJECTS.values() or [CFG]) for r in GH_RESOURCES} | set(_slots) | {key}
+            _slots.clear()
+            _slots.update(L.stagger_plan(keys, STAGGER_WINDOW_S, STAGGER_JITTER_S, random.Random()))
+        return _slots[key]
+
+
 _failures = {}  # key -> dict(at, error, until, rate_limited) of the last failed refresh that was answered with an older copy; removed by the next success
 
 
@@ -326,6 +343,8 @@ def cached(key, fn, ttl, swr=False, persist=False, disk_fresh=0, queue=False):
             _cache.setdefault(key, (t, v))
     if v is not None and (OFFLINE or time.time() - t <= ttl):
         return v
+    if v is not None and swr and queue and time.time() < L.refresh_due(t, ttl, _slot(key), _started):
+        return v  # staggered: this key's refresh slot has not come yet
     if v is not None and swr:
         with _lock:
             if key in _refreshing:
@@ -793,6 +812,10 @@ def do_act(form, run=run_gh, state=None, p=None):
             return 200, dict(ok=True, msg=save_card_settings(p, form))
         if form.get("action") == "compliance":  # starts the project's compliance check; same guard (the UI is the owner's alone)
             return 200, dict(ok=True, msg=start_compliance(p))
+        why = steer_block(p)
+        if why:  # owner: the write side refuses while GitHub cannot be read; nothing is queued for later
+            log.warning("refused action %s on %s: %s", form.get("action"), p.get("name", ""), why)
+            return 503, dict(error=f"not done, and not queued: {why}")
         S = state or get_state(p=p)  # the cached state: an action does not bypass the hour (owner F-701)
         ops, msg = plan_action(form, S, p["repo"], CFG["simulate"])
         execute(ops, run)
@@ -1009,7 +1032,20 @@ def stale_note(p, now=None):
     v = _cache.get(pk(p, "state"), (0, None))[1]
     if not f or not v:
         return None
-    return dict(age_s=max(0, round(now - v["source"]["fetchedAt"])), error=f["error"], until=f["until"], rate_limited=f["rate_limited"])
+    kind = L.offline_kind(f["error"], f["rate_limited"])
+    return dict(age_s=max(0, round(now - v["source"]["fetchedAt"])), error=f["error"], until=f["until"], rate_limited=f["rate_limited"],
+                kind=kind, reason=L.offline_reason(kind, f["until"], _clock))
+
+
+def steer_block(p, now=None):
+    """None, or why the steering actions on GitHub are off now (owner: the write side refuses while GitHub cannot be read and never queues)."""
+    now = time.time() if now is None else now
+    if OFFLINE:
+        return "offline copy from a backup"
+    if now < _gh_pause["until"]:
+        return L.offline_reason("rate_limit", _gh_pause["until"], _clock)
+    n = stale_note(p, now)
+    return n["reason"] if n else None
 
 
 STATE_CALLS = 12   # gh calls of one state load (see GH_CALLS_PER_HOUR)
@@ -1053,7 +1089,12 @@ def get_state_served(p, fresh=False):
         S = dict(S, source=dict(S.get("source", {}), steering=False, simulate=False))
     if "modules" in S:
         S = dict(S, modules=ordered(p, S["modules"]))
-    return dict(S, stale=refreshing(pk(p, "state")), staleNote=stale_note(p), refreshAfter=S.get("source", {}).get("fetchedAt", 0) + GH_REFRESH_S)
+    at = S.get("source", {}).get("fetchedAt")
+    new_work = L.may_start_new(time.time() - at if at else None)
+    if not new_work and "tasks" in S:  # owner: no new task is started from state older than an hour; work in progress may continue
+        S = dict(S, tasks=[dict(t, pick=False) for t in S["tasks"]])
+    return dict(S, stale=refreshing(pk(p, "state")), staleNote=stale_note(p), refreshAfter=(at or 0) + GH_REFRESH_S,
+                steerBlock=steer_block(p) if CFG["steer"] else None, newWork=new_work)
 
 
 def warm_module_pages(p):
