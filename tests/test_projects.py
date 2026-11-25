@@ -31,7 +31,7 @@ def flags(**kw):
 def test_single_project_flags_make_one_implicit_project_named_after_the_repo():
     ps, default = C.resolve(flags(repo="acme/widgets", project=3, git="/src/w"))
     assert default == "widgets" and len(ps) == 1
-    assert ps[0] == dict(name="widgets", repo="acme/widgets", manager="acme", project=3, git="/src/w", modules=None, phases=None, code=None, code_collect=None)
+    assert ps[0] == dict(name="widgets", repo="acme/widgets", manager="acme", project=3, git="/src/w", modules=None, phases=None, code=None, code_collect=None, compliance=None)
     assert C.resolve(flags(repo="acme/widgets", manager="alice"))[0][0]["manager"] == "alice"
     assert C.resolve(flags(repo="acme/widgets", code_collect="make snap"))[0][0]["code_collect"] == ["make", "snap"]
 

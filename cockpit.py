@@ -32,8 +32,8 @@ HERE = pathlib.Path(__file__).parent
 TYPES = ["feature", "bug", "decision", "research", "doc", "devops", "test"]
 # Global switches (steer, simulate) live in CFG. A project is a dict of PROJECT_KEYS plus its name; PROJECTS maps name -> project.
 # Without any registered project (tests, embedding) CFG itself doubles as the one project.
-CFG = dict(repo=None, manager=None, steer=False, simulate=False, project=None, git=None, modules=None, phases=None, code=None, code_collect=None)
-PROJECT_KEYS = ("repo", "manager", "project", "git", "modules", "phases", "code", "code_collect")
+CFG = dict(repo=None, manager=None, steer=False, simulate=False, project=None, git=None, modules=None, phases=None, code=None, code_collect=None, compliance=None)
+PROJECT_KEYS = ("repo", "manager", "project", "git", "modules", "phases", "code", "code_collect", "compliance")
 PROJECTS, DEFAULT = {}, None
 
 
@@ -59,7 +59,8 @@ def pk(p, what):
 def project_from_flags(a):
     """The implicit project of the single-project flags, named after the repo."""
     return dict(name=a["repo"].split("/")[-1], repo=a["repo"], manager=a.get("manager") or a["repo"].split("/")[0],
-                **{k: a.get(k) for k in PROJECT_KEYS[2:-1]}, code_collect=L.collect_command(a.get("code_collect")))
+                **{k: a.get(k) for k in PROJECT_KEYS[2:-2]}, code_collect=L.collect_command(a.get("code_collect")),
+                compliance=L.collect_command(a.get("compliance"), "compliance"))
 
 
 def projects_from_file(data):
@@ -89,6 +90,7 @@ def projects_from_file(data):
             p["transcript_sources"] = list(e["transcript_sources"])
         try:
             p["code_collect"] = L.collect_command(e.get("code_collect"))  # the snapshot's collector command, run by the daily refresh
+            p["compliance"] = L.collect_command(e.get("compliance"), "compliance")  # the compliance check, the same command as the terminal and the daily job
         except ValueError as ex:
             raise ValueError(f"--projects: project {name!r}: {ex}") from None
         out.append(p)
@@ -765,6 +767,8 @@ def do_act(form, run=run_gh, state=None, p=None):
             return 200, dict(ok=True, msg=save_settings(p, form))
         if form.get("action") == "cardsettings":  # same: a local file, same guard
             return 200, dict(ok=True, msg=save_card_settings(p, form))
+        if form.get("action") == "compliance":  # starts the project's compliance check; same guard (the UI is the owner's alone)
+            return 200, dict(ok=True, msg=start_compliance(p))
         S = state or get_state(p=p)  # the cached state: an action does not bypass the hour (owner F-701)
         ops, msg = plan_action(form, S, p["repo"], CFG["simulate"])
         execute(ops, run)
@@ -780,6 +784,87 @@ def do_act(form, run=run_gh, state=None, p=None):
         return 502, dict(error=f"GitHub: {ex}")
     log.info("action ok on %s: %s -> %s", p.get("name", ""), form.get("action"), msg)
     return 200, dict(ok=True, msg=msg)
+
+
+# ---------- compliance check (Settings > Policies): the report is the check's (PC-108); the Cockpit shows it and starts the check ----------
+_compliance_lock = threading.Lock()
+
+
+def compliance_status_path(p):
+    """The run status of the project's compliance check: <data dir>/<project name>/compliance-run.json (the page polls it)."""
+    return DATA_DIR / (p.get("name") or p["repo"].split("/")[-1]) / "compliance-run.json"
+
+
+def _write_json(f, data):
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data))
+    os.replace(tmp, f)
+
+
+def _alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, TypeError):
+        return False
+
+
+def compliance_of(p):
+    """One project's compliance view: configured, the report (date, violations; None = never run), the run state."""
+    try:
+        status = json.loads(compliance_status_path(p).read_text())
+    except (OSError, ValueError):
+        status = None
+    out = dict(name=p.get("name", ""), configured=bool(p.get("compliance") and p.get("git")), report=None, path=L.COMPLIANCE_REPORT,
+               run=dict(status or {}, state=L.compliance_run_state(status, status and _alive(status.get("pid")))))
+    f = compliance_report_file(p)
+    if f:
+        try:
+            r = L.parse_compliance(f.read_text())
+            out["report"] = dict(r, checked=r["checked"] or dt.datetime.fromtimestamp(f.stat().st_mtime).isoformat(timespec="minutes"))
+        except (OSError, UnicodeDecodeError) as ex:
+            out["error"] = f"report unreadable: {ex}"
+    return out
+
+
+def build_compliance():
+    """The compliance view of every configured project (local files only, no GitHub)."""
+    return dict(steering=CFG["steer"], projects=[compliance_of(p) for p in (PROJECTS or {CFG.get("name", ""): CFG}).values()])
+
+
+def start_compliance(p):
+    """Start the project's compliance check detached, in its clone; one run at a time per project. The status file records the run.
+    ValueError when not configured or already running. The check itself writes the report; the Cockpit writes nothing into the project."""
+    if not (p.get("compliance") and p.get("git")):
+        raise ValueError("compliance check not configured: set the project's `compliance` command and `git` clone")
+    name = p.get("name", "")
+    with _compliance_lock:
+        if compliance_of(p)["run"]["state"] == "running":
+            raise ValueError(f"a compliance check of {name} is already running")
+        f = compliance_status_path(p)
+        f.parent.mkdir(parents=True, exist_ok=True)
+        logf = open(f.with_suffix(".log"), "w")
+        proc = subprocess.Popen(p["compliance"], cwd=pathlib.Path(p["git"]).expanduser(), stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                start_new_session=True, env=dict(os.environ, COMPLIANCE_REPORT=L.COMPLIANCE_REPORT))
+        rec = dict(state="running", pid=proc.pid, started=time.time())
+        _write_json(f, rec)
+
+    def wait():
+        code = proc.wait()
+        logf.close()
+        _write_json(f, dict(rec, state="ended", exit=code, ended=time.time()))
+        log.info("compliance check of %s ended with exit %s", name, code)
+
+    threading.Thread(target=wait, daemon=True).start()
+    log.info("compliance check of %s started (pid %d): %s", name, proc.pid, " ".join(p["compliance"]))
+    return f"compliance check of {name} started"
+
+
+def compliance_report_file(p):
+    """The project's current report file, or None."""
+    f = pathlib.Path(p["git"]).expanduser() / L.COMPLIANCE_REPORT if p.get("git") else None
+    return f if f and f.is_file() else None
 
 
 # ---------- rules ----------
@@ -1229,6 +1314,11 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, get_queue(p))
             if u.path == "/api/usage":
                 return self.send(200, usage_served(p))
+            if u.path == "/api/compliance":
+                return self.send(200, build_compliance())
+            if u.path == "/compliance-report":
+                f = compliance_report_file(p)
+                return self.send(200, f.read_bytes(), "text/plain; charset=utf-8") if f else self.send(404, dict(error="no compliance report yet"))
             if u.path == "/api/rules":
                 return self.send(200, get_rules(p))
             if u.path == "/api/rulesprs":
@@ -1303,7 +1393,7 @@ def resolve(a):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--projects", help="JSON {default, projects:[{name, repo, project?, manager?, modules?, git?, code?, code_collect?, phases?, meta?}]}: serve several projects (replaces the single-project flags)")
+    ap.add_argument("--projects", help="JSON {default, projects:[{name, repo, project?, manager?, modules?, git?, code?, code_collect?, compliance?, phases?, meta?}]}: serve several projects (replaces the single-project flags)")
     ap.add_argument("--repo", help="OWNER/REPO")
     ap.add_argument("--manager", help="the one login whose protected labels count (default: the repo owner)")
     ap.add_argument("--port", type=int, default=8795)
@@ -1313,6 +1403,7 @@ def main():
     ap.add_argument("--modules", help="JSON {modules:[{id,name,docs?}], assign:[{path,module}]}")
     ap.add_argument("--phases", help="extra timeline.json ({module, events:[...]}) merged into the timeline")
     ap.add_argument("--code", help="code snapshot directory: metrics.json and erd|dataflow|deps|js.svg (see README)")
+    ap.add_argument("--compliance", help="the compliance check command (PC-108), run in the --git clone; it writes docs/compliance/compliance-report.md")
     ap.add_argument("--code-collect", help="the code snapshot's collector command, run by tools/code_snapshot_refresh.py when the snapshot is stale")
     ap.add_argument("--token-file", help="keep the access token in this file (created 0600 if missing), so the URL survives restarts")
     ap.add_argument("--cache-dir", help="keep the slow answers on disk here (default: <data dir>/cache) so that a restarted service shows data at once; 'none' = memory only")
