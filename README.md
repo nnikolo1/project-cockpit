@@ -81,7 +81,7 @@ An agent that finds a file contradicting a standing policy files a task with `to
 ## Several projects
 `--projects FILE` serves several repos from one instance (replaces `--repo`, `--manager`, `--project`, `--git`, `--modules`, `--phases`, `--code`; `--port`, `--lan`, `--read-only`, `--token-file` stay global):
 `{"default": "widgets", "projects": [{"name": "widgets", "repo": "acme/widgets", "project": 3, "manager": "alice", "modules": "m.json", "git": "~/src/widgets", "code": "~/snap"}, {"name": "gadgets", "repo": "acme/gadgets"}]}`.
-Only `name` and `repo` are required (optional: `project`, `manager`, `modules`, `git`, `code`, `code_collect`, `phases`, `meta`, `stats_cache`). With more than one project the header shows a selector (remembered in the browser); every `/api/*` call takes `?project=NAME` (default: the `default`), `/api/projects` lists `[{name, repo}]`, and only the visible project is polled.
+Only `name` and `repo` are required (optional: `project`, `manager`, `modules`, `git`, `code`, `code_collect`, `compliance`, `phases`, `meta`, `stats_cache`). With more than one project the header shows a selector (remembered in the browser); every `/api/*` call takes `?project=NAME` (default: the `default`), `/api/projects` lists `[{name, repo}]`, and only the visible project is polled.
 Rationale and limits: [ADR 0012](docs/adr/0012-several-projects-in-one-instance.md).
 
 ## Daily backup to Google Drive
@@ -96,6 +96,8 @@ GitHub setup: `kit/` holds labels (`kit/setup.sh OWNER/REPO`), issue forms and t
 Optional `rules` key in the `--modules` JSON: `{"rules": {"groups": [{"name": "Instructions", "paths": ["CLAUDE.md", "**/CLAUDE.md"]}], "managers": ["Name or e-mail"], "bots": ["[bot]", "noreply@anthropic"]}}`. `bots` lists substrings of author name and e-mail that mark an agent-assisted change; when absent, the two values shown are the default. Globs are repo-relative; `**/` spans directories (or none), `*` and `?` stay within one path segment.
 Needs `--git` (a local clone). The Policies section of the Settings tab lists the policy files and their last change, the last 90 days of changes with a diff excerpt, and open pull requests touching them.
 A change is flagged when it carries a Co-Authored-By trailer or bot author, or is not by a listed Manager. Review marks stay in the browser (localStorage); nothing is stored server-side.
+
+**Compliance** (top of the Policies section): a card per project with the number of open violations, a link to its current compliance report `docs/compliance/compliance-report.md` (served at `/compliance-report?project=NAME`) and its date, or "never run"; below, every open violation of every project (file, quoted passage, constitutional rule, reason), highlighted until a later report no longer lists it. The Cockpit's "Needs you" strip shows the selected project's count. The page never writes a policy file. Unless `--read-only`, **Run compliance check** (two clicks, the second confirms naming the project) starts the project's `compliance` command (project key, or `--compliance`; needs `git`) detached in the clone, one run at a time per project; the page polls its state. `GET /api/compliance` serves all projects. Report format, command and run record: [docs/contracts/compliance-report.md](docs/contracts/compliance-report.md).
 
 ## How it works
 - GitHub is the store; labels carry the protected state (`released`, `P1`-`P3`, `due:DATE`, `cancelled`), counted only if the Manager set them.

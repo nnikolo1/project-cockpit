@@ -679,16 +679,16 @@ def snapshot_age(generated_at, now, max_h=None):
     return dict(age_h=None if age is None else round(age, 1), stale=age is None or age > max_h, max_age_h=max_h)
 
 
-def collect_command(value):
-    """The project setting `code_collect` (a list of arguments, or one string split like a shell would) -> argv list, or None when unset.
-    Raises ValueError for anything else."""
+def collect_command(value, what="code_collect"):
+    """A command project setting (`code_collect`, `compliance`: a list of arguments, or one string split like a shell would) -> argv list,
+    or None when unset. Raises ValueError for anything else."""
     if value in (None, "", []):
         return None
     if isinstance(value, str):
         return shlex.split(value)
     if isinstance(value, list) and all(isinstance(x, str) and x for x in value):
         return list(value)
-    raise ValueError(f"code_collect: expected a command string or a list of strings (got {value!r})")
+    raise ValueError(f"{what}: expected a command string or a list of strings (got {value!r})")
 
 
 def refresh_outcome(exit_code, metrics_after, now, max_h=None):
@@ -1903,3 +1903,32 @@ def pane_problem(api, body):
     if api == "/api/code":
         return None if body.get("wired") else "code snapshot not wired"
     return None
+
+
+# ---------- compliance report (written by the compliance check, PC-108; read by Settings > Policies) ----------
+COMPLIANCE_REPORT = "docs/compliance/compliance-report.md"  # one current report per project, inside its clone, overwritten by each run
+
+
+def parse_compliance(text):
+    """The compliance report (docs/contracts/compliance-report.md) -> dict(checked, violations=[{file, line, passage, rule, reason}]).
+    `checked` is the `Checked:` line (None when absent). Only the `## Violations` section is read; "none" there means no violation."""
+    m = re.search(r"^Checked:\s*(.+?)\s*$", text, re.M)
+    sec = re.search(r"^## Violations[^\n]*\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+    out = []
+    for block in re.split(r"^### ", sec.group(1) if sec else "", flags=re.M)[1:]:
+        head, *body = block.split("\n")
+        file, _, line = head.strip().rpartition(":") if re.search(r":\d+$", head.strip()) else (head.strip(), "", "")
+        field = lambda k: next((b.split(":", 1)[1].strip() for b in body if re.match(rf"-\s*{k}\s*:", b, re.I)), "")
+        out.append(dict(file=file, line=int(line) if line else None, passage=" ".join(b.lstrip("> ").rstrip() for b in body if b.startswith(">")).strip(),
+                        rule=field("Rule"), reason=field("Reason")))
+    return dict(checked=m.group(1) if m else None, violations=out)
+
+
+def compliance_run_state(status, alive):
+    """The run status file's record (or None) and whether its process still lives -> the state the page shows:
+    idle (never started here), running, done, failed (exit code not 0), interrupted (recorded as running, but the process is gone)."""
+    if not status:
+        return "idle"
+    if status.get("state") == "running":
+        return "running" if alive else "interrupted"
+    return "done" if status.get("exit") == 0 else "failed"

@@ -81,6 +81,7 @@
   {"path": "tests/test_workflow.py", "module": "cockpitwebpage", "basis": "guards the Workflow page (web/index.html) against going stale; tests follow the code"},
   {"path": "tests/test_usage.py", "module": "githubclient", "basis": "tests usage_report in logic.py and the usage endpoint in cockpit.py; tests follow the code"},
   {"path": "tests/test_settings.py", "module": "githubclient", "basis": "tests the settings validation in logic.py and the settings action in cockpit.py; tests follow the code"},
+  {"path": "tests/test_compliance.py", "module": "githubclient", "basis": "tests the compliance report parser in logic.py and the compliance view and action in cockpit.py; tests follow the code"},
   {"path": "tests/test_report.py", "module": "githubclient", "basis": "tests the report functions of logic.py"},
   {"path": "tests/test_rules.py", "module": "githubclient", "basis": "tests the rule-change functions of logic.py"},
   {"path": "tests/fixtures/cardmeta/", "module": "githubclient", "basis": "synthetic inputs of tests/test_cardmeta.py"},
