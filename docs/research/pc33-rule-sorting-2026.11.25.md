@@ -61,3 +61,31 @@ Verdicts: **G** generic (opinionated but fit for any developer using Claude Code
 | 39 | Gate chained commands on the tests (validate before writing, join test and push with `&&`) | G | rule line |
 | 40 | Batch pushes when hosted CI minutes are metered | S | the private repository |
 | 41 | Verify "untracked" or "missing" claims with a real check before stating them | G | folded into the evidence rule (21) |
+
+## Batch 4: the Cockpit's task and release workflow, and the skills (proposed; the owner has decided only the point below)
+
+Decided by the owner, 2026-11-25: the core (C) rules reach the Claude of a project that uses the Cockpit as a short, generated "Cockpit workflow" section of the managed block (PC-92), derived from the constitution, which stays the single source; a project does not describe the workflow itself.
+
+Proposed, not yet answered by the owner (rows 42 to 58 and the skills):
+
+| # | Rule | Proposed |
+|---|---|---|
+| 42 | Open questions persisted as issues (`question`, `type:decision`) | C |
+| 43 | Task provenance block and sanitising of owner words in tasks | C |
+| 44 | Who may create tasks and when one counts as released; a Worker suggests at most one task | C |
+| 45 | The assistant never sets `released`, priority, deadline or `cancelled` on its own initiative | C |
+| 46 | All tasks go through the Task Queue; tasks about the queue are `interactive-only` | C |
+| 47 | One global ranking, one project first by setting, the others equal | C |
+| 48 | Blocked tasks are never assigned | C |
+| 49 | The Interactive agent merges unmerged tasks, may delegate, parallel when conflict-free | C |
+| 50 | Policy findings are filed and released by the finder, worked by someone else | C |
+| 51 | Components refreshed within 24 hours; the daily job reports and files gaps | C |
+| 52 | Local policy files are never overwritten automatically | C |
+| 53 | The UI is the owner's alone; settings may narrow ranges | C |
+| 54 | Module-map rules (ambiguity, null with a basis, notes, 30 percent threshold) | C, optional |
+| 55 | Design talk is not a decision | G |
+| 56 | The daily report is a policy | G, optional |
+| 57 | Boot-filling delegation text in the jcrawler instruction file | obsolete (superseded by the Dispatcher) |
+| 58 | Restart the Cockpit after a merge, redraw the Workflow page, test isolation with two users | S |
+
+Skills: `agent-brief` G; manager review G; independent reviewer G; worker task protocol and filing a question C; `ats-investigator`, `crawl-qc` S; `code-writer` split.
