@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+"""Merge gate: run the full tests, page-code tests with node included, and print PASS or FAIL.
+
+The merge step runs it before a Worker branch is merged (CLAUDE.md, Merging); FAIL means do not merge.
+  tools/merge_gate              tests the working tree of the current repository
+  tools/merge_gate BRANCH       tests HEAD with BRANCH merged into it, in a temporary worktree (the working tree is not touched)
+Node is required: without it the page-code tests would be skipped, so the gate fails instead of passing a partial run.
+Exit: 0 PASS, 1 FAIL.
+"""
+import argparse
+import logging
+import pathlib
+import shutil
+import subprocess
+import sys
+import tempfile
+
+log = logging.getLogger("merge_gate")
+GIT_ID = ["-c", "user.name=merge-gate", "-c", "user.email=merge-gate@localhost"]
+
+
+def git(cwd, *args):
+    return subprocess.run(["git", *GIT_ID, *args], cwd=cwd, capture_output=True, text=True)
+
+
+def run_tests(tree):
+    """Run pytest in `tree` -> None when green, else the reason."""
+    if not shutil.which("node"):
+        return "node not found: the page-code tests cannot run"
+    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"], cwd=tree)
+    return None if r.returncode == 0 else f"pytest exited with {r.returncode}"
+
+
+def gate(repo, branch=None):
+    """-> None when the gate passes, else the reason."""
+    if branch is None:
+        return run_tests(repo)
+    with tempfile.TemporaryDirectory(prefix="merge-gate-") as tmp:
+        tree = pathlib.Path(tmp) / "tree"
+        r = git(repo, "worktree", "add", "--detach", str(tree), "HEAD")
+        if r.returncode:
+            return f"cannot make a worktree: {r.stderr.strip()}"
+        try:
+            r = git(tree, "merge", "--no-edit", "--no-ff", branch)
+            if r.returncode:
+                return f"{branch} does not merge cleanly into HEAD: {(r.stdout + r.stderr).strip()}"
+            return run_tests(tree)
+        finally:
+            git(repo, "worktree", "remove", "--force", str(tree))
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("branch", nargs="?", help="the branch to merge into HEAD before testing (default: test the working tree)")
+    a = ap.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", stream=sys.stderr)
+    top = git(".", "rev-parse", "--show-toplevel")
+    if top.returncode:
+        reason = "not inside a git repository"
+    else:
+        reason = gate(pathlib.Path(top.stdout.strip()), a.branch)
+    print("merge gate: PASS" if reason is None else f"merge gate: FAIL ({reason})")
+    return 0 if reason is None else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

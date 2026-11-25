@@ -156,6 +156,22 @@ def test_task_queue_local_part_is_served_while_github_fails(monkeypatch):
     assert q["log"][0]["state"] == "launched" and "values" in q["settings"]
 
 
+def test_task_queue_shows_the_last_ci_run_of_main_and_survives_github_failing(monkeypatch):
+    calls = []
+    run = [dict(status="completed", conclusion="failure", headSha="abc", createdAt="2026-11-24T08:00:00Z", url="https://x/runs/7")]
+    monkeypatch.setattr(C, "run_gh", lambda args: calls.append(args) or json.dumps(run))
+    ci = C.get_ci(P)
+    assert ci["state"] == "red" and ci["url"] == "https://x/runs/7"
+    assert calls[0][:2] == ["run", "list"] and calls[0][calls[0].index("--branch") + 1] == "main"
+
+    def down(args):
+        raise RuntimeError("gh: no network")
+    monkeypatch.setattr(C, "run_gh", down)
+    assert C.get_ci(dict(P, name="other", repo="o/other"))["state"] == "unknown"  # no earlier copy: unknown, not an error page
+    page = (pathlib.Path(C.__file__).parent / "web" / "index.html").read_text()
+    assert "api('/api/ci')" in page and "+ciLine(CI)" in page and "CI on main: " in page
+
+
 def test_task_queue_local_part_without_files_is_empty():
     q = L.queue_local(None, None)
     assert q == dict(workers=[], log=[])

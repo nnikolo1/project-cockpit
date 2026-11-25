@@ -225,6 +225,7 @@ function sortKey(t){return t.stage==='wip'?0:(t.stage==='released'?1:(t.stage===
 /* Data layer: everything comes from the backend (/api/state, /api/timeline, /api/code). Nothing is stored in the browser. */
 let PROJ=null,PROJS=[],OFF=null;  /* OFF: set when this is an offline copy from a backup ({created, ghAttempts, gaps}) */  /* the selected project (name) and the configured ones; the choice is kept in localStorage `cockpit-project` */
 const NOMETA=()=>({footprint:{status:'missing'},churn:{status:'missing'},ambiguity:{status:'missing'}});
+let CI=null;  /* /api/ci: the last run of the test workflow on main (GitHub, hourly cache), shown on the Task Queue page */
 let QL=null;  /* /api/queue: the local part of the Task Queue (Dispatcher state file, processing log, settings); never needs GitHub */
 let Q={questions:[],counts:{},projects:[]};  /* open questions of every project: /api/questions, not tied to the selected project */
 let COMP={steering:false,projects:[]},compTimer=0;  /* /api/compliance: every project's compliance report and check run (local files), polled while a run is on */
@@ -293,6 +294,7 @@ async function reload(pane){
   }catch(e){if(mine!==PROJ)return;errs.push(String(e.message||e));}
   /* 2. the GitHub-sourced parts: a failure leaves the copy the page already has, and the banner says so */
   const qp=loadQuestions(fq),pp=loadPrs(fr);
+  api('/api/ci').then(x=>{if(mine===PROJ){CI=x;render();}}).catch(e=>{});  /* on its own: it never blocks the page */
   try{
     const [s,f,r]=await Promise.all([soft(api('/api/state'+(fresh?'?fresh=1':'')),null,'state'),soft(api('/api/timeline'+(ft?'?fresh=1':'')),{entries:[],activity:[]},'timeline'),api('/api/rules').catch(e=>({configured:false,error:e.message}))]);
     if(mine!==PROJ)return;  /* the user switched project while this was loading: drop the answer */
@@ -560,12 +562,19 @@ function block(name,fn,page){
     return page?'<div class="page">'+c+'</div>':c;}
 }
 /* safe-block:end */
+/* The last run of the test workflow on main: red is a warning (until the daily job files it as a finding, PC-91). */
+function ciLine(c){
+  if(!c)return '';
+  const t=c.time?' started '+esc(new Date(c.time).toLocaleString()):'',a=c.url?' <a href="'+esc(c.url)+'" target="_blank" rel="noopener">run</a>':'';
+  const w={green:'passed',red:'failed ('+esc(c.conclusion||'')+')',running:'running',other:esc(c.conclusion||'no result'),none:'no run recorded',unknown:'unknown: '+esc(c.error||'GitHub unavailable')}[c.state]||esc(c.state);
+  return '<p class="'+(c.state==='red'?'warnline':'muted')+'" style="font-size:12px;margin:6px 0 0">CI on main: '+w+t+(c.sha?' <span class="mono">'+esc(c.sha.slice(0,7))+'</span>':'')+a+'.</p>';
+}
 function vQueueLocal(){
   const nf=t=>D&&D.tasks.find(x=>x.key===t),L=QL;
-  if(!L)return '<div class="card"><h2>Being processed now</h2><span class="muted">The Dispatcher files could not be read.</span></div>';
+  if(!L)return '<div class="card"><h2>Being processed now</h2><span class="muted">The Dispatcher files could not be read.</span>'+ciLine(CI)+'</div>';
   return '<div class="card"><h2>Being processed now</h2>'+(L.workers.length?L.workers.map(w=>{const t=nf(w.task);return '<div class="row" style="gap:10px;margin-top:8px"><b class="mono">'+esc(w.worker)+'</b><b class="mono">'+esc(w.task||'?')+'</b>'+(t?'<button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button>':'')+'<span class="muted">launched '+t0(w.launched)+(w.started?'':' · starting')+'</span></div>';}).join(''):'<p class="muted" style="margin:8px 0 0">No Worker is running now.</p>')
    +'<p class="muted" style="font-size:12px;margin:10px 0 0">From the Dispatcher: '+(L.settings.values.enabled?'on':'off')+', '+L.settings.values.workers+' Worker'+(L.settings.values.workers===1?'':'s')+' at most, every '+L.settings.values.interval_minutes+' min (settings in the Settings tab).</p>'
-   +bkLine(L.backup)
+   +bkLine(L.backup)+ciLine(CI)
    +(L.log.length?'<details style="margin-top:8px"><summary class="muted">Processing log, newest '+L.log.length+'</summary><div class="mono" style="font-size:12px;margin-top:6px">'+L.log.map(r=>t0(r.time)+' '+esc(r.heartbeat?r.heartbeat:[r.task,r.state,r.reason,r.worker].filter(Boolean).join(' '))).join('<br>')+'</div></details>':'')+'</div>';
 }
 function vBacklog(){

@@ -35,6 +35,7 @@ Before doing anything it prints `Plan:` with every file it writes and every comm
 |---|---|---|
 | macOS on Apple silicon | the Dispatcher runs under launchd, the Workers' image is Alpine arm64 and runs in Apple's `container` tool; the viewer alone also runs on Linux (systemd unit in 5) | `uname -sm`: `Darwin arm64` |
 | Python 3.14, stdlib only | everything in this repository | `python3 --version`: `Python 3.14` |
+| `node` on the machine that merges | `tools/merge_gate` runs the page-code tests with it and fails without it | `node --version`: any version |
 | `git` and the GitHub CLI `gh`, logged in as the Manager | the Cockpit acts as the `gh` login and stores no GitHub token | `gh auth status`: `Logged in to github.com account LOGIN` |
 | Apple's `container` tool, its service started | the Workers' container | `container system status`: the service is running |
 | The model credential in a file outside git, mode 0600 (the owner's subscription token) | the Dispatcher's proxy adds it to the Workers' requests; it is never logged | `ls -l TOKENFILE`: `-rw-------` |
@@ -65,7 +66,7 @@ Done by the one command (0, order 5). By hand: write the LaunchAgent (macOS) or 
 
 ### 5. Install the daily upkeep job and the Dispatcher
 
-- **Daily upkeep job, planned: PC-91 (with PC-92).** Until then its steps run by hand, per project, in this order: `tools/code_snapshot_refresh.py`, `tools/cardmeta_collect.py`, `tools/module_map_upkeep.py`, `tools/metadata_gaps.py`, `tools/compliance_check.py --all --file-findings`, `tools/project_backup.py` (each in the README).
+- **Daily upkeep job, planned: PC-91 (with PC-92).** Until then its steps run by hand, per project, in this order: `tools/code_snapshot_refresh.py`, `tools/cardmeta_collect.py`, `tools/module_map_upkeep.py`, `tools/metadata_gaps.py`, `tools/compliance_check.py --all --file-findings`, `tools/ci_main.py --repo OWNER/NAME --file-task`, `tools/project_backup.py` (each in the README).
 - **The Workers' image (by hand)**: copy the `claude` binary to the root of a build context that holds this repository's layout, then `container build --dns 1.1.1.1 -t cockpit-worker:latest -f dispatcher/image/Containerfile CONTEXT`. Expected: the build ends with the image tag; `container image list` shows `cockpit-worker`.
 - **The Dispatcher and the quota collector**: `python3 -m dispatcher.launchd render --project widgets --repo acme/widgets --repo-dir ~/src/widgets --token-file TOKENFILE` prints the paths of the two property lists and the two `launchctl bootstrap gui/$(id -u) FILE` commands; run those **by hand**, quota collector first. Expected: `launchctl print gui/$(id -u)/com.project-cockpit.dispatcher.widgets` shows the job; the Settings page shows the Dispatcher's values (it is on by default; switch it off there to install without starting Workers).
 

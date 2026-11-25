@@ -1313,9 +1313,9 @@ def _json_lines(text):
 
 
 def _epoch(s):
-    """Epoch seconds of an ISO time; a time without a zone is local time. None if unreadable."""
+    """Epoch seconds of an ISO time (a trailing Z is UTC); a time without a zone is local time. None if unreadable."""
     try:
-        return dt.datetime.fromisoformat(s).astimezone().timestamp()
+        return dt.datetime.fromisoformat(re.sub(r"Z$", "+00:00", s)).astimezone().timestamp()
     except (ValueError, TypeError, AttributeError):
         return None
 
@@ -1999,6 +1999,34 @@ def backup_status_gaps(text, now, max_age_h=GAPS_MAX_AGE_H):
     elif age > max_age_h:
         out.append((f"last successful backup is older than {max_age_h:g} hours", age))
     return out
+
+
+# ---------- the last CI run of main (tools/ci_main.py, the Task Queue page) ----------
+CI_WORKFLOW = "test.yml"
+CI_FIELDS = "databaseId,status,conclusion,headSha,createdAt,url"
+CI_RED = ("failure", "timed_out", "startup_failure")
+RED_MAIN_TITLE = "CI is red on main: the test workflow fails"
+RED_MAIN_POLICY = "Merging: a commit is merged only when it obeys all policies, tests passing included (CLAUDE.md, Merging)."
+
+
+def ci_run(text):
+    """`gh run list --json CI_FIELDS --limit 1` output -> dict(state: green|red|running|other|none, conclusion, sha, time, url)."""
+    try:
+        runs = json.loads(text or "[]")
+    except ValueError:
+        runs = None
+    r = runs[0] if isinstance(runs, list) and runs and isinstance(runs[0], dict) else None
+    if r is None:
+        return dict(state="none", conclusion=None, sha=None, time=None, url=None)
+    c = r.get("conclusion") or None
+    state = "running" if r.get("status") != "completed" else "green" if c == "success" else "red" if c in CI_RED else "other"
+    return dict(state=state, conclusion=c, sha=r.get("headSha"), time=r.get("createdAt"), url=r.get("url"))
+
+
+def red_main_body(run):
+    """The text of the red-main finding (tools/file_finding.py adds the policy, the files and the Origin block)."""
+    return (f"The last run of the workflow `{CI_WORKFLOW}` on main is red ({run['conclusion']}): {run['url']}, commit {run['sha']}, "
+            f"started {run['time']}.\n\nWork: find the failing jobs, fix the cause (not the test), and confirm that `tools/merge_gate` passes.")
 
 
 RETENTION_MIN_DAYS = 3650  # owner, 2026-11-24: keep the session transcripts (the source of the token statistics) as long as possible
