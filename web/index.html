@@ -243,6 +243,8 @@ function stageBar(r){const n=STAGES.reduce((a,s)=>a+r[s],0);if(!n)return '';
   return STAGES.slice(0,6).map(s=>r[s]?'<i style="width:'+(r[s]/n*100)+'%;background:'+col[s]+'"></i>':'').join('');}
 /* The size every module list is ordered by (logic.order_modules on the server: biggest first, ties by name, unsized after, Unassigned last). */
 const lines=m=>m.lines.toLocaleString('en-US')+' lines';
+/* the size a module was ordered by, in a sub-module's meta line (PC-89, PC-90): its code lines, or nothing when it has none */
+const sizeSum=m=>m.lines==null?'<span class="muted">size: no data</span> ':'<span class="muted">'+lines(m)+'</span> ';
 const sizeNote=m=>m.lines!=null?' · '+lines(m):'';
 /* Two chip rows: the top-level modules, then (indented) the sub-modules of the selected one. ex = only tasks at the module level itself. */
 function modFilter(cur,act,first,allOf,unsorted,extra){
@@ -420,7 +422,7 @@ function subBlock(m){
   const rows=m.children.map(id=>MODULES.find(x=>x.id===id)).map(q=>{const n=STAGES.reduce((a,s)=>a+q.rollup[s],0);
     return '<div class="subrow"><button class="linkbtn" data-act="mod" data-m="'+q.id+'"><b>'+esc(q.short)+'</b>'+(q.desc?'<span class="muted" style="font-size:12px;display:block">'+esc(q.desc)+'</span>':'')+'</button><span class="muted">'+n+'</span><span class="bar" aria-hidden="true">'+stageBar(q.rollup)+'</span>'
      +'<div style="grid-column:1/-1">'+dlForm(q,D.modDeadline[q.id]||'',true)
-     +'<details class="meta" style="border:0;padding:0"><summary>'+churnSum(q.id)+' <span class="muted">more</span></summary>'+metaBlock(q.id)+'</details></div></div>';}).join('');
+     +'<details class="meta" style="border:0;padding:0"><summary>'+sizeSum(q)+churnSum(q.id)+' <span class="muted">more</span></summary>'+metaBlock(q.id)+'</details></div></div>';}).join('');
   const un=STAGES.reduce((a,s)=>a+m.counts[s],0);
   return '<div style="display:flex;flex-direction:column;gap:2px"><span class="label">Sub-modules</span>'+rows+'<span class="muted" style="font-size:12px">'
    +(un?'<button class="linkbtn" style="color:var(--accent)" data-act="mod" data-m="'+m.id+'" data-x="1">'+un+' tasks only at module level</button>':'No tasks only at module level')+'. Deadlines inherit: task, sub-module, module.</span></div>';}

@@ -362,15 +362,24 @@ def snapshot_lines(metrics):
 
 
 def order_modules(mods, lines):
-    """The one module order of every list (cards, chips, module navigation): top-level modules by size (`lines` {id: code lines}),
-    biggest first, equal sizes by name; unsized ones after them in their map order; virtual entries ("Unassigned") last. Each top-level
-    module is followed by its sub-modules in their own order. Sets `lines` (None when unknown) on every module; returns a new list."""
+    """The one module order of every list (cards, chips, module navigation): modules by size (`lines` {id: code lines}), biggest
+    first, equal sizes by name; unsized ones after them in their map order; virtual entries ("Unassigned") last. Top-level modules are
+    ordered among themselves, the sub-modules of one module among their siblings only (PC-90: same rule, a sub-module never leaves its
+    module); each top-level module is followed by its sub-modules, and its `children` list has the same order. Sets `lines` (None when
+    unknown) on every module; returns a new list."""
     mods = [dict(m, lines=lines.get(m["id"])) for m in mods]
     pos = {m["id"]: i for i, m in enumerate(mods)}
-    tops = [m for m in mods if not parent_id(m["id"])]
-    tops.sort(key=lambda m: (bool(m.get("virtual")), m["lines"] is None, -(m["lines"] or 0),
-                             m["name"].lower() if m["lines"] is not None else "", pos[m["id"]]))
-    out = [x for t in tops for x in [t] + [m for m in mods if m["id"].startswith(t["id"] + "/")]]
+
+    def by_size(ms):
+        return sorted(ms, key=lambda m: (bool(m.get("virtual")), m["lines"] is None, -(m["lines"] or 0),
+                                         m["name"].lower() if m["lines"] is not None else "", pos[m["id"]]))
+    tops = by_size([m for m in mods if not parent_id(m["id"])])
+    out = []
+    for t in tops:
+        subs = by_size([m for m in mods if m["id"].startswith(t["id"] + "/")])
+        if "children" in t:
+            t["children"] = [m["id"] for m in subs if m["id"] in t["children"]] + [c for c in t["children"] if c not in {m["id"] for m in subs}]
+        out += [t] + subs
     seen = {m["id"] for m in out}
     return out + [m for m in mods if m["id"] not in seen]  # a sub-module without its parent listed is never dropped
 
