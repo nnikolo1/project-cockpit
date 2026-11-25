@@ -2445,3 +2445,78 @@ def compliance_run_state(status, alive):
     if status.get("state") == "running":
         return "running" if alive else "interrupted"
     return "done" if status.get("exit") == 0 else "failed"
+
+
+# ---------- action log (PC-132): one JSON line per state-changing action or page failure; never a token, a credential or a task text ----------
+ACTION_LOG_LIMIT = 200  # the Settings view shows at most this many events
+_LOG_PARAMS = ("p", "d", "b", "module", "type", "cls", "parent", "id", "enabled")  # short, non-secret values kept as given
+_LOG_SIZES = ("body", "desc")  # texts: only their size is kept
+_SECRETISH = re.compile(r"\b(gh[pousr]_[A-Za-z0-9_]{10,}|github_pat_[A-Za-z0-9_]{10,}|sk-[A-Za-z0-9_-]{10,})\b|([?&]t=)[^ &\"']+")
+
+
+def scrub(text, secrets=(), limit=300):
+    """A message safe for the action log: known secrets and token-shaped strings replaced, cut to `limit` characters."""
+    s = str(text if text is not None else "")
+    for x in secrets:
+        if x:
+            s = s.replace(x, "<secret>")
+    return _SECRETISH.sub(lambda m: (m.group(2) or "") + "<secret>", s)[:limit]
+
+
+def _short(v, limit=40):
+    return v if isinstance(v, (bool, int, float)) else scrub(v, limit=limit)
+
+
+def _page_id(v):
+    return v if isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,40}", v) else ""
+
+
+def _now_iso(now):
+    return (now or dt.datetime.now(dt.timezone.utc)).isoformat(timespec="seconds")
+
+
+def action_record(form, outcome, msg, ms, task=None, version=None, now=None, secrets=()):
+    """The action log's line of one action posted to /api/act: what, on which task, the non-secret parameters (the new title, the size of an
+    edited text, never the text), outcome (ok | refused | failed), message, duration in ms, the page's id and the code version."""
+    params = {k: _short(form[k]) for k in _LOG_PARAMS if form.get(k) not in (None, "")}
+    if form.get("title"):
+        params["title"] = scrub(form["title"], secrets, 200)
+    params.update({f"{k}_chars": len(str(form[k])) for k in _LOG_SIZES if form.get(k) is not None})
+    return dict(t=_now_iso(now), source="server", project=_short(form.get("project") or "", 60), action=_short(form.get("action") or "", 30),
+                task=_short(task if task is not None else form.get("n") or "", 30), params=params, outcome=outcome, msg=scrub(msg, secrets),
+                ms=int(ms), page=_page_id(form.get("page")), version=version or "")
+
+
+PAGE_KINDS = dict(network="failed", script="failed", refused="refused")
+
+
+def page_record(ev, project, version=None, now=None, secrets=()):
+    """A failure the page reports (/api/event): a network error on an action, a script error, a refusal it showed -> the action log's line.
+    ValueError when it is not one (unknown kind, no page id): the endpoint refuses it rather than log noise."""
+    kind, page = ev.get("kind"), _page_id(ev.get("page"))
+    if kind not in PAGE_KINDS or not page:
+        raise ValueError("an event needs a kind (network, script, refused) and the page's id")
+    ms = ev.get("ms")
+    ok_ms = isinstance(ms, (int, float)) and not isinstance(ms, bool) and math.isfinite(ms)
+    return dict(t=_now_iso(now), source="page", kind=kind, project=_short(project or "", 60), action=_short(ev.get("action") or "", 30),
+                task=_short(ev.get("task") or "", 30), params={}, outcome=PAGE_KINDS[kind], msg=scrub(ev.get("msg"), secrets),
+                ms=int(ms) if ok_ms else None, at=scrub(ev.get("at"), limit=40), page=page, version=version or "")
+
+
+def filter_events(lines, action="", outcome="", task="", limit=ACTION_LOG_LIMIT):
+    """Action log lines, newest first, -> the parsed events that match every given filter, at most `limit`.
+    Unreadable lines are skipped. `task` matches the task key or number (with or without '#')."""
+    out, want = [], str(task).strip().lstrip("#").lower()
+    for line in lines:
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(e, dict) or (action and e.get("action") != action) or (outcome and e.get("outcome") != outcome):
+            continue
+        if want and str(e.get("task", "")).lstrip("#").lower() != want:
+            continue
+        out.append(e)
+        if len(out) >= limit:
+            break
+    return out

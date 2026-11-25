@@ -253,10 +253,10 @@ let CI=null;  /* /api/ci: the last run of the test workflow on main (GitHub, hou
 let QL=null;  /* /api/queue: the local part of the Task Queue (Dispatcher state file, processing log, settings); never needs GitHub */
 let Q={questions:[],counts:{},projects:[]};  /* open questions of every project: /api/questions, not tied to the selected project */
 let COMP={steering:false,projects:[]},compTimer=0;  /* /api/compliance: every project's compliance report and check run (local files), polled while a run is on */
-let USE=null,SET=null,CSET=null,D=null,CODE={wired:false,modules:{}},FEED=[],ACT=[],MODULES=[],RULES={configured:false},META=NOMETA();
+let USE=null,SET=null,CSET=null,ALOG=null,D=null,CODE={wired:false,modules:{}},FEED=[],ACT=[],MODULES=[],RULES={configured:false},META=NOMETA();
 const SVGC={};
 const MODDOC={};  /* module page content (/api/moduledoc) by project:id */
-const UI={route:'cockpit',filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',tlType:'all',setSec:'dispatcher',rulesGroup:'all',qProj:'all',codeMod:'unassigned',codeTab:'quality',fit:{deps:true,erd:true,js:true,flow:false},toast:'',err:'',armed:null};
+const UI={route:'cockpit',filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',tlType:'all',setSec:'dispatcher',alog:{action:'',outcome:'',task:''},rulesGroup:'all',qProj:'all',codeMod:'unassigned',codeTab:'quality',fit:{deps:true,erd:true,js:true,flow:false},toast:'',err:'',armed:null};
 const ST=()=>!!(D?D.source.steering:(SET&&SET.steering));
 const SIM=()=>!!(D&&D.source.simulate);
 const nd=(v,f)=>v==null?'<span class="muted">no data</span>':(f?f(v):v);
@@ -283,7 +283,30 @@ function modFilter(cur,act,first,allOf,unsorted,extra){
      +(unsorted&&STAGES.some(s=>tm.counts[s])?b(top,'(unsorted)',ex,true):'')+'</div>';}
   return h;}
 const pq=p=>PROJ?p+(p.includes('?')?'&':'?')+'project='+encodeURIComponent(PROJ):p;
-async function api(path,opt){let r;try{r=await fetch(pq(path),opt);}catch(e){throw new Error('the Cockpit could not be reached (it may be restarting)');}let j={};try{j=await r.json();}catch(e){}if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j;}
+async function api(path,opt){let r;try{r=await fetch(pq(path),opt);}catch(e){const x=new Error('the Cockpit could not be reached (it may be restarting)');x.network=true;throw x;}  /* never reached the server: the page logs it (PC-132) */
+  let j={};try{j=await r.json();}catch(e){}if(!r.ok){const x=new Error(j.error||('HTTP '+r.status));x.status=r.status;x.logged=!!j.error;throw x;}
+  if(PENDING.length)flush();return j;}
+/* action-log:start (PC-132) */
+/* The page's own failures (a network error on an action, a script error, a refusal the server did not answer itself) go to the server's
+   action log with this page's id. While the server cannot be reached they wait here, at most 100, and are sent with the next request that works. */
+const PAGE_ID=Math.random().toString(36).slice(2,10)+Date.now().toString(36);
+const PENDING=[],SEEN={};
+let flushing=false;
+function note(kind,action,task,msg,ms){
+  const k=kind+'|'+action+'|'+msg,now=Date.now();if(SEEN[k]&&now-SEEN[k]<60000)return;SEEN[k]=now;  /* a block that throws at every render is logged once a minute */
+  PENDING.push({project:PROJ,kind:kind,action:String(action||'').slice(0,30),task:String(task||'').slice(0,30),msg:String(msg||'').slice(0,300),ms:ms==null?null:Math.round(ms),at:new Date().toISOString(),page:PAGE_ID});
+  if(PENDING.length>100)PENDING.splice(0,PENDING.length-100);
+  flush();
+}
+async function flush(){
+  if(flushing||!PENDING.length)return;flushing=true;
+  const pr=PENDING[0].project,batch=PENDING.filter(e=>e.project===pr).slice(0,50);
+  try{const r=await fetch('/api/event'+(pr?'?project='+encodeURIComponent(pr):''),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project:pr,events:batch})});
+    if(r.ok||r.status===400||r.status===404)batch.forEach(e=>{const i=PENDING.indexOf(e);if(i>=0)PENDING.splice(i,1);});}  /* a batch the server refuses is dropped, not retried forever */
+  catch(e){}  /* still unreachable: kept for the next try */
+  finally{flushing=false;}
+}
+/* action-log:end */
 async function loadPrs(fresh){  /* never blocks or fails anything else: its own request, its own state */
   try{PRS=await api('/api/rulesprs'+(fresh?'?fresh=1':''));}catch(e){PRS={configured:true,available:false,pending:[],error:e.message};}
 }
@@ -304,6 +327,7 @@ async function loadQuestions(fresh){  /* fresh: only the owner's Refresh click o
 const PANE_STATE=['cockpit','backlog','timeline'];  /* the panes that show the GitHub task state; Code, Settings and Token Usage are local */
 async function reload(pane){
   const mine=PROJ,fresh=PANE_STATE.includes(pane),ft=pane==='timeline',fr=pane==='settings',fq=pane==='questions';
+  if(UI.route==='settings'&&UI.setSec==='actionlog')loadAlog();
   const errs=[],soft=(pr,d,w)=>pr.catch(e=>{errs.push(w+': '+e.message);return d;});  /* one failing part must not blank the others */
   /* 1. the local parts (no GitHub at all: Token Usage, Settings, Task Queue's Dispatcher part, code snapshot, card data): drawn as soon as they arrive,
         never waiting for the GitHub requests below */
@@ -362,18 +386,20 @@ const sleep=s=>new Promise(r=>setTimeout(r,s*1000));
 async function sendAct(body){  /* one try -> the answer; throws Refusal (an HTTP answer that is not ok) or the fetch's own TypeError (not reached) */
   const r=await fetch(pq('/api/act'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   let j={};try{j=await r.json();}catch(e){}
-  if(!r.ok)throw new Refusal(j.error||('HTTP '+r.status));
+  if(!r.ok){const x=new Refusal(j.error||('HTTP '+r.status));x.logged=!!j.error;throw x;}  /* an answer with its own reason is logged by the server */
   return j;}
 const NET_MSG=(i)=>'The Cockpit could not be reached (it may be restarting). Nothing was changed. Retrying in '+NET_WAIT_S+' s (try '+(i+1)+' of '+NET_TRIES+').';
 const NET_FINAL='The Cockpit could not be reached after '+NET_TRIES+' tries (it may be restarting or stopped). The action did not reach it, or it was cut off by a restart; Retry sends it again and the Cockpit never applies it twice.';
 const REACHED=' (it had reached the Cockpit before the connection broke and was applied once, not again)';
 async function post(body){  /* body without aid: a new action; with aid (the Retry button): the same action again */
-  body=Object.assign({project:PROJ,aid:newAid()},body);
+  body=Object.assign({project:PROJ,aid:newAid(),page:PAGE_ID},body);
+  const t0=performance.now(),tk=body.n&&D&&D.tasks.find(x=>x.number===+body.n);
   for(let i=1;;i++){
     let j;
     try{j=await sendAct(body);}
-    catch(e){
-      if(e instanceof Refusal){problem(body.action,'Refused: '+e.message);say('Refused: '+e.message,8000,'refused');return false;}
+    catch(e){  /* the server logs what it answered itself; the page logs what never reached it or came back without the server's own answer (PC-132) */
+      if(e instanceof Refusal){if(!e.logged)note('refused',body.action,tk?tk.key:body.n,e.message,performance.now()-t0);problem(body.action,'Refused: '+e.message);say('Refused: '+e.message,8000,'refused');return false;}
+      note('network',body.action,tk?tk.key:body.n,'try '+i+' of '+NET_TRIES+': '+(e&&e.message||e),performance.now()-t0);
       if(i>=NET_TRIES){problem(body.action,NET_FINAL);say(NET_FINAL,0,'net',body);return false;}
       say(NET_MSG(i),(NET_WAIT_S+1)*1000,'net');await sleep(NET_WAIT_S);continue;}
     await reload(false);say(j.msg+(j.repeat?REACHED:'')+'. The page shows GitHub data as of the last refresh; press Refresh on the pane to see the change.',7000);return true;}
@@ -629,6 +655,7 @@ function t0(x){
 function block(name,fn,page){
   try{return fn();}
   catch(e){console.error('Cockpit: block "'+name+'" could not be drawn:',e);
+    if(typeof note==='function')note('script','draw',name,String(e&&e.message||e));  /* into the action log (PC-132) */
     const c='<div class="card" role="alert" data-block-error="'+esc(name)+'"><b class="warnline">This block could not be drawn: '+esc(String(e&&e.message||e))+'</b> <span class="muted">('+esc(name)+')</span></div>';
     return page?'<div class="page">'+c+'</div>':c;}
 }
@@ -731,9 +758,37 @@ function cardSettingsForm(){
    +'<div class="field"><label for="s_quota_weak_readings">Readings for a firm estimate</label><input id="s_quota_weak_readings" name="quota_weak_readings" type="number" step="1" min="1" value="'+esc(String(CSET.values.quota_weak_readings||''))+'"'+(ro?' disabled':'')+'>'
    +'<span class="muted" style="font-size:12px">An estimate resting on fewer readings is marked weak.</span></div>'
    +(ro?'':'<div><button class="btn primary">Save</button></div>')+'</form>';}
+/* Settings > Action log (PC-132): the last events of the project's action log (read only), newest first, filtered on the server; failures highlighted,
+   a failed or refused row links to its task. */
+const ALOG_ACTIONS=['release','cancel','edit','change','block','unblock','new','accept','dismiss','moddl','compliance','settings','cardsettings','draw'];
+async function loadAlog(){
+  const F=UI.alog,mine=PROJ,q=['action','outcome','task'].filter(k=>F[k]).map(k=>k+'='+encodeURIComponent(F[k])).join('&');
+  let x;try{x=await api('/api/actionlog'+(q?'?'+q:''));}catch(e){x={error:String(e.message||e),events:[]};}
+  if(mine!==PROJ)return;ALOG=x;if(UI.route==='settings'&&UI.setSec==='actionlog')render();
+}
+function vActionLog(){
+  const F=UI.alog,lim=ALOG&&ALOG.limit||200;
+  const sel=(n,opts,lab)=>'<label class="muted" style="font-size:12px">'+lab+' <select name="'+n+'">'+[''].concat(opts).map(o=>'<option value="'+esc(o)+'"'+(F[n]===o?' selected':'')+'>'+(o?esc(o):'all')+'</option>').join('')+'</select></label>';
+  let h='<div class="card"><h2>Action log</h2><span class="muted">The last '+lim+' actions of this page and of every other page on this project, with the page\'s own failures (a network error, a script error), newest first; failures highlighted. Times in UTC. Never a token or a task text: titles and text sizes only. The log is actions.jsonl in the project\'s data folder (rotated by size, five files kept).</span>'
+   +'<form data-form="alog" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:10px 0">'+sel('action',ALOG_ACTIONS,'Action')+sel('outcome',['ok','refused','failed'],'Outcome')
+   +'<label class="muted" style="font-size:12px">Task <input name="task" size="10" value="'+esc(F.task)+'"></label><button class="btn small">Filter</button></form>';
+  if(!ALOG)return h+'<span class="muted">Loading…</span></div>';
+  if(ALOG.error)return h+'<span class="warnline">The action log could not be read: '+esc(ALOG.error)+'</span></div>';
+  if(!ALOG.events.length)return h+'<span class="muted">No events'+(F.action||F.outcome||F.task?' match the filters':' yet')+'.</span></div>';
+  const task=e=>{const k=String(e.task||''),t=k&&D&&(byKey(D,k)||D.tasks.find(x=>String(x.number)===k.replace('#','')));
+    return t&&e.outcome!=='ok'?'<button class="linkbtn" data-act="open" data-k="'+esc(t.key)+'">'+esc(t.key)+'</button>':esc(k);};
+  const par=e=>Object.keys(e.params||{}).map(k=>esc(k)+'='+esc(String(e.params[k]))).join(', ');
+  return h+'<div class="tblbox"><table><thead><tr><th>Time (UTC)</th><th>From</th><th>Action</th><th>Task</th><th>Outcome</th><th>Message</th><th>Parameters</th><th>ms</th><th>Page</th><th>Version</th></tr></thead><tbody>'
+   +ALOG.events.map(e=>'<tr data-outcome="'+esc(e.outcome)+'"'+(e.outcome==='failed'?' style="background:var(--danger-tint)"':'')+'><td class="mono">'+esc(String(e.t||'').replace('T',' ').slice(0,19))+'</td>'
+     +'<td>'+esc(e.source==='page'?'page ('+(e.kind||'')+')':'server')+'</td><td>'+esc(e.action||'')+'</td><td>'+task(e)+'</td>'
+     +'<td'+(e.outcome==='ok'?'':' class="warnline"')+'>'+esc(e.outcome||'')+'</td><td>'+esc(e.msg||'')+'</td><td class="muted" style="font-size:12px">'+par(e)+'</td>'
+     +'<td>'+(e.ms==null?'':esc(String(e.ms)))+'</td><td class="mono">'+esc(e.page||'')+'</td><td class="mono">'+esc(e.version||'')+'</td></tr>').join('')
+   +'</tbody></table></div></div>';
+}
 function vSettings(){
-  const sec=UI.setSec,head='<div class="page"><div><h1>Settings</h1></div><div class="filters" role="group" aria-label="Section">'+[['dispatcher','Dispatcher settings'],['cards','Module cards'],['policies','Policies']].map(x=>'<button class="f" data-act="setsec" data-v="'+x[0]+'" aria-pressed="'+(sec===x[0])+'">'+x[1]+'</button>').join('')+'</div>';
+  const sec=UI.setSec,head='<div class="page"><div><h1>Settings</h1></div><div class="filters" role="group" aria-label="Section">'+[['dispatcher','Dispatcher settings'],['cards','Module cards'],['policies','Policies'],['actionlog','Action log']].map(x=>'<button class="f" data-act="setsec" data-v="'+x[0]+'" aria-pressed="'+(sec===x[0])+'">'+x[1]+'</button>').join('')+'</div>';
   if(sec==='policies')return head+vCompliance()+vRules()+'</div>';
+  if(sec==='actionlog')return head+block('Action log',vActionLog)+'</div>';
   const dh='<span class="muted">How the Dispatcher behaves. It reads the file at each firing.</span>';
   const cards=CSET?cardSettingsForm():'<div class="card"><span class="muted">Module card settings could not be loaded.</span></div>';
   if(sec==='cards')return head+cards+'</div>';
@@ -1152,7 +1207,7 @@ function act(a,ds){
   switch(a){
    case 'qtdefaults':{const d=(CSET.defaults||{}).quality_thresholds||{},f=document.querySelector('[data-form=cardsettings]');
      Object.keys(d).forEach(k=>['ok','warn'].forEach(x=>{const i=f.elements['qt_'+k+'_'+x];if(i)i.value=d[k][x];}));say('Defaults filled in; press Save to keep them.');break;}
-   case 'setsec':UI.setSec=ds.v;render();break;
+   case 'setsec':UI.setSec=ds.v;if(ds.v==='actionlog')loadAlog();render();break;
    case 'go':UI.route=ds.r;if(ds.r==='how'){UI.route='code';UI.codeTab='flowchart';}if(ds.r==='rules'){UI.route='settings';UI.setSec='policies';}UI.drawer=null;render();window.scrollTo(0,0);break;
    case 'code':UI.route='code';UI.codeTab='quality';UI.codeMod=ds.m;render();window.scrollTo(0,0);break;
       case 'codetab':UI.codeTab=ds.v;render();break;
@@ -1189,7 +1244,11 @@ function act(a,ds){
    case 'accept':case 'dismiss':post({action:a,n:+ds.n,id:ds.id});break;
   }
 }
-document.addEventListener('click',function(e){const b=e.target.closest('[data-act]');if(!b)return;if(b.classList.contains('drawer-bg')&&e.target!==b)return;act(b.dataset.act,b.dataset);});
+document.addEventListener('click',function(e){const b=e.target.closest('[data-act]');if(!b)return;if(b.classList.contains('drawer-bg')&&e.target!==b)return;
+  try{act(b.dataset.act,b.dataset);}catch(x){note('script',b.dataset.act,b.dataset.k,String(x&&x.message||x));say('This click failed in the page: '+(x&&x.message||x),6000);}});
+window.addEventListener('error',e=>note('script','','',String(e.message||e.error||'script error')));
+window.addEventListener('unhandledrejection',e=>note('script','','',String(e.reason&&e.reason.message||e.reason||'unhandled rejection')));
+setInterval(flush,30000);  /* sends the events kept while the server was unreachable */
 document.addEventListener('input',function(e){const f=e.target.closest('[data-form=edit]');if(f&&UI.drawer)UI.drawer.draft={title:f.elements.title.value,body:f.elements.body.value};});
 document.addEventListener('change',function(e){if(e.target.id==='psel')pickProject(e.target.value);});
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&UI.drawer){UI.drawer=null;render();}});
@@ -1207,6 +1266,7 @@ document.addEventListener('submit',async function(e){
   else if(kind==='settings'){const b={action:'settings',enabled:f.elements.enabled.checked};
     SETROWS.slice(1).forEach(r=>{b[r[0]]=fd.get(r[0]);});post(b);}
   else if(kind==='cardsettings')post({action:'cardsettings',churn_colour:fd.get('churn_colour'),quality_thresholds:qThRead(fd),quota_plan_start:fd.get('quota_plan_start'),quota_weak_readings:fd.get('quota_weak_readings')});
+  else if(kind==='alog'){UI.alog={action:fd.get('action')||'',outcome:fd.get('outcome')||'',task:(fd.get('task')||'').trim()};ALOG=null;render();loadAlog();}
   else if(kind==='moddl')post({action:'moddl',module:f.dataset.m,d:fd.get('d')||''});
   else if(kind==='new'){const title=fd.get('title');
     if(await post({action:'new',title:title,desc:fd.get('desc'),module:fd.get('module'),type:fd.get('type'),cls:fd.get('cls'),parent:fd.get('parent')||''})){

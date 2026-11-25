@@ -1,4 +1,5 @@
-"""Shared test setup: the staggered refresh slots (cockpit.STAGGER_*) are off unless a test turns them on, as if the service had run long."""
+"""Shared test setup: the staggered refresh slots (cockpit.STAGGER_*) are off unless a test turns them on, as if the service had run long (PC-18);
+and no test writes into the owner's real data folder (the action log of PC-132 is written by every action)."""
 import pathlib
 import sys
 
@@ -15,3 +16,9 @@ def no_stagger(monkeypatch):
     C._slots.clear()
     yield
     C._slots.clear()
+
+
+@pytest.fixture(autouse=True)
+def _private_data_dir(tmp_path, monkeypatch):
+    if "cockpit" in sys.modules:
+        monkeypatch.setattr(sys.modules["cockpit"], "DATA_DIR", tmp_path / "cockpit-data")

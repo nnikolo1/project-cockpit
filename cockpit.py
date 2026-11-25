@@ -856,7 +856,7 @@ def do_act(form, run=None, state=None, p=None):
     run = run or run_gh
     aid = str(form.get("aid") or "")[:64]
     if not aid or not CFG["steer"]:
-        return _do_act(form, run, state, p)
+        return _logged_act(form, run, state, p)
     with _acts_lock:
         ev = _acts_running.get(aid)
     if ev:
@@ -882,7 +882,7 @@ def do_act(form, run=None, state=None, p=None):
         ev = _acts_running[aid] = threading.Event()
     try:
         _acts_put(aid, dict(state="started", action=form.get("action")))
-        code, body = _do_act(form, run, state, p)
+        code, body = _logged_act(form, run, state, p)
         _acts_put(aid, dict(state="done", code=code, body=body))
         return code, body
     finally:
@@ -891,13 +891,31 @@ def do_act(form, run=None, state=None, p=None):
         ev.set()
 
 
-def _do_act(form, run, state=None, p=None):
-    """-> (http status, body). 403 when the app is read-only; acts on the project named in form["project"] (default project otherwise)."""
+def _logged_act(form, run, state=None, p=None):
+    """-> (http status, body). 403 when the app is read-only; acts on the project named in form["project"] (default project otherwise).
+    Every action, whatever its outcome, leaves one line in the project's action log (PC-132)."""
+    ctx, t0 = dict(p=p), time.monotonic()
+    try:
+        code, body = _do_act(form, run, state, ctx)
+    except Exception as ex:  # an unexpected error is a failed action too: logged, and answered rather than dropping the connection
+        log.exception("action %s failed", form.get("action"))
+        code, body = 500, dict(error=f"{type(ex).__name__}: {ex}")
+    outcome = "ok" if code == 200 else "failed" if code >= 500 else "refused"
+    log_action(ctx.get("p"), L.action_record(form, outcome, body.get("msg") or body.get("error"), (time.monotonic() - t0) * 1000,
+                                             task=ctx.get("task"), version=code_version(), secrets=(H.token,)))
+    return code, body
+
+
+def _do_act(form, run, state, ctx):
     if not CFG["steer"]:
         log.warning("refused action %s: read-only", form.get("action"))
+        try:
+            ctx["p"] = ctx["p"] or proj(form.get("project"))
+        except UnknownProject:
+            pass
         return 403, dict(error="read-only: this is an offline copy from a backup" if OFFLINE else "read-only: this instance was started with --read-only")
     try:
-        p = p or proj(form.get("project"))
+        p = ctx["p"] = ctx["p"] or proj(form.get("project"))
         if form.get("action") == "settings":  # a local file, not a GitHub operation; same guard, same errors
             return 200, dict(ok=True, msg=save_settings(p, form))
         if form.get("action") == "cardsettings":  # same: a local file, same guard
@@ -909,6 +927,7 @@ def _do_act(form, run, state=None, p=None):
             log.warning("refused action %s on %s: %s", form.get("action"), p.get("name", ""), why)
             return 503, dict(error=f"not done, and not queued: {why}")
         S = state or get_state(p=p)  # the cached state: an action does not bypass the hour (owner F-701)
+        ctx["task"] = next((t["key"] for t in S["tasks"] if str(t["number"]) == str(form.get("n", "")).lstrip("#")), None)
         ops, msg = plan_action(form, S, p["repo"], CFG["simulate"])
         execute(ops, run)
     except UnknownProject as ex:
@@ -923,6 +942,89 @@ def _do_act(form, run, state=None, p=None):
         return 502, dict(error=f"GitHub: {ex}")
     log.info("action ok on %s: %s -> %s", p.get("name", ""), form.get("action"), msg)
     return 200, dict(ok=True, msg=msg)
+
+
+# ---------- action log (PC-132): <data dir>/<project>/actions.jsonl, appended, mode 0600, rotated by size keeping five files ----------
+ACTION_LOG_MAX = 1_000_000  # bytes of one file before it is rotated
+ACTION_LOG_KEEP = 5         # files kept: actions.jsonl and actions.jsonl.1 .. .4 (the oldest is dropped)
+_action_log_lock = threading.Lock()
+_version = []
+
+
+def code_version():
+    """The Cockpit's own commit (short hash), read once; '' when it is not a git checkout."""
+    if not _version:
+        try:
+            _version.append(subprocess.run(["git", "-C", str(HERE), "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=5).stdout.strip())
+        except (OSError, subprocess.SubprocessError):
+            _version.append("")
+    return _version[0]
+
+
+def action_log_path(p):
+    """<data dir>/<project>/actions.jsonl; None for a project without a name or repo (nothing to file it under)."""
+    name = p.get("name") or (p.get("repo") or "").split("/")[-1]
+    return DATA_DIR / name / "actions.jsonl" if name else None
+
+
+def log_action(p, rec):
+    """Append one event to the project's action log; rotate first when the file is full. Never fails the action: a write error is a warning.
+    An offline copy writes nothing (its data folder is the backup)."""
+    f = action_log_path(p) if p and not OFFLINE else None
+    if not f:
+        return
+    try:
+        with _action_log_lock:
+            f.parent.mkdir(parents=True, exist_ok=True)
+            if f.exists() and f.stat().st_size >= ACTION_LOG_MAX:
+                for i in range(ACTION_LOG_KEEP - 1, 0, -1):
+                    src = f.with_name(f"{f.name}.{i - 1}" if i > 1 else f.name)
+                    if src.exists():
+                        os.replace(src, f.with_name(f"{f.name}.{i}"))
+            fd = os.open(f, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "a") as fh:
+                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except OSError as ex:
+        log.warning("action log of %s not written: %s", p.get("name", ""), ex)
+
+
+def read_action_log(p, action="", outcome="", task=""):
+    """The last events of the project's action log (newest first, at most 200) that match the filters; the rotated files are read as needed."""
+    f = action_log_path(p)
+
+    def lines():
+        if not f:
+            return
+        for x in [f] + [f.with_name(f"{f.name}.{i}") for i in range(1, ACTION_LOG_KEEP)]:
+            try:
+                yield from reversed(x.read_text(errors="replace").splitlines())
+            except OSError:
+                continue
+    events = L.filter_events(lines(), action, outcome, task)
+    return dict(events=events, limit=L.ACTION_LOG_LIMIT, path=str(f or ""))
+
+
+def page_events(form):
+    """POST /api/event {project, events: [...]}: the failures a page reports (each with its page id; the ones it kept while the server could not be
+    reached come in one batch) are appended to the project's action log. -> (http status, body); the invalid ones are counted, not logged."""
+    try:
+        p = proj(form.get("project") or None)
+    except UnknownProject as ex:
+        return 404, dict(error=ex.args[0])
+    evs = form.get("events")
+    if not isinstance(evs, list) or not evs or len(evs) > 50:
+        return 400, dict(error="events: a list of 1 to 50 events")
+    bad = 0
+    for ev in evs:
+        try:
+            rec = L.page_record(ev if isinstance(ev, dict) else {}, p.get("name", ""), version=code_version(), secrets=(H.token,))
+        except ValueError:
+            bad += 1
+            continue
+        log.warning("page %s reports %s on %s: %s", rec["page"], rec["kind"], rec["action"] or "-", rec["msg"])
+        log_action(p, rec)
+    return 200, dict(ok=True, logged=len(evs) - bad, refused=bad)
 
 
 # ---------- compliance check (Settings > Policies): the report is the check's (PC-108); the Cockpit shows it and starts the check ----------
@@ -1522,6 +1624,8 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, usage_served(p))
             if u.path == "/api/compliance":
                 return self.send(200, build_compliance())
+            if u.path == "/api/actionlog":
+                return self.send(200, read_action_log(p, *(q.get(k, [""])[0] for k in ("action", "outcome", "task"))))
             if u.path == "/compliance-report":
                 f = compliance_report_file(p)
                 return self.send(200, f.read_bytes(), "text/plain; charset=utf-8") if f else self.send(404, dict(error="no compliance report yet"))
@@ -1555,7 +1659,7 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         u = urlparse(self.path)
-        if not self.authed() or u.path != "/api/act":
+        if not self.authed() or u.path not in ("/api/act", "/api/event"):
             return self.send(403, dict(error="forbidden"))
         try:
             form = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
@@ -1563,7 +1667,9 @@ class H(BaseHTTPRequestHandler):
             return self.send(400, dict(error="bad JSON"))
         if not form.get("project") and parse_qs(u.query).get("project"):
             form["project"] = parse_qs(u.query)["project"][0]
-        self.send(*do_act(form))
+        if not isinstance(form, dict):
+            return self.send(400, dict(error="bad JSON"))
+        self.send(*(page_events(form) if u.path == "/api/event" else do_act(form)))
 
 
 def check_manager(projects, steer):

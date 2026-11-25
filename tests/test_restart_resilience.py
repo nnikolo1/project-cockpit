@@ -243,7 +243,7 @@ def block():
 
 def run_page(tail):
     esc = re.search(r"^function esc\(s\).*$", PAGE, re.M).group(0)
-    stubs = ("var store={},localStorage={getItem:k=>store[k]||null,setItem:(k,v)=>{store[k]=v}};var UI={},PROJ='x',SAYS=[],RELOADS=0;"
+    stubs = ("var PAGE_ID='pg',NOTES=[],D=null;function note(){NOTES.push([].slice.call(arguments))}var store={},localStorage={getItem:k=>store[k]||null,setItem:(k,v)=>{store[k]=v}};var UI={},PROJ='x',SAYS=[],RELOADS=0;"
              "const pq=p=>p;async function reload(){RELOADS++}function say(m,ms,kind,retry){SAYS.push({m:m,ms:ms,kind:kind||'',retry:!!retry})}"
              "global.setTimeout=(f)=>{f();return 0};")
     r = subprocess.run(["node", "-e", esc + stubs + block() + tail], capture_output=True, text=True, timeout=30)
