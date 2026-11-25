@@ -54,8 +54,16 @@ class GitDeployAdapter:
         return dict(clean=not dirty and pushed, tests_green=self._tests_ok(), ahead_of_live=ahead, deploy_running=False, ci_ok=None,
                     problems_open=None, rollback_target=live is None or self.releases.release_path(project, live, self.home).is_dir())
 
+    def _ref(self, tag):
+        """The tag when it exists, else HEAD (a dry run plans a tag that is created only when the deploy is applied)."""
+        try:
+            self._sha(f"{tag}^{{commit}}")
+            return tag
+        except Exception:  # noqa: BLE001
+            return "HEAD"
+
     def changed_paths(self, project, tag):
-        return self.git.changed_paths(self.repo_dir, self.releases.current(project, self.home), tag, run=self.run)
+        return self.git.changed_paths(self.repo_dir, self.releases.current(project, self.home), self._ref(tag), run=self.run)
 
     def running_workers(self):
         return self.process.running_workers(self.layout.per_project(self.home or self.layout.DATA_DIR, self.project)["state"])

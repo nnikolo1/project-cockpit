@@ -136,3 +136,22 @@ def test_untracked_files_do_not_make_the_clone_dirty_but_changed_tracked_files_d
     assert ad.facts("p", "v2026.11.25-2", ENV)["clean"] is True
     (repo / "web.txt").write_text("changed")
     assert ad.facts("p", "v2026.11.25-2", ENV)["clean"] is False
+
+
+def test_a_dry_run_plans_a_tag_that_does_not_exist_yet_against_head(repo, tmp_path):
+    ad = adapter(repo, tmp_path, FakeProcess(), FakeGithub())
+    r = core.deploy("p", "v2026.11.26-1", ENV, ad, dry_run=True)
+    assert r["ok"] and r["dry_run"] and r["data"]["plan"]["mode"] == "hot"
+
+
+def test_cli_prints_a_failure_as_a_result(tmp_path, monkeypatch, capsys, repo):
+    monkeypatch.setenv("CP_HOME", str(tmp_path / "cphome"))
+    store_env.save("p", {"production": ENV})
+
+    class Boom:
+        def facts(self, *a):
+            raise RuntimeError("boom")
+
+    args = cli.build_parser().parse_args(["deploy", "--project", "p", "--repo", "o/p", "--repo-dir", str(repo), "--tag", "v2026.11.25-2"])
+    assert cli.cmd_deploy(args, adapter=Boom()) == 1
+    assert "RuntimeError: boom" in json.loads(capsys.readouterr().out)["error"]

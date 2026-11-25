@@ -42,7 +42,11 @@ def cmd_deploy(a, adapter=None, today=None):
     tag = a.tag or git_adapter.next_tag(a.repo_dir, today or dt.date.today())
     if a.apply and not a.tag:
         git_adapter.tag(a.repo_dir, tag, "HEAD")
-    return _out(core_deploy.deploy(a.project, tag, envs[a.env], ad, dry_run=not a.apply))
+    try:
+        return _out(core_deploy.deploy(a.project, tag, envs[a.env], ad, dry_run=not a.apply))
+    except Exception as e:  # noqa: BLE001 - a command prints its failure as a Result, never a traceback
+        log.exception("deploy failed")
+        return _out({"ok": False, "error": f"{type(e).__name__}: {e}", "data": {"project": a.project, "tag": tag}, "dry_run": not a.apply})
 
 
 def build_parser():
