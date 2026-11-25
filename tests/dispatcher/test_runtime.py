@@ -113,6 +113,21 @@ def test_build_image(tmp_path):
         r.build_image("/ctx")
 
 
+def test_image_for_project(tmp_path):
+    r, f = make(tmp_path)
+    r.cfg.recipes_dir = str(tmp_path / "recipes")
+    assert r.image_for(None) == r.cfg.image and r.image_for("pp") == r.cfg.image
+    (tmp_path / "recipes" / "pp").mkdir(parents=True)
+    (tmp_path / "recipes" / "pp" / "Containerfile").write_text("FROM cockpit-worker:latest\n")
+    assert r.image_for("pp") == "cockpit-worker-pp:latest" and r.image_for("other") == r.cfg.image
+    assert r.build_project_image("pp") == "cockpit-worker-pp:latest"
+    args = f.calls[-1][0]
+    assert args[args.index("-t") + 1] == "cockpit-worker-pp:latest"
+    assert args[args.index("-f") + 1] == str(tmp_path / "recipes" / "pp" / "Containerfile") and args[-1] == str(tmp_path / "recipes" / "pp")
+    with pytest.raises(rt.ContainerError):
+        r.build_project_image("other")
+
+
 def test_worker_users_and_count(tmp_path):
     r, _ = make(tmp_path)
     assert rt.worker_user(r.cfg, 1) == "worker1"
