@@ -185,7 +185,7 @@ def test_api_unknown_project_is_404_with_a_clear_error(two):
 
 def test_api_picks_the_project_from_the_query(two, monkeypatch):
     monkeypatch.setattr(C, "build_state", lambda p: dict(of=p["name"]))
-    assert get("/api/state?project=alpha") == (200, dict(of="alpha", stale=False, staleNote=None, refreshAfter=3600)) and get("/api/state") == (200, dict(of="beta", stale=False, staleNote=None, refreshAfter=3600))
+    assert get("/api/state?project=alpha") == (200, dict(of="alpha", stale=False, staleNote=None, refreshAfter=3600, steerBlock=None, newWork=False)) and get("/api/state") == (200, dict(of="beta", stale=False, staleNote=None, refreshAfter=3600, steerBlock=None, newWork=False))
 
 
 def test_report_without_a_query_follows_the_referer(two, tmp_path):
