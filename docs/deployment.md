@@ -1,5 +1,7 @@
 # Deployment and role separation
 
+Modules: devops
+
 How to run the cockpit, and how far the Manager / Orchestrator / Worker separation of [the constitution](constitution.md) can really be enforced. Examples use the repo `acme/widgets`, the Manager login `alice`, a module `alpha`. Decision record: [ADR 0011](adr/0011-deployment-and-role-separation.md).
 
 **Read this first.** In phase 1 (one GitHub identity for everyone) nothing is enforced; the rule is followed by agreement. Enforcement starts only when each role has its own identity (phase 2) and its own credentials that the other roles cannot read (phase 3). Section labels below: **[GitHub]** enforced by GitHub, **[OS]** enforced by the operating system, **[after]** reverted or flagged after the fact, **[convention]** nothing stops a violation.

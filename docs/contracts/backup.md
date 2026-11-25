@@ -1,5 +1,7 @@
 # Contract: a project backup the Cockpit can run offline
 
+Modules: devops/backup
+
 A backup holds everything the Cockpit's page shows for one project. The daily backup (PC-62) writes it, and `cockpit.py --offline BACKUP` serves it (PC-63). An offline copy only reads the restored data. It makes no GitHub call, needs no credential and has steering off. It is a read-only view of the past, not a second store of task state (ADR 0001).
 
 ## Layout

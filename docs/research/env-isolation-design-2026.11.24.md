@@ -2,7 +2,7 @@
 
 Status: research report, design proposal (background agent, 2026-11-24; read-only on code and data, web research; nothing installed, run or changed)
 Date: 2026-11-24
-Modules: taskqueue
+Modules: devops/deployment
 
 Owner briefs: F-809 (the design, generic, building on the earlier work), F-808 (the gap: production runs from the development clone), F-810 (equal weight to the infrastructure, the deployment and the observed constraints of the owner's MacBook), F-750, F-751, F-754, F-758, F-777, F-779 (principles).
 

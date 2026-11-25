@@ -65,7 +65,8 @@ def test_load_map_rejects_bad_maps(tmp_path):
 # ---- guard on the real map of this repository
 def test_real_map_every_assigned_path_exists_and_loads():
     mmap = mp.load_map(ROOT / "docs" / "cockpit-modules.json")
-    assert [m["id"] for m in mmap["modules"]] == ["githubclient", "cockpitwebpage", "docs", "internal", "taskqueue", "taskqueue/dispatcher", "taskqueue/worker", "taskqueue/e2e", "internal/metadata", "internal/devops", "internal/agents"]
+    assert [m["id"] for m in mmap["modules"]] == ["githubclient", "cockpitwebpage", "docs", "internal", "taskqueue", "devops", "taskqueue/dispatcher", "taskqueue/worker", "taskqueue/e2e", "internal/metadata", "internal/agents",
+                                                 "devops/installation", "devops/backup", "devops/ci", "devops/monitoring", "devops/policy", "devops/deployment"]
     r = mp.check_map(mp.tracked_files(ROOT), mmap)
     assert r["stale_paths"] == []
 
@@ -75,3 +76,18 @@ def test_real_map_only_explicit_null_files_are_unassigned():
     explicit = {a["path"] for a in mmap["assign"] if a["module"] is None}
     stray = [f for f in mp.check_map(mp.tracked_files(ROOT), mmap)["unassigned"] if f not in explicit]
     assert stray == [], f"new files with no module: add them to docs/cockpit-modules.json ({stray})"
+
+
+def test_real_map_devops_assignments_and_unsorted_share():
+    """PC-116: DevOps is a top-level module; the files the owner named sit in their sub-modules and the parent keeps at most 30 percent."""
+    import cardmeta_ambiguity as amb
+    mmap = mp.load_map(ROOT / "docs" / "cockpit-modules.json")
+    want = {"tests/test_install_commands.py": "devops/installation", "kit/setup.sh": "devops/installation",
+            "tools/project_backup.py": "devops/backup", "tools/backup_restore.py": "devops/backup", "tools/drive_retention.gs": "devops/backup",
+            "docs/contracts/backup.md": "devops/backup", "tests/tools/test_project_backup.py": "devops/backup",
+            ".github/workflows/test.yml": "devops/ci", "docs/research/env-isolation-design-2026.11.24.md": "devops/deployment",
+            "tools/file_finding.py": "devops/policy", "kit/subissue.sh": "devops", ".gitignore": "devops", "docs/deployment.md": "devops", "README.md": "docs"}
+    assert {f: mp.module_of(f, mmap) for f in want} == want
+    d = amb.aggregate(mp.tracked_files(ROOT), mmap)["modules"]["devops"]
+    total = len(d["unsorted"]) + sum(d["sub_files"].values())
+    assert len(d["unsorted"]) <= 0.30 * total, d["unsorted"]
