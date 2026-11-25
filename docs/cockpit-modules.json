@@ -75,6 +75,8 @@
   {"path": "tests/test_actions.py", "module": "githubclient", "basis": "tests the action planning in cockpit.py and logic.py; tests follow the code"},
   {"path": "tests/test_edit_text.py", "module": "githubclient", "basis": "tests the edit-text action planning in cockpit.py and logic.py; tests follow the code"},
   {"path": "tests/test_cache.py", "module": "githubclient", "basis": "tests the cache in cockpit.py"},
+  {"path": "tests/conftest.py", "module": "githubclient", "basis": "shared test setup that switches off the staggered GitHub refresh slots of cockpit.py"},
+  {"path": "tests/test_stagger_offline.py", "module": "githubclient", "basis": "tests the staggered refreshes, offline kinds and the one-hour new-work limit (cockpit.py, logic.py)"},
   {"path": "tests/test_gh_resilience.py", "module": "githubclient", "basis": "tests the GitHub call gate, lazy hourly refresh, stale copies and the local Task Queue part of cockpit.py"},
   {"path": "tests/test_timeline_repair.py", "module": "githubclient", "basis": "tests the paged timeline fetch and its repair in cockpit.py and logic.py"},
   {"path": "tests/test_cardmeta.py", "module": "githubclient", "basis": "tests logic.card_meta"},
