@@ -783,6 +783,95 @@ def norm_issue(n):
                 comments=[dict(body=c["body"], author=(c.get("author") or {}).get("login"), t=c["createdAt"]) for c in n["comments"]["nodes"]])
 
 
+def _flag(op, name):
+    """The values of `name` options in one gh argument list (`--add-label x` or `-f title=x` style)."""
+    return [op[k + 1] for k in range(len(op) - 1) if op[k] == name]
+
+
+def _fields(op):
+    return dict(f.split("=", 1) for f in _flag(op, "-f") + _flag(op, "-F") if "=" in f)
+
+
+def apply_ops(raw, deadlines, ops, outs, actor, now):
+    """PC-135: the known effect of gh calls that succeeded, laid on the raw copy (issues, events) and the module deadlines, with no GitHub call.
+    ops: the argument lists run, outs: each one's JSON answer ({} when none). Labels, assignees, closing, comments, title and body, blockers
+    and new issues change as GitHub changes them; label events carry `actor` (the gh login), so the policy sees who set them.
+    -> (raw, deadlines, numbers of the issues touched). The inputs are not changed."""
+    issues = {i["number"]: dict(i, labels=list(i["labels"]), assignees=list(i.get("assignees") or []), blocked_by=list(i.get("blocked_by") or []),
+                                comments=list(i.get("comments") or [])) for i in raw["issues"]}
+    by_db = {i.get("id"): n for n, i in issues.items()}
+    events, touched, created = list(raw["events"]), [], None
+    ev = lambda n, kind, name: events.append(dict(number=n, kind=kind, name=name, actor=actor, t=now))
+    for op, out in zip(ops, outs):
+        if op[0] == "variable" and op[1:3] == ["set", "MODULE_DEADLINES"]:
+            deadlines = parse_module_deadlines(_flag(op, "--body")[0])
+            continue
+        if op[0] == "issue" and len(op) > 2 and op[2].isdigit() and int(op[2]) in issues:
+            i = issues[int(op[2])]
+            if op[1] == "edit":
+                for l in _flag(op, "--remove-label"):
+                    if l in i["labels"]:
+                        i["labels"].remove(l)
+                    ev(i["number"], "unlabeled", l)
+                for l in _flag(op, "--add-label"):
+                    i["labels"] += [] if l in i["labels"] else [l]
+                    ev(i["number"], "labeled", l)
+                for a in _flag(op, "--add-assignee"):
+                    a = actor if a == "@me" else a
+                    i["assignees"] += [] if a in i["assignees"] else [a]
+                    ev(i["number"], "assigned", a)
+            elif op[1] == "close":
+                reason = "not_planned" if _flag(op, "--reason") == ["not planned"] else "completed"
+                i.update(state="closed", state_reason=reason, closed_at=now)
+                ev(i["number"], "closed", reason)
+            elif op[1] == "comment":
+                i["comments"] = (i["comments"] + [dict(body=_flag(op, "--body")[0], author=actor, t=now)])[-10:]
+            else:
+                continue
+            i["updated_at"] = now
+            touched.append(i["number"])
+            continue
+        if op[0] != "api":
+            continue
+        path, f = next((x for x in op[1:] if x.startswith("repos/")), ""), _fields(op)
+        m = re.fullmatch(r"repos/[^/]+/[^/]+/issues(?:/(\d+)(/.*)?)?", path)
+        if not m:
+            continue
+        n, rest = int(m.group(1)) if m.group(1) else None, m.group(2) or ""
+        if n is None and isinstance(out, dict) and out.get("number"):   # a new issue
+            created = int(out["number"])
+            issues[created] = dict(number=created, id=out.get("id"), title=f.get("title", ""), url=out.get("html_url", ""), state="open", state_reason=None,
+                                   created_at=out.get("created_at") or now, updated_at=now, closed_at=None, edited=None, author=actor,
+                                   labels=[x.split("=", 1)[1] for x in _flag(op, "-f") if x.startswith("labels[]=")],
+                                   assignees=[], parent=None, blocked_by=[], body=f.get("body", ""), comments=[])
+            by_db[out.get("id")] = created
+            for l in issues[created]["labels"]:
+                ev(created, "labeled", l)
+            touched.append(created)
+        elif n in issues and rest == "" and "-X" in op and op[op.index("-X") + 1] == "PATCH":
+            i = issues[n]
+            i.update({k: f[k] for k in ("title", "body") if k in f}, edited=now, updated_at=now)
+            touched.append(n)
+        elif n in issues and rest == "/sub_issues" and created:
+            issues[created]["parent"] = n
+            touched.append(created)
+        elif n in issues and rest.startswith("/dependencies/blocked_by"):
+            b = by_db.get(int(f["issue_id"])) if "issue_id" in f else by_db.get(int(rest.rsplit("/", 1)[1])) if rest.count("/") == 3 else None
+            if b is not None:
+                bl = [x for x in issues[n]["blocked_by"] if x != b]
+                issues[n].update(blocked_by=bl + ([b] if "issue_id" in f else []), updated_at=now)
+                touched.append(n)
+    return dict(raw, issues=list(issues.values()), events=events), deadlines, list(dict.fromkeys(touched))
+
+
+def replace_issues(raw, issues, events):
+    """PC-135: the raw copy with the given issues (and all their events) replaced by a newer reading of them; new ones are added."""
+    got = {i["number"]: i for i in issues}
+    old = [got.pop(i["number"], i) for i in raw["issues"]]
+    nums = {i["number"] for i in issues}
+    return dict(raw, issues=old + list(got.values()), events=[e for e in raw["events"] if e["number"] not in nums] + list(events))
+
+
 def norm_events(n):
     """timelineItems nodes of one GraphQL issue -> flat events (labeled/unlabeled/assigned/closed)."""
     out = []
