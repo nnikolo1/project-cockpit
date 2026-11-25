@@ -2374,3 +2374,37 @@ def compliance_run_state(status, alive):
     if status.get("state") == "running":
         return "running" if alive else "interrupted"
     return "done" if status.get("exit") == 0 else "failed"
+
+
+# ---------- open issues per module (PC-128): the Task Queue's module chips ----------
+OPEN_KINDS = ("embryo", "released", "wip", "unmerged", "failed", "question")   # the order of the chip's tooltip
+
+
+def open_kind(t):
+    """The kind a task counts as on a module chip: None when its issue is no longer open (merged, cancelled), `question` for an open
+    question (label `question`), else its stage."""
+    if t["stage"] in ("merged", "cancelled"):
+        return None
+    return "question" if "question" in (t.get("labels") or []) else t["stage"]
+
+
+def open_tip(counts):
+    """{kind: n} -> the chip's tooltip, e.g. '3 embryo, 1 WIP, 4 question'; 'no open issue' when there is none."""
+    parts = [f"{counts[k]} {'WIP' if k == 'wip' else k}" for k in OPEN_KINDS if counts.get(k)]
+    return ", ".join(parts) or "no open issue"
+
+
+def open_counts(tasks, mods):
+    """-> {module id: {n, tip}} for every module (its sub-modules rolled up) and `all` (every open issue). A task without a module
+    carries the module `unassigned`, so that chip counts it."""
+    kinds = [(t.get("module") or "unassigned", k) for t in tasks if (k := open_kind(t))]
+
+    def one(keep):
+        c = {}
+        for mid, k in kinds:
+            if keep(mid):
+                c[k] = c.get(k, 0) + 1
+        return dict(n=sum(c.values()), tip=open_tip(c))
+    out = {m["id"]: one(lambda mid, m=m: mid == m["id"] or mid.startswith(m["id"] + "/")) for m in mods}
+    out["all"] = one(lambda mid: True)
+    return out

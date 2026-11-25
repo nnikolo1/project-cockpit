@@ -1042,7 +1042,7 @@ def live_state(p, S, fresh=False):
     held = {n for w in L.queue_local(state_text, None)["workers"] if (n := L.task_number(w["task"], shorts)) is not None}
     tasks = L.overlay_live(S["tasks"], at, events, held, state_text is not None)
     pick = L.pickable(tasks, dt.datetime.now(dt.timezone.utc), held)
-    return dict(S, tasks=[dict(t, pick=t["key"] in pick) for t in tasks])
+    return dict(S, tasks=[dict(t, pick=t["key"] in pick) for t in tasks], openCounts=L.open_counts(tasks, S.get("modules", [])))
 
 
 def get_state_served(p, fresh=False):
