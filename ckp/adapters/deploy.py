@@ -16,7 +16,7 @@ class GitDeployAdapter:
     def __init__(self, project, repo, repo_dir, env_name, home=None, *, git=_git, github=_github, process=_process, releases=_releases,
                  layout=_layout, run=_run, tests_green=None, health_wait_s=90, health_interval_s=2, sleep=None, clock=None):
         """`repo`: OWNER/NAME on the hosting service; `repo_dir`: the working clone; `env_name`: the environment being deployed;
-        `tests_green`: a bool or a callable returning one (default: run tools/merge_gate in the clone)."""
+        `tests_green`: a bool or a callable returning one (default: the test environment, tools/test_env.py, on the clone's HEAD)."""
         self.project, self.repo, self.repo_dir, self.env_name, self.home = project, repo, repo_dir, env_name, home
         self.git, self.github, self.process, self.releases, self.layout, self.run = git, github, process, releases, layout, run
         self._tests_green = tests_green
@@ -36,10 +36,10 @@ class GitDeployAdapter:
         if t is not None:
             return bool(t)
         try:
-            self.run([str(self.repo_dir) + "/tools/merge_gate"])
+            self.run(["python3", str(self.repo_dir) + "/tools/test_env.py", "--repo-dir", str(self.repo_dir)])
             return True
         except Exception as e:  # noqa: BLE001 - a failing gate is a fact, not an error
-            log.warning("merge gate failed: %s", e)
+            log.warning("test environment failed: %s", e)
             return False
 
     def facts(self, project, tag, env):
@@ -54,8 +54,10 @@ class GitDeployAdapter:
             ahead = live is None or self._sha(f"{tag}^{{commit}}") != self._sha(f"{live}^{{commit}}")
         except Exception:  # noqa: BLE001
             ahead = True
-        return dict(clean=not dirty and pushed, tests_green=self._tests_ok(), ahead_of_live=ahead, deploy_running=False, ci_ok=None,
-                    problems_open=None, rollback_target=live is None or self.releases.release_path(project, live, self.home).is_dir())
+        installed = self.releases.release_path(project, tag, self.home).is_dir()   # a rollback: no gate run, the tree was checked then
+        return dict(clean=not dirty and pushed, tests_green=installed or self._tests_ok(), ahead_of_live=ahead, deploy_running=False,
+                    ci_ok=None, problems_open=None, installed=installed,
+                    rollback_target=live is None or self.releases.release_path(project, live, self.home).is_dir())
 
     def _ref(self, tag):
         """The tag when it exists, else HEAD (a dry run plans a tag that is created only when the deploy is applied)."""

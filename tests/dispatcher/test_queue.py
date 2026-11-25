@@ -385,7 +385,8 @@ def test_render_cli_queue_writes_two_files(capsys):
     import tempfile
     from dispatcher import launchd as L
     root = pathlib.Path(tempfile.mkdtemp(dir="/tmp", prefix="q"))   # short: the proxy socket path must stay under the 104-byte limit
-    L.render(["--queue", "--data-root", str(root), "--token-file", str(root / "tok"), "--python", sys.executable])
+    L.render(["--queue", "--data-root", str(root), "--token-file", str(root / "tok"), "--python", sys.executable,
+              "--cockpit-dir", str(root / "releases" / "cockpit" / "current")])   # production starts from a release, not this clone
     out = capsys.readouterr().out
     assert sorted(f.name for f in (root / "launchd").iterdir()) == ["com.project-cockpit.dispatcher.queue.plist", "com.project-cockpit.quota.queue.plist"]
     assert "dispatcher.queue.plist" in out

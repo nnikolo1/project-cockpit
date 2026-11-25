@@ -4,6 +4,13 @@ Pure rendering (plistlib); the command line only writes the files and prints the
 
     python3 -m dispatcher.launchd render --project NAME --repo OWNER/NAME --repo-dir DIR --token-file F [--out DIR]
     python3 -m dispatcher.launchd render --queue --token-file F [--data-root DIR] [--out DIR]    # one job for all projects the settings list
+    ... [--env NAME] [--cockpit-dir DIR]
+
+The environment (PC-84) is a setting, not a copy of the code: `--env` (default production) names the jobs' labels and the Workers'
+container, and sets CP_ENV for the jobs; production keeps the unprefixed labels and the container `cockpit-workers`, every other
+environment gets `com.project-cockpit.<env>.*` and `cockpit-workers-<env>`. Production must start from a release folder
+(`<home>/releases/<project>/current`, given as `--cockpit-dir` and kept as a link, never resolved), never from a git working clone:
+render refuses that.
 """
 import argparse
 import os
@@ -22,6 +29,19 @@ SOCKET_LIMIT = 104  # bytes, 4f
 INTERVAL = 120      # seconds, 3c
 QUOTA_INTERVAL = 30  # seconds, the quota collector
 PREFIX = "com.project-cockpit"
+PRODUCTION = "production"
+CONTAINER = "cockpit-workers"   # the production container; dispatcher.core's default
+
+
+def label(kind, project, env=PRODUCTION):
+    """The job label: com.project-cockpit.<kind>.<project>, with the environment after the prefix unless it is production."""
+    return f"{PREFIX}.{kind}.{project}" if env == PRODUCTION else f"{PREFIX}.{env}.{kind}.{project}"
+
+
+def in_working_clone(path):
+    """True when `path` or a folder above it holds a .git entry: a development checkout, not a release folder."""
+    p = pathlib.Path(os.path.abspath(pathlib.Path(path).expanduser()))
+    return any((d / ".git").exists() for d in (p, *p.parents))
 
 
 def paths(project, data_dir=DATA_DIR):
@@ -44,11 +64,12 @@ def check_socket(sock):
 JOB_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 
-def _env(cockpit_dir):
-    return {"PYTHONPATH": str(cockpit_dir), "PATH": JOB_PATH}
+def _env(cockpit_dir, env=PRODUCTION):
+    return {"PYTHONPATH": str(cockpit_dir), "PATH": JOB_PATH, "CP_ENV": env}
 
 
-def dispatcher_plist(project, repo, repo_dir, token_file, image=None, data_dir=DATA_DIR, cockpit_dir=COCKPIT_DIR, python="python3", queue_root=None):
+def dispatcher_plist(project, repo, repo_dir, token_file, image=None, data_dir=DATA_DIR, cockpit_dir=COCKPIT_DIR, python="python3", queue_root=None,
+                     env=PRODUCTION):
     """3c: the Dispatcher job, started every 2 minutes with the arguments of dispatcher.core.main().
     With `queue_root` it is the job of the one queue (all projects the settings list): the arguments are --data-root and the token file; project, repo and repo_dir are not used."""
     if queue_root is not None:
@@ -63,21 +84,23 @@ def dispatcher_plist(project, repo, repo_dir, token_file, image=None, data_dir=D
                 "--repo", repo, "--repo-dir", repo_dir, "--data-dir", p["processing"]]
     if image:
         args += ["--image", image]
-    return dict(Label=f"{PREFIX}.dispatcher.{project}", ProgramArguments=[str(a) for a in args], StartInterval=INTERVAL,
+    if env != PRODUCTION:
+        args += ["--container-name", f"{CONTAINER}-{env}"]   # never the production container
+    return dict(Label=label("dispatcher", project, env), ProgramArguments=[str(a) for a in args], StartInterval=INTERVAL,
                 AbandonProcessGroup=True,  # the Workers and the proxy outlive the firing that started them
-                WorkingDirectory=str(cockpit_dir), EnvironmentVariables=_env(cockpit_dir),
+                WorkingDirectory=str(cockpit_dir), EnvironmentVariables=_env(cockpit_dir, env),
                 StandardOutPath=str(p["dir"] / "dispatcher.log"), StandardErrorPath=str(p["dir"] / "dispatcher.log"))
 
 
-def quota_plist(project, data_dir=DATA_DIR, cockpit_dir=COCKPIT_DIR, python="python3", queue_root=None):
+def quota_plist(project, data_dir=DATA_DIR, cockpit_dir=COCKPIT_DIR, python="python3", queue_root=None, env=PRODUCTION):
     """The quota collector, one reading every 30 seconds into <data dir>/<project>/quota-history.jsonl (with `queue_root`: <root>/quota-history.jsonl)."""
     if queue_root is not None:
         p, project = queue_paths(queue_root), QUEUE
     else:
         p = paths(project, data_dir)
     args = [python, "-m", "dispatcher.quota", "--history", p["quota"]]
-    return dict(Label=f"{PREFIX}.quota.{project}", ProgramArguments=[str(a) for a in args], StartInterval=QUOTA_INTERVAL,
-                WorkingDirectory=str(cockpit_dir), EnvironmentVariables=_env(cockpit_dir),
+    return dict(Label=label("quota", project, env), ProgramArguments=[str(a) for a in args], StartInterval=QUOTA_INTERVAL,
+                WorkingDirectory=str(cockpit_dir), EnvironmentVariables=_env(cockpit_dir, env),
                 StandardOutPath=str(p["dir"] / "quota.log"), StandardErrorPath=str(p["dir"] / "quota.log"))
 
 
@@ -91,12 +114,21 @@ def render(argv=None):
     ap.add_argument("--token-file", required=True)
     ap.add_argument("--out", help="default: <data dir>/<project>/launchd (with --queue: <data root>/launchd)")
     ap.add_argument("--image")
+    ap.add_argument("--env", default=PRODUCTION, help="the environment: names the labels and the container (default production)")
+    ap.add_argument("--cockpit-dir", default=str(COCKPIT_DIR),
+                    help="the Cockpit code the jobs start from; production: the release link <home>/releases/<project>/current (kept as a link)")
     ap.add_argument("--python", default=shutil.which("python3") or sys.executable,
                     help="absolute path of the python program the jobs run (launchd does not search PATH for it; a bare python3 is the Xcode shim); default: the python3 on PATH now")
     a = ap.parse_args(argv)
     if not os.path.isabs(a.python):
         sys.exit("--python must be an absolute path")
     absolute = lambda s: str(pathlib.Path(s).expanduser().resolve())
+    if not a.env or not all(c.isalnum() or c == "-" for c in a.env):
+        sys.exit(f"--env {a.env!r}: letters, digits and '-' only")
+    cockpit_dir = os.path.abspath(pathlib.Path(a.cockpit_dir).expanduser())   # not resolved: a `current` link must stay a link
+    if a.env == PRODUCTION and in_working_clone(cockpit_dir):
+        sys.exit(f"production must start from a release folder (<home>/releases/<project>/current), not from the working clone {cockpit_dir}; "
+                 "deploy a release with `ckp deploy` and pass its link as --cockpit-dir, or render another --env")
     if a.queue:
         root = absolute(a.data_root)
         out, repo_dir, kw = pathlib.Path(absolute(a.out or queue_paths(root)["launchd"])), None, dict(queue_root=root)
@@ -106,13 +138,14 @@ def render(argv=None):
             sys.exit("--project, --repo and --repo-dir are required (or --queue)")
         out, repo_dir, kw = pathlib.Path(absolute(a.out or paths(a.project)["launchd"])), absolute(a.repo_dir), {}
     token = absolute(a.token_file)
+    kw.update(cockpit_dir=cockpit_dir, env=a.env)
     out.mkdir(parents=True, exist_ok=True)
     for plist in (dispatcher_plist(a.project, a.repo, repo_dir, token, a.image, python=a.python, **kw), quota_plist(a.project, python=a.python, **kw)):
         f = out / f"{plist['Label']}.plist"
         f.write_bytes(plistlib.dumps(plist))
         print(f)
     print("To install (by hand):")
-    for plist in (quota_plist(a.project, python=a.python, **kw), dispatcher_plist(a.project, a.repo, repo_dir, token, python=a.python, **kw)):
+    for plist in (quota_plist(a.project, python=a.python, **kw), dispatcher_plist(a.project, a.repo, repo_dir, token, a.image, python=a.python, **kw)):
         print(f"  launchctl bootstrap gui/$(id -u) {out / (plist['Label'] + '.plist')}")
 
 

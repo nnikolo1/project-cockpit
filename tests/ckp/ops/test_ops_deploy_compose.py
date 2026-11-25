@@ -166,3 +166,43 @@ def test_a_refused_apply_leaves_no_tag_behind(tmp_path, monkeypatch, capsys, rep
     args = cli.build_parser().parse_args(["deploy", "--project", "p", "--repo", "o/p", "--repo-dir", str(repo), "--apply"])
     assert cli.cmd_deploy(args, adapter=adapter(repo, tmp_path, FakeProcess(), FakeGithub())) == 1
     assert subprocess.run(["git", "-C", str(repo), "tag"], capture_output=True, text=True).stdout == tags_before
+
+
+def _apply(repo, tmp_path, gate, *extra):
+    args = cli.build_parser().parse_args(["deploy", "--project", "p", "--repo", "o/p", "--repo-dir", str(repo), "--apply", *extra])
+    return cli.cmd_deploy(args, adapter=adapter(repo, tmp_path, FakeProcess(), FakeGithub(), gate=gate))
+
+
+def test_a_rollback_is_the_same_command_with_the_previous_tag_and_every_apply_is_logged(tmp_path, monkeypatch, capsys, repo):
+    home = tmp_path / "home"
+    monkeypatch.setenv("CP_HOME", str(home))
+    store_env.save("p", {"production": ENV})
+    assert _apply(repo, tmp_path, True, "--tag", "v2026.11.25-1") == 0 and _apply(repo, tmp_path, True, "--tag", "v2026.11.25-2") == 0
+    capsys.readouterr()
+    assert _apply(repo, tmp_path, False, "--rollback") == 0   # the gate is red now: a rollback does not need it
+    out = json.loads(capsys.readouterr().out)
+    assert out["ok"] and out["data"]["installed"] and releases.current("p", home) == "v2026.11.25-1"
+    assert "fetch" not in [s["step"] for s in out["data"]["steps"]]
+    assert _apply(repo, tmp_path, False, "--tag", "v2026.11.25-2") == 0 and releases.current("p", home) == "v2026.11.25-2"
+    assert _apply(repo, tmp_path, False) == 1   # a new tag needs the green gate; the refusal is logged too
+    lines = [json.loads(line) for line in (home / "deploy-log.jsonl").read_text().splitlines()]
+    assert [(r["tag"], r["rollback"], r["ok"], r["env"]) for r in lines[:4]] == [
+        ("v2026.11.25-1", False, True, "production"), ("v2026.11.25-2", False, True, "production"),
+        ("v2026.11.25-1", True, True, "production"), ("v2026.11.25-2", False, True, "production")]
+    assert not lines[4]["ok"] and "tests" in lines[4]["error"]
+
+
+def test_rollback_without_a_previous_release_or_with_a_tag_is_refused(tmp_path, monkeypatch, capsys, repo):
+    monkeypatch.setenv("CP_HOME", str(tmp_path / "home"))
+    store_env.save("p", {"production": ENV})
+    args = ["deploy", "--project", "p", "--repo", "o/p", "--repo-dir", str(repo), "--rollback"]
+    assert cli.main(args) == 1 and "no previous release" in json.loads(capsys.readouterr().out)["error"]
+    assert cli.main(args + ["--tag", "v2026.11.25-1"]) == 1 and "exclude" in json.loads(capsys.readouterr().out)["error"]
+
+
+def test_a_dry_run_writes_no_log_line(tmp_path, monkeypatch, capsys, repo):
+    monkeypatch.setenv("CP_HOME", str(tmp_path / "home"))
+    store_env.save("p", {"production": ENV})
+    args = cli.build_parser().parse_args(["deploy", "--project", "p", "--repo", "o/p", "--repo-dir", str(repo), "--tag", "v2026.11.25-2"])
+    assert cli.cmd_deploy(args, adapter=adapter(repo, tmp_path, FakeProcess(), FakeGithub())) == 0
+    assert not (tmp_path / "home" / "deploy-log.jsonl").exists()
