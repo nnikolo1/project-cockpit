@@ -136,6 +136,9 @@ tr.blocked{background:var(--danger-tint)}tr.blocked td:first-child{box-shadow:in
 /* Churn bands reuse the priority palette (red, amber, blue are told apart without relying on hue) and always carry a symbol and a word. */
 .band{display:inline-block;border-radius:6px;padding:1px 8px;font-size:12px;font-weight:600;white-space:nowrap}
 .band-hot{background:var(--p1);color:var(--p1-ink)}.band-mid{background:var(--p2);color:var(--p2-ink)}.band-cold{background:var(--p3);color:var(--p3-ink)}
+.pbar{position:relative;display:inline-block;vertical-align:middle;flex:none;width:200px;height:12px;border-radius:1px;background:var(--line);overflow:hidden}
+.pbar i{position:absolute;left:0;top:0;bottom:0;background:var(--accent)}.pbar s{position:absolute;top:0;bottom:0;width:1px;margin-left:-1px;background:var(--muted);opacity:.7}
+.pscale{position:relative;display:inline-block;width:200px;height:1em;font-size:11px;font-weight:400;color:var(--muted)}.pscale span{position:absolute;transform:translateX(-50%)}.pscale span:first-child{transform:none}.pscale span:last-child{transform:translateX(-100%)}
 .qbar{height:6px;border-radius:3px;background:var(--q-none)}.qbar.qb-ok{background:var(--q-ok)}.qbar.qb-warn{background:var(--q-warn)}.qbar.qb-bad{background:var(--q-bad)}
 .qw{font-size:12px;font-weight:600}.qleg{display:flex;flex-wrap:wrap;gap:14px;font-size:13px}.qleg i{display:inline-block;width:18px;height:6px;border-radius:3px;margin-right:6px;vertical-align:middle}
 .qth{display:grid;grid-template-columns:minmax(120px,1fr) 80px 90px 90px;gap:8px;align-items:center}.qth input{min-height:36px;width:100%}
@@ -631,21 +634,27 @@ const NOUSE='no usage in the last 90 days';  // the per-day and per-window table
 /* Every period table of the Token Usage page: the most recent period at the top, a period without data has no row (owner, 2026-11-24).
    rows: as the server lists them, oldest first; has(r): whether the row has data. */
 function recentRows(rows,has){return (rows||[]).filter(has||(()=>true)).reverse();}
+/* One bar for every percentage bar of the Token Usage page (PC-112): a fixed 200 px track (not sized by the table layout), square ends, ticks at 25, 50, 75 and 100 %;
+   the fill width is a pure, non-decreasing function of the value, 0 for no value, capped at the full track above 100, with no minimum width. */
+const PTICKS=[25,50,75,100];
+function pctWidth(v){v=Number(v);return v>0?Math.min(100,v):0;}
+function pctBar(v,label){return '<span class="pbar" role="img" aria-label="'+esc(label)+'"><i style="width:'+pctWidth(v)+'%"></i>'+PTICKS.map(t=>'<s data-tick="'+t+'" style="left:'+t+'%"></s>').join('')+'</span>';}
+function pctScale(){return '<span class="pscale" aria-hidden="true">'+[0].concat(PTICKS).map(t=>'<span style="left:'+t+'%">'+t+(t===100?' %':'')+'</span>').join('')+'</span>';}
 function usageTable(title,rows,empty){
   const nf=x=>x.toLocaleString('en-US');
   if(!rows)return '<div class="card"><h2>'+title+'</h2><span class="muted">no data</span></div>';
   const mx=Math.max(1,...rows.map(r=>r.total));
-  return '<div class="card"><h2>'+title+'</h2><div class="tblbox narrow"><table><thead><tr><th>'+title.split(' ').pop()+'</th>'+USEF.map(f=>'<th>'+f[1]+'</th>').join('')+'<th></th></tr></thead><tbody>'
-   +rows.map(r=>'<tr><td class="mono">'+esc(r.key)+'</td>'+USEF.map(f=>'<td class="mono">'+nf(r[f[0]])+'</td>').join('')+'<td style="width:120px"><div class="bar" aria-hidden="true"><i style="width:'+(100*r.total/mx)+'%;background:var(--accent)"></i></div></td></tr>').join('')
+  return '<div class="card"><h2>'+title+'</h2><span class="muted">Bar: share of the largest row listed (0 to 100 %), ticks at 25, 50, 75 and 100 %.</span><div class="tblbox narrow"><table><thead><tr><th>'+title.split(' ').pop()+'</th>'+USEF.map(f=>'<th>'+f[1]+'</th>').join('')+'<th>'+pctScale()+'</th></tr></thead><tbody>'
+   +rows.map(r=>'<tr><td class="mono">'+esc(r.key)+'</td>'+USEF.map(f=>'<td class="mono">'+nf(r[f[0]])+'</td>').join('')+'<td>'+pctBar(100*r.total/mx,Math.round(100*r.total/mx)+' % of the largest row')+'</td></tr>').join('')
    +(rows.length?'':'<tr><td class="muted" colspan="7">'+(empty||'no data')+'</td></tr>')+'</tbody></table></div></div>';
 }
 function quotaCard(q){
   const T='Vendor quota used';
   if(!q)return '<div class="card"><h2>'+T+'</h2><span class="muted">no data</span></div>';
-  const pc=x=>x==null?'':x+' %',bar=x=>'<div class="bar" aria-hidden="true"><i style="width:'+Math.min(100,x||0)+'%;background:var(--accent)"></i></div>';
+  const pc=x=>x==null?'':x+' %',bar=(x,w)=>x==null?'':pctBar(x,w+' quota: '+x+' % used');
   const rs=recentRows(q.days,d=>d.five_hour!=null||d.seven_day!=null);
-  return '<div class="card"><h2>'+T+' per day (highest reading)</h2><div class="tblbox narrow"><table><thead><tr><th>Day</th><th>5-hour</th><th></th><th>Weekly</th><th></th></tr></thead><tbody>'
-   +rs.map(d=>'<tr><td class="mono">'+esc(d.key)+'</td><td class="mono">'+pc(d.five_hour)+'</td><td style="width:120px">'+bar(d.five_hour)+'</td><td class="mono">'+pc(d.seven_day)+'</td><td style="width:120px">'+bar(d.seven_day)+'</td></tr>').join('')
+  return '<div class="card"><h2>'+T+' per day (highest reading)</h2><span class="muted">Bars: share of the quota used (0 to 100 %), the highest reading of the day; ticks at 25, 50, 75 and 100 %.</span><div class="tblbox narrow"><table><thead><tr><th>Day</th><th>5-hour</th><th>'+pctScale()+'</th><th>Weekly</th><th>'+pctScale()+'</th></tr></thead><tbody>'
+   +rs.map(d=>'<tr><td class="mono">'+esc(d.key)+'</td><td class="mono">'+pc(d.five_hour)+'</td><td>'+bar(d.five_hour,'5-hour')+'</td><td class="mono">'+pc(d.seven_day)+'</td><td>'+bar(d.seven_day,'Weekly')+'</td></tr>').join('')
    +(rs.length?'':'<tr><td class="muted" colspan="5">no quota readings in the last 90 days</td></tr>')+'</tbody></table></div></div>';
 }
 function latestCard(q,today){
