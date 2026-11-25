@@ -137,3 +137,7 @@ This is an AI agent working with the Owner in an interactive session. It merges 
 ### A Worker
 
 This is a headless AI agent that works on one task, in its own clone, as an unprivileged user in a container. Multiple Workers may be active at any given time.
+
+## Turns end with a clear status (constitutional amendment, owner, 2026-11-25)
+
+Every turn ends in a way that makes it abundantly clear whether the assistant is about to work on anything: either it states plainly that it is idle and waits for the owner (and for what), or it states what it is doing next and then does it. Every turn also reports the number of sub-agents currently running and any intention to launch one (owner, 2026-11-25, constitutional amendment; applies to all projects at all times).

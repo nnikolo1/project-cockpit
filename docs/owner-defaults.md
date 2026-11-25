@@ -105,3 +105,7 @@ Data that is derived or produced by processing (reports of checks, statistics, s
 ## Design talk is not a decision (owner, 2026-11-25, standing rule)
 
 When the owner reflects on a design ("I am not sure", "I feel", "I think", thinking aloud), the assistant answers the discussion, gives a reasoned view and options, and logs the exchange in the feedback log as a design discussion; it writes no decision record, no constitution or policy text and no task comment, files no task and changes no task until the owner says it is decided ("decided", "file it", or an explicit instruction); when it is unclear whether a remark is a decision, it asks once (owner, 2026-11-25, standing rule).
+
+## Turns end with a clear status (constitutional amendment, owner, 2026-11-25)
+
+Every turn ends in a way that makes it abundantly clear whether the assistant is about to work on anything: either it states plainly that it is idle and waits for the owner (and for what), or it states what it is doing next and then does it. Every turn also reports the number of sub-agents currently running and any intention to launch one (owner, 2026-11-25, constitutional amendment; applies to all projects at all times).
