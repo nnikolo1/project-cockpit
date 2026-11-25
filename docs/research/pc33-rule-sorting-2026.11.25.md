@@ -96,4 +96,4 @@ The 32 generic rules were condensed into the base text `docs/templates/base-rule
 
 ## Step 2 done: the Cockpit workflow section
 
-The owner edited the draft (rule 1 names GitHub, rule 5 loses "provisional") and agreed it on 2026-11-25; written to `docs/templates/workflow-section.md` (13 lines). Next: the skills (step 3), the cleanup of the private project's instruction file (step 4), PC-34 (step 5). Open: how rule 8 of the base text (the running log goes to the data folder, not into git) is reconciled with the constitution's Daily reports section.
+The owner edited the draft (rule 1 names GitHub, rule 5 loses "provisional") and agreed it on 2026-11-25; written to `docs/templates/workflow-section.md` (13 lines). Next: the skills (step 3), the cleanup of the private project's instruction file (step 4), PC-34 (step 5). Decided (owner, 2026-11-25, option A): base rule 8 and the daily report are two different things: the running log of the day (the agent's own) goes to the tool's data folder, not into git; the project's daily session report, the narrative record of decisions and work, stays in the repository as the constitution's Daily reports section says.
