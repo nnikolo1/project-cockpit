@@ -1,4 +1,5 @@
 """Pure logic of the cockpit: no network, no subprocess. Everything here is unit-tested."""
+import bisect
 import datetime as dt
 import json
 import logging
@@ -1382,6 +1383,13 @@ def _quota(quota_text, end_day):
     for r in sorted(resets):  # the same window's reset time can wobble by seconds: merge ends closer than 10 minutes
         if not ends or r - ends[-1] > 600:
             ends.append(r)
+    peaks = {}  # vendor window end -> the highest 5-hour percentage read in it; a reading without a reset time belongs to no window
+    for rec in recs:
+        f = rec.get("five_hour")
+        r, v = (f.get("resets_at"), _pct(f, "used_percentage")) if isinstance(f, dict) else (None, None)
+        if _epoch(rec.get("ts")) is not None and v is not None and isinstance(r, (int, float)) and not isinstance(r, bool):
+            e = ends[bisect.bisect_right(ends, r) - 1]
+            peaks[e] = max(peaks.get(e, v), v)
     if end_day is None and reads:
         end_day = dt.datetime.fromtimestamp(reads[-1]["t"], dt.timezone.utc).date()
     days = {}
@@ -1394,7 +1402,8 @@ def _quota(quota_text, end_day):
             for k in ("five_hour", "seven_day"):
                 if r[k] is not None and (d[k] is None or r[k] > d[k]):
                     d[k] = r[k]
-    return ends, dict(days=[dict(key=k, **v) for k, v in days.items()], periods=_periods(reads), anchor=reads[-1]["t"] if reads else None)
+    return ends, dict(days=[dict(key=k, **v) for k, v in days.items()], periods=_periods(reads), anchor=reads[-1]["t"] if reads else None,
+                      windows=[dict(end=e, peak=v) for e, v in sorted(peaks.items())])
 
 
 SESSIONS_SHOWN = 20
@@ -1421,7 +1430,9 @@ def transcript_report(text, quota=None, aggregate=None):
     """The counts of interactive sessions (contract transcript-usage.jsonl) -> dict(periods, sources, sessions, aggregate_days), or None when
     neither file exists. periods: the graded rows of _period(), anchored on the newest quota reading (else the newest message or aggregate
     day), each with the message count, the four counts, their sum and the highest 5-hour and weekly percentage of the same period from
-    `quota` (the report of _quota()). sources, sessions: the last HISTORY_DAYS days; sessions are the SESSIONS_SHOWN with the most tokens.
+    `quota` (the report of _quota()); on a day, week or month row the 5-hour value is instead the mean of the peaks of the vendor 5-hour
+    windows ending in the period (five_hour_windows: their number, five_hour_high: the highest; a window without readings is not counted).
+    sources, sessions: the last HISTORY_DAYS days; sessions are the SESSIONS_SHOWN with the most tokens.
     aggregate: the text of stats-cache-usage.jsonl (its contract): its token totals per day count in a period's `total` and `aggregate`
     only (no split, no messages), never in sources or sessions; a day with per-message records ignores them (the exact data wins).
     aggregate_days: {day: tokens} of the aggregates used."""
@@ -1458,9 +1469,18 @@ def transcript_report(text, quota=None, aggregate=None):
         if p is not None and p[:2] in rows:
             rows[p[:2]]["aggregate"] += n
             rows[p[:2]]["total"] += n
+    wins = {}
+    for w in (quota or {}).get("windows", []) if anchor is not None else []:
+        p = _period(w["end"], anchor)
+        if p is not None and p[0] != "hour":
+            wins.setdefault(p[:2], []).append(w["peak"])
     for k, row in rows.items():
         q = peaks.get(k, {})
         row["five_hour"], row["seven_day"] = q.get("five_hour"), q.get("seven_day")
+        if row["level"] != "hour":  # the mean of the peaks of the vendor 5-hour windows ending in the period (owner, 2026-11-25, PC-110)
+            ws = wins.get(k, [])
+            row["five_hour"] = round(sum(ws) / len(ws), 1) if ws else None
+            row["five_hour_windows"], row["five_hour_high"] = len(ws), max(ws, default=None)
     top = sorted(sessions.items(), key=lambda kv: (-kv[1]["total"], kv[0]))[:SESSIONS_SHOWN]
     return dict(periods=_history(rows.values(), [m[0] for m in msgs] + [_epoch(f"{d}T00:00:00+00:00") for d in days]), sources=[dict(key=k, **v) for k, v in sorted(sources.items(), key=lambda kv: (-kv[1]["total"], kv[0]))],
                 sessions=[dict(v, key=k[1]) for k, v in top], aggregate_days=dict(sorted(days.items())))

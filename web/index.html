@@ -663,17 +663,21 @@ function latestCard(q,today){
    +card('Earlier readings','The earlier days of this week per day, the earlier weeks of this month per week, the two months before per month (all UTC). '+rule,rows.filter(r=>!isToday(r)),'no data');
 }
 function sessionCards(T){
-  const nf=x=>x.toLocaleString('en-US'),pc=x=>x==null?'':x+' %';
+  const nf=x=>x.toLocaleString('en-US'),pc=x=>x==null?'':x+' %',none='<td class="muted">no readings</td>';
+  /* day, week and month rows: 5-hour = mean of the peaks of the vendor windows ending in the period, weekly = the period's highest reading (PC-110) */
+  const peaks=r=>r.level==='hour'?'<td class="mono">'+pc(r.five_hour)+'</td><td class="mono">'+pc(r.seven_day)+'</td>'
+    :(r.five_hour_windows?'<td class="mono" title="avg of '+r.five_hour_windows+' window'+(r.five_hour_windows>1?'s':'')+', highest '+pc(r.five_hour_high)+'">'+pc(r.five_hour)+'</td>':none)
+     +(r.seven_day==null?none:'<td class="mono">'+pc(r.seven_day)+'</td>');
   const cols=USEF.map(f=>'<th>'+f[1]+'</th>').join(''),cells=r=>'<td class="mono">'+nf(r.messages)+'</td>'+USEF.map(f=>'<td class="mono">'+nf(r[f[0]])+'</td>').join('');
-  const card=(title,note,head,rows,row,n)=>'<div class="card"><h2>'+title+'</h2><span class="muted">'+note+'</span><div class="tblbox narrow"><table><thead><tr>'+head+'<th>Messages</th>'+cols+(n?'<th>5-hour peak</th><th>Weekly peak</th>':'')+'</tr></thead><tbody>'
+  const card=(title,note,head,rows,row,n)=>'<div class="card"><h2>'+title+'</h2><span class="muted">'+note+'</span><div class="tblbox narrow"><table><thead><tr>'+head+'<th>Messages</th>'+cols+(n?'<th>5-hour peak (avg)</th><th>Weekly peak</th>':'')+'</tr></thead><tbody>'
     +rows.map(row).join('')+(rows.length?'':'<tr><td class="muted" colspan="9">no data</td></tr>')+'</tbody></table></div></div>';
   if(!T)return '<div class="card"><h2>Interactive sessions</h2><span class="muted">no data</span></div>';
   const LV=['hour','day','week','month'],hist=recentRows(T.periods,r=>r.messages>0||r.total>0);
   if(hist.length&&!hist.some(r=>r.level==='hour'))hist.unshift({level:'hour',none:true});
   const legend='<span class="lvlegend" aria-label="Aggregation levels">'+LV.map(l=>'<span class="lvkey lv-'+l+'"><i aria-hidden="true"></i>'+l+'</span>').join('')+'</span>';
-  return card('Interactive sessions history','Token counts of the interactive Claude Code sessions per period (UTC), with the highest quota percentage of the same period; hours without messages are not listed. Days before the transcripts exist come from the tool’s statistics cache as a daily aggregate without a split: counted in the sum only, marked “daily aggregate, no split”.'+legend,'<th>Period (UTC)</th><th>Per</th>',hist,
+  return card('Interactive sessions history','Token counts of the interactive Claude Code sessions per period (UTC), with the quota: on a day, week or month row “5-hour peak (avg)” is the mean, over the vendor 5-hour windows ending in that period, of each window’s highest reading (the tooltip gives the number of windows), and “Weekly peak” the highest weekly reading of the period; an hour row shows its own highest reading. Quota readings exist only since 2026-11-24: earlier periods show “no readings”, nothing is estimated or back-filled. Hours without messages are not listed. Days before the transcripts exist come from the tool’s statistics cache as a daily aggregate without a split: counted in the sum only, marked “daily aggregate, no split”.'+legend,'<th>Period (UTC)</th><th>Per</th>',hist,
       r=>r.none?'<tr class="lv-hour"><td class="muted" colspan="10">no sessions today</td></tr>'
-        :'<tr class="lv-'+r.level+'"><td class="mono">'+esc(r.label)+(r.aggregate?' <span class="muted" title="'+nf(r.aggregate)+' tokens of the tool’s statistics cache, counted in the sum only">incl. daily aggregate, no split</span>':'')+'</td><td>'+r.level+'</td>'+cells(r)+'<td class="mono">'+pc(r.five_hour)+'</td><td class="mono">'+pc(r.seven_day)+'</td></tr>',true)
+        :'<tr class="lv-'+r.level+'"><td class="mono">'+esc(r.label)+(r.aggregate?' <span class="muted" title="'+nf(r.aggregate)+' tokens of the tool’s statistics cache, counted in the sum only">incl. daily aggregate, no split</span>':'')+'</td><td>'+r.level+'</td>'+cells(r)+peaks(r)+'</tr>',true)
    +card('Interactive sessions per source','Last 90 days.','<th>Source</th>',T.sources,r=>'<tr><td class="mono">'+esc(r.key)+'</td>'+cells(r)+'</tr>')
    +card('Sessions with the most tokens','Last 90 days, at most 20.','<th>Session</th><th>Source</th>',T.sessions,r=>'<tr><td class="mono">'+esc(r.key)+'</td><td class="mono">'+esc(r.source)+'</td>'+cells(r)+'</tr>');
 }
