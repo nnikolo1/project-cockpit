@@ -46,3 +46,24 @@ def latest_deployment(repo, environment, *, run=_run):
     state = sts[0]["state"] if sts else None
     return {"id": d["id"], "ref": d["ref"], "environment": d.get("environment", environment), "state": state,
             "description": (sts[0].get("description") if sts else d.get("description")), "created_at": d.get("created_at")}
+
+
+def gh_of(run=_run):
+    """The `gh(args) -> stdout` function dispatcher.tasks takes, over the injected runner (args without the leading `gh`)."""
+    return lambda args: run(["gh", *args])
+
+
+def create_issue(repo, title, body, labels=(), *, run=_run):
+    """`gh issue create`; returns the new issue's URL. Labels must exist in the repository."""
+    args = ["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body]
+    for label in labels:
+        args += ["--label", label]
+    url = run(args).strip()
+    log.info("issue created in %s: %s", repo, url)
+    return url
+
+
+def comment_issue(repo, number, text, *, run=_run):
+    """`gh issue comment`: add one comment to issue `number`."""
+    run(["gh", "issue", "comment", str(number), "--repo", repo, "--body", text])
+    log.info("comment added to %s#%s", repo, number)
