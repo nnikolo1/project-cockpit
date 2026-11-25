@@ -36,6 +36,16 @@ class Task:
     unblocks: int = 0
     must: bool = False
     filed_by: str = None
+    project: str = None                   # the repository short name (docs/contracts/queue-interfaces.md, "The project key")
+
+    def __post_init__(self):
+        if self.project is None:
+            self.project = project_of(self.id)
+
+
+def project_of(task_id):
+    """The project key of a task id: the repository short name, the part before the issue number. The one place that parses it."""
+    return task_id.rsplit("-", 1)[0]
 
 
 def write_task_md(task, path):
@@ -180,3 +190,59 @@ class GitHubTasks:
             raise ValueError(f"unusable branch name {branch!r}")
         self.git(["fetch", str(bundle_path), f"+refs/heads/{branch}:refs/heads/worker/{task_id}"], self.repo_dir)
         log.info("%s: fetched %s from %s as worker/%s", task_id, branch, bundle_path, task_id)
+
+
+def _rank_key(t):
+    """The Dispatcher's ranking rule (core.rank_key): priority, deadline, what it unblocks, must before nice."""
+    return (t.priority, t.due or "9999-99-99", -t.unblocks, not t.must)
+
+
+class ProjectsTasks:
+    """One task source over several projects: one GitHubTasks per listed project, calls routed by `project_of(task_id)`. Only the listed
+    projects are ever touched. Same methods and signatures as GitHubTasks, so the Dispatcher takes either."""
+
+    def __init__(self, projects, gh, git, first=(), manager=None, now=None):
+        """projects: list of {"short", "repo": "owner/name", "repo_dir"}; first: short names served before all others, in that order."""
+        self.sources = {}
+        for p in projects:
+            if p["short"] in self.sources:
+                raise ValueError(f"project {p['short']!r} is listed twice")
+            self.sources[p["short"]] = GitHubTasks(p["repo"], gh, git, p["repo_dir"], manager=manager, short=p["short"], now=now)
+        unknown = [f for f in first if f not in self.sources]
+        if unknown:
+            raise ValueError(f"`first` names projects that are not listed: {unknown}")
+        self.first = list(first)
+
+    def _source(self, task_id):
+        short = project_of(task_id) if TASK_ID.match(task_id or "") else None
+        if short not in self.sources:
+            raise ValueError(f"not a task of a listed project: {task_id!r}")
+        return self.sources[short]
+
+    def released(self):
+        """The released tasks of all listed projects in one list: `first` projects (in that order), then the others; within each group by
+        the ranking rule, with no per-project share. A project whose listing fails is logged and skipped."""
+        tasks = []
+        for short, src in self.sources.items():
+            try:
+                tasks += src.released()
+            except Exception:
+                log.exception("%s: listing the released tasks failed; the other projects are still served", short)
+        rank = {short: i for i, short in enumerate(self.first)}
+        return sorted(tasks, key=lambda t: (rank.get(t.project, len(rank)), _rank_key(t)))
+
+    def set_state(self, task_id, state):
+        self._source(task_id).set_state(task_id, state)
+
+    def fetch_branch(self, task_id, bundle_path, branch):
+        self._source(task_id).fetch_branch(task_id, bundle_path, branch)
+
+    def reconcile_wip(self, running):
+        """PC-98 over all listed projects; a failing project is logged and skipped. -> list of (task id, what was done)."""
+        done = []
+        for short, src in self.sources.items():
+            try:
+                done += src.reconcile_wip(running)
+            except Exception:
+                log.exception("%s: reconciling wip tasks failed; the other projects are still reconciled", short)
+        return done
