@@ -44,3 +44,20 @@ Verdicts: **G** generic (opinionated but fit for any developer using Claude Code
 | 27 | Forward moves in application workflows go through the extension | S | jcrawler |
 | 28 | Claude in Chrome may inspect the owner's own UIs, read-only, without asking | Split: the read-only limits are generic, the standing permission is the owner's | rule line (limits) |
 | 29 | The public repository uses generic wording and carries no private project data | S | the Cockpit's own repository |
+
+## Batch 3: code, tests and verification (decided by the owner, 2026-11-25)
+
+| # | Rule | Verdict | Form |
+|---|---|---|---|
+| 30 | Bounded retries in fetch loops (abort after a few identical failures, distinct log line) | G | rule line, a code check possible |
+| 31 | Tests mirror the source tree; fast, deterministic, no network or external process | G (the pure-logic scope under `pipeline/` is project-specific) | rule line |
+| 32 | A code change reports test coverage, not only pass or fail | G | rule line |
+| 33 | A bug fix to pure logic gets a regression test in the same change | G | rule line |
+| 34 | Every gap the owner reports is covered by a generalised, project-agnostic test in the same change | G | rule line |
+| 35 | Every UI action has a test | G (where there is a UI) | rule line, harness check |
+| 36 | CI is automatic; no check depends on remembering to run it | G | rule line |
+| 37 | Tests run locally by default; the hosted run is the exception | Split: the local-gate-first principle is generic, the reasons (metered minutes) are the owner's | rule line |
+| 38 | Only the Python version in use is supported and tested | Split: "state the supported platform and test only it" is generic, Python 3.14 is the Cockpit's own choice | rule line |
+| 39 | Gate chained commands on the tests (validate before writing, join test and push with `&&`) | G | rule line |
+| 40 | Batch pushes when hosted CI minutes are metered | S | the private repository |
+| 41 | Verify "untracked" or "missing" claims with a real check before stating them | G | folded into the evidence rule (21) |
