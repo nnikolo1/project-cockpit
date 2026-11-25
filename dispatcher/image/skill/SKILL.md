@@ -7,7 +7,7 @@ description: What the good-bye note contains and when a Worker writes it. Use at
 
 ## Start
 
-Read `inbox/task.md`. Work in your own clone. Write the file `outbox/started` first (its content is ignored).
+Read `inbox/task.md`. Then read `inbox/synopsis.md` when it exists: a dated synopsis of the project's latest interactive session (decisions, standing rules, work in flight, open questions), for context only; a first line `STALE: ...` says it may be out of date. Never copy its text into commits, issues or notes. Work in your own clone. Write the file `outbox/started` first (its content is ignored).
 
 ## End
 
