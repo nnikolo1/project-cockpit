@@ -84,7 +84,7 @@ def test_gate_tests_a_branch_merged_into_head_and_leaves_the_tree_alone(tmp_path
 @pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
 def test_task_queue_page_shows_a_red_main_as_a_warning():
     page = (ROOT / "web" / "index.html").read_text()
-    code = "\n".join([re.search(r"^function esc\(s\).*$", page, re.M).group(0), page[page.index("function ciLine(c){"):page.index("function vQueueLocal(){")],
+    code = "\n".join(["const tmTxt=t=>'HH:MM',tm=tmTxt;", re.search(r"^function esc\(s\).*$", page, re.M).group(0), page[page.index("function ciLine(c){"):page.index("function vQueueLocal(){")],
                       "process.stdout.write(JSON.stringify([%s].map(ciLine)))" % ",".join(json.dumps(L.ci_run(runs(conclusion=c))) for c in ("failure", "success"))])
     r = subprocess.run(["node", "-e", code], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr

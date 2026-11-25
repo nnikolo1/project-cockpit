@@ -1,7 +1,9 @@
 import datetime as dt
 import json
 import pathlib
+import re
 import sys
+import time
 
 import pytest
 
@@ -26,9 +28,26 @@ def test_event_failure_and_heartbeat(tmp_path):
     log.failure("cockpit-1", "/w/cockpit-1", "no start")
     log.heartbeat("t=10:00 running=0 nothing to do")
     a, b, c = lines(log)
-    assert a == dict(time="2026-11-24T10:00:00", task="cockpit-1", folder="/w/cockpit-1", state="wip")
+    assert a == dict(time=Clock.t.astimezone().isoformat(timespec="seconds"), task="cockpit-1", folder="/w/cockpit-1", state="wip")
     assert (b["state"], b["reason"], b["task"], b["folder"]) == ("failed", "no start", "cockpit-1", "/w/cockpit-1")
     assert c["heartbeat"].startswith("t=10:00")
+
+
+def test_every_line_carries_its_offset(tmp_path, monkeypatch):
+    """PC-134: the log is written in local time with the offset, so no reader has to guess the zone (fixed zone UTC+02:00)."""
+    monkeypatch.setenv("TZ", "XYZ-2")   # POSIX: the sign is inverted
+    time.tzset()
+    try:
+        log = P.ProcessingLog(tmp_path / "d")                                  # the real clock
+        log.event("cockpit-1", "/w", "launched", worker="worker1")
+        P.ProcessingLog(tmp_path / "e", Clock()).heartbeat("x")                  # a naive clock is local time
+        P.ProcessingLog(tmp_path / "f", lambda: dt.datetime(2026, 11, 25, 7, 59, 1, tzinfo=dt.timezone.utc)).heartbeat("x")
+        now, naive, aware = (lines(P.ProcessingLog(tmp_path / x))[0]["time"] for x in "def")
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+02:00", now)
+    assert naive == "2026-11-24T10:00:00+02:00" and aware == "2026-11-25T07:59:01+00:00"
 
 
 def test_unknown_failure_reason_refused(tmp_path):

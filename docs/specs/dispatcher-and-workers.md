@@ -71,7 +71,7 @@ Every requirement below is the owner's own statement or was approved by the owne
 
 **5. Processing log**
 
-- 5a. Each significant change of state related to Workers and the Dispatcher is recorded in the processing log; each entry names the task, its project (the project key, 2d) and its task folder.
+- 5a. Each significant change of state related to Workers and the Dispatcher is recorded in the processing log; each entry names the task, its project (the project key, 2d) and its task folder, and carries its time as ISO local time with the offset (`2026-11-25T09:59:01+02:00`; entries before PC-134 have no offset and are the host's local time).
 - 5b. Every failed task records its reason in the processing log: no start, over 40 minutes, no activity, no note, an unusable note, no commit in the bundle, or the Worker gave up.
 - 5c. The processing log is stored where the processing occurs, on the owner's host (currently a MacBook). The processing data of all projects lives in one place, one data root (owner, 2026-11-24, constitutional): the one processing log, the Dispatcher's state, the proxy socket and usage file, the quota history and the Workers' area, with a subfolder per project where the interface contract (`docs/contracts/queue-interfaces.md`) says so (the task folders of 4q lie under `area/<project>/`). The root is an argument of the Dispatcher; its default is `~/.local/share/project-cockpit/task-queue`.
 - 5d. The processing log is not part of any git repository.

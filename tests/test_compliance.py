@@ -161,7 +161,7 @@ def test_projects_file_takes_the_command():
 def run_node(code):
     esc = re.search(r"^function esc\(s\).*$", PAGE, re.M).group(0)
     block = PAGE[PAGE.index("/* compliance:start */"):PAGE.index("/* compliance:end */")]
-    r = subprocess.run(["node", "-e", esc + "const hm=t=>'HH:MM';" + block + code], capture_output=True, text=True)
+    r = subprocess.run(["node", "-e", esc + "const hm=t=>'HH:MM';const tmTxt=hm;" + block + code], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     return r.stdout
 

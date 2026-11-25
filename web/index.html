@@ -237,7 +237,7 @@ const STAGE_TIP={embryo:'embryo: filed, waiting for the owner to release it',rel
 function stagePill(s,n){return '<span class="stg s-'+s+'" title="'+esc(STAGE_TIP[s])+'">'+(n==null?'':n+' ')+(STAGE_LABEL[s]||s)+'</span>';}
 function stageHtml(t,blocked){
   const nw=t.stage==='wip'&&t.noWorker?' <span class="muted" title="Labelled WIP, but the Dispatcher runs no Worker on it; the table is refreshed soon">(no Worker running)</span>':'';
-  const lv=t.live?' <span class="chip" title="from the Dispatcher\'s log, newer than the data from '+(D?hm(D.source.fetchedAt):'?')+' ('+hm(t.live.at)+'; was '+esc(STAGE_LABEL[t.live.was]||t.live.was)+')">live</span>':'';
+  const lv=t.live?' <span class="chip" title="from the Dispatcher\'s log, newer than the data from '+(D?tmTxt(D.source.fetchedAt):'?')+' ('+tmTxt(t.live.at)+'; was '+esc(STAGE_LABEL[t.live.was]||t.live.was)+')">live</span>':'';
   return stagePill(t.stage)+nw+(blocked?' '+stagePill('blocked'):'')+lv;}
 function stageChip(x,on){return '<button class="f'+(STAGE_TIP[x]?' sf s-'+x:'')+'" data-act="filter" data-v="'+x+'" aria-pressed="'+on+'"'+(STAGE_TIP[x]?' title="'+esc(STAGE_TIP[x])+'"':'')+'>'+(STAGE_LABEL[x]||x)+'</button>';}
 const stageLegend=()=>'<details><summary class="muted" style="font-size:13px;cursor:pointer">What the stage colours mean</summary><div class="legend" role="note" style="flex-direction:column;align-items:flex-start;gap:4px;margin-top:6px">'
@@ -549,7 +549,6 @@ function vCockpit(){
   return h+'</div></div>';
 }
 
-function hm(t){return new Date(t*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}
 function paneBar(R){
   /* every pane that shows GitHub-sourced data says how old it is and has its own Refresh (the only thing that bypasses the hourly refresh) */
   let at=null,after=null;
@@ -558,13 +557,13 @@ function paneBar(R){
   else if(R==='settings'&&UI.setSec==='policies'&&PRS.at){at=PRS.at;after=at+3600;}
   else if(!(R==='cockpit'||R==='backlog'||R==='timeline'||R==='questions'||R==='settings'))return '';
   else if(R==='settings'&&UI.setSec!=='policies')return '';
-  return '<div class="page" style="padding-bottom:0"><div class="row" style="gap:10px"><span class="muted" style="font-size:13px" title="GitHub data is refreshed lazily, at most once an hour; Refresh fetches this pane\'s data now">'+(at?'data from '+hm(at)+(after?', next refresh after '+hm(after):''):'no data yet')+'</span><button class="btn small" data-act="refresh" data-pane="'+R+'">Refresh</button></div></div>';
+  return '<div class="page" style="padding-bottom:0"><div class="row" style="gap:10px"><span class="muted" style="font-size:13px" title="GitHub data is refreshed lazily, at most once an hour; Refresh fetches this pane\'s data now">'+(at?'data from '+tm(at)+(after?', next refresh after '+tm(after):''):'no data yet')+'</span>'+(R==='backlog'?'<span class="muted" style="font-size:13px" data-zone>'+zoneNote()+'</span>':'')+'<button class="btn small" data-act="refresh" data-pane="'+R+'">Refresh</button></div></div>';
 }
 /* The age banner (owner, offline behaviour): the last good state with its age, the case (rate limit with its retry time, rejected token,
    unreachable), that no new task starts from it when it is over an hour old, and why the steering actions are off. */
 function ageBanner(D){
   const n=D.staleNote,age=n?n.age_s:Math.max(0,Math.round(Date.now()/1000-D.source.fetchedAt));
-  return '<div class="page" style="padding-bottom:0"><div class="card" role="status" style="border-color:var(--warn,var(--danger))"><b class="warnline">GitHub data is '+ageMin(age)+' old.</b> <span class="muted">Showing the last good copy, from '+esc(D.source.fetched)+'. '
+  return '<div class="page" style="padding-bottom:0"><div class="card" role="status" style="border-color:var(--warn,var(--danger))"><b class="warnline">GitHub data is '+ageMin(age)+' old.</b> <span class="muted">Showing the last good copy, from '+tm(D.source.fetchedAt)+'. '
     +(n?esc(n.reason)+(n.kind==='rate_limit'?'':n.kind==='error'?' ('+esc(n.error)+')':'')+'. '+(n.until||n.kind==='rate_limit'?'':'Next try within a minute. '):'')
     +(D.newWork===false?'No new task is started from data over an hour old; work in progress continues. ':'')
     +(D.steerBlock?'Actions are off: '+esc(D.steerBlock)+'. ':'')+'</span> <button class="btn small" data-act="refresh">Retry</button></div></div>';
@@ -632,7 +631,7 @@ function vModPage(id){
 /* The last daily backup (status record of tools/project_backup.py): time and result; a failure or an age over 24 h is shown as a warning. */
 function bkLine(b){
   if(!b)return '<p class="warnline" style="font-size:12px;margin:6px 0 0">Daily backup: none recorded.</p>';
-  const t=x=>x?esc(new Date(x).toLocaleString()):'never',old=!b.last_ok||(Date.now()-new Date(b.last_ok))>864e5;
+  const t=x=>x?tm(x):'never',old=!b.last_ok||(Date.now()-new Date(b.last_ok))>864e5;
   return '<p class="'+(b.ok&&!old?'muted':'warnline')+'" style="font-size:12px;margin:6px 0 0">Daily backup: '+t(b.time)+', '
    +(b.ok?'ok ('+b.files+' files, '+(b.size/1048576).toFixed(1)+' MB)':'failed: '+esc(b.reason||'no reason given')+'; last good one '+t(b.last_ok))
    +(b.ok&&old?'; older than 24 hours':'')+'.</p>';
@@ -645,10 +644,25 @@ function compLine(c){
 }
 
 /* safe-block:start (PC-114) */
-/* A time as "YYYY-MM-DD HH:MM" (UTC): an ISO string as given, a number as epoch seconds; anything unreadable gives "?", never an exception. */
-function t0(x){
-  if(typeof x==='number'){const d=new Date(x*1000);x=isNaN(d)?'':d.toISOString();}
-  return typeof x==='string'&&x?esc(x.replace('T',' ').slice(0,16)):'?';
+/* One time format for the Task Queue page (PC-134): x is epoch seconds or an ISO string (with an offset; one without is local time). tmTxt gives
+   the browser's local time, "HH:MM" today and "YYYY-MM-DD HH:MM" otherwise (now: epoch ms, for tests); tm adds the UTC value as a tooltip;
+   anything unreadable gives "?", never an exception (PC-114). zoneNote names the zone once at the top of the view. */
+function tmDate(x){
+  const d=typeof x==='number'?new Date(x*1000):typeof x==='string'&&x?new Date(x):null;
+  return d&&!isNaN(d)?d:null;
+}
+function tmTxt(x,now){
+  const d=tmDate(x);if(!d)return '?';
+  const p=n=>String(n).padStart(2,'0'),day=v=>v.getFullYear()+'-'+p(v.getMonth()+1)+'-'+p(v.getDate()),hh=p(d.getHours())+':'+p(d.getMinutes());
+  return day(d)===day(new Date(now==null?Date.now():now))?hh:day(d)+' '+hh;
+}
+function tm(x,now){
+  const d=tmDate(x);
+  return d?'<span class="tm" title="'+d.toISOString().slice(0,16).replace('T',' ')+' UTC">'+tmTxt(x,now)+'</span>':'?';
+}
+function zoneNote(now){
+  const o=-new Date(now==null?Date.now():now).getTimezoneOffset(),a=Math.abs(o);
+  return 'times in your local time, UTC'+(o<0?'-':'+')+String(Math.floor(a/60)).padStart(2,'0')+':'+String(a%60).padStart(2,'0');
 }
 /* One block (card) of a view: its HTML, or, when drawing it throws, an error card in its place (logged to the console), so one bad value
    cannot leave a whole tab undrawn. A whole tab passes page=true: its error card is put in a page frame. */
@@ -663,17 +677,17 @@ function block(name,fn,page){
 /* The last run of the test workflow on main: red is a warning (until the daily job files it as a finding, PC-91). */
 function ciLine(c){
   if(!c)return '';
-  const t=c.time?' started '+esc(new Date(c.time).toLocaleString()):'',a=c.url?' <a href="'+esc(c.url)+'" target="_blank" rel="noopener">run</a>':'';
+  const t=c.time?' started '+tm(c.time):'',a=c.url?' <a href="'+esc(c.url)+'" target="_blank" rel="noopener">run</a>':'';
   const w={green:'passed',red:'failed ('+esc(c.conclusion||'')+')',running:'running',other:esc(c.conclusion||'no result'),none:'no run recorded',unknown:'unknown: '+esc(c.error||'GitHub unavailable')}[c.state]||esc(c.state);
   return '<p class="'+(c.state==='red'?'warnline':'muted')+'" style="font-size:12px;margin:6px 0 0">CI on main: '+w+t+(c.sha?' <span class="mono">'+esc(c.sha.slice(0,7))+'</span>':'')+a+'.</p>';
 }
 function vQueueLocal(){
   const nf=t=>D&&D.tasks.find(x=>x.key===t),L=QL;
   if(!L)return '<div class="card"><h2>Being processed now</h2><span class="muted">The Dispatcher files could not be read.</span>'+ciLine(CI)+'</div>';
-  return '<div class="card"><div class="row" style="gap:10px"><h2>Being processed now</h2><span class="muted" style="font-size:13px" title="Read from the Dispatcher\'s files on every page load; the task table below is GitHub data'+(D?' from '+hm(D.source.fetchedAt):'')+', with newer Dispatcher events marked live">live, '+hm(L.asOf)+'</span></div>'+(L.workers.length?L.workers.map(w=>{const t=nf(w.task);return '<div class="row" style="gap:10px;margin-top:8px"><b class="mono">'+esc(w.worker)+'</b><b class="mono">'+esc(w.task||'?')+'</b>'+(t?'<button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button>':'')+'<span class="muted">launched '+t0(w.launched)+(w.started?'':' · starting')+'</span></div>';}).join(''):'<p class="muted" style="margin:8px 0 0">No Worker is running now.</p>')
+  return '<div class="card"><div class="row" style="gap:10px"><h2>Being processed now</h2><span class="muted" style="font-size:13px" title="Read from the Dispatcher\'s files on every page load; the task table below is GitHub data'+(D?' from '+tmTxt(D.source.fetchedAt):'')+', with newer Dispatcher events marked live">live, '+tmTxt(L.asOf)+'</span></div>'+(L.workers.length?L.workers.map(w=>{const t=nf(w.task);return '<div class="row" style="gap:10px;margin-top:8px"><b class="mono">'+esc(w.worker)+'</b><b class="mono">'+esc(w.task||'?')+'</b>'+(t?'<button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button>':'')+'<span class="muted">launched '+tm(w.launched)+(w.started?'':' · starting')+'</span></div>';}).join(''):'<p class="muted" style="margin:8px 0 0">No Worker is running now.</p>')
    +'<p class="muted" style="font-size:12px;margin:10px 0 0">From the Dispatcher: '+(L.settings.values.enabled?'on':'off')+', '+L.settings.values.workers+' Worker'+(L.settings.values.workers===1?'':'s')+' at most, every '+L.settings.values.interval_minutes+' min (settings in the Settings tab).</p>'
    +bkLine(L.backup)+ciLine(CI)
-   +(L.log.length?'<details style="margin-top:8px"><summary class="muted">Processing log, newest '+L.log.length+'</summary><div class="mono" style="font-size:12px;margin-top:6px">'+L.log.map(r=>t0(r.time)+' '+esc(r.heartbeat?r.heartbeat:[r.task,r.state,r.reason,r.worker].filter(Boolean).join(' '))).join('<br>')+'</div></details>':'')+'</div>';
+   +(L.log.length?'<details style="margin-top:8px"><summary class="muted">Processing log, newest '+L.log.length+'</summary><div class="mono" style="font-size:12px;margin-top:6px">'+L.log.map(r=>tm(r.time)+' '+esc(r.heartbeat?r.heartbeat:[r.task,r.state,r.reason,r.worker].filter(Boolean).join(' '))).join('<br>')+'</div></details>':'')+'</div>';
 }
 function vBacklog(){
   if(!D)return '<div class="page">'+block('Being processed now',vQueueLocal)+'<p class="muted">The task list needs GitHub and is not available yet.</p></div>';
@@ -928,10 +942,10 @@ const compCount=p=>p&&p.report?p.report.violations.length:0;
 /* Compliance (Settings > Policies): one card per project (violation count, last report link and date, run state, the Run button), then every
    open violation of every project, highlighted until a later report no longer has it. The page only shows; a fix is the owner's own act. */
 function compRun(r){
-  return r.state==='running'?'<span class="warnline">Check running since '+hm(r.started)+'\u2026</span>'
-   :r.state==='failed'?'<span class="warnline">Last run failed (exit '+r.exit+') at '+hm(r.ended)+'.</span>'
+  return r.state==='running'?'<span class="warnline">Check running since '+tmTxt(r.started)+'\u2026</span>'
+   :r.state==='failed'?'<span class="warnline">Last run failed (exit '+r.exit+') at '+tmTxt(r.ended)+'.</span>'
    :r.state==='interrupted'?'<span class="warnline">Last run was interrupted (the Cockpit restarted or the process vanished).</span>'
-   :r.state==='done'?'<span class="muted" style="font-size:13px">Last run finished at '+hm(r.ended)+'.</span>':'';}
+   :r.state==='done'?'<span class="muted" style="font-size:13px">Last run finished at '+tmTxt(r.ended)+'.</span>':'';}
 function vCompliance(){
   const P=COMP.projects,all=P.flatMap(p=>(p.report?p.report.violations:[]).map(v=>Object.assign({project:p.name},v)));
   let h='<div><h2>Compliance</h2><span class="muted">Violations the compliance check found in the projects\' local policy files. This page only shows them; fixing a file is yours to do.</span></div>';
@@ -1133,7 +1147,7 @@ function drawerTask(t){
   }
   if(kids.length)h+='<div class="card"><h2>Sub-tasks</h2>'+kids.map(k=>'<div><button class="linkbtn" data-act="open" data-k="'+k.key+'"><b class="mono">'+esc(k.key)+'</b> '+esc(k.title)+'</button> '+prioChip(k)+' '+stagePill(k.stage)+'</div>').join('')+'</div>';
   const ev=D.events.filter(x=>x.key===t.key);
-  h+='<div class="card"><h2>History</h2><div style="display:flex;flex-direction:column;gap:5px;margin-top:8px;font-size:13px">'+(ev.length?ev.map(x=>'<span><span class="mono muted">'+x.t.slice(5)+'</span> <b>'+esc(x.actor)+'</b> '+esc(x.text)+'</span>').join(''):'<span class="muted">No events yet.</span>')+'</div></div>';
+  h+='<div class="card"><h2>History</h2><div style="display:flex;flex-direction:column;gap:5px;margin-top:8px;font-size:13px">'+(ev.length?ev.map(x=>'<span><span class="mono muted">'+tm(x.t)+'</span> <b>'+esc(x.actor)+'</b> '+esc(x.text)+'</span>').join(''):'<span class="muted">No events yet.</span>')+'</div></div>';
   return h;
 }
 /* "edited <time>" (GitHub's lastEditedAt; GitHub keeps the history) and a stale authority analysis, on the row and in the task view. */
@@ -1176,12 +1190,12 @@ function render(){
      +(s.steering&&s.user&&s.user!==s.manager?'<span class="pill bad">acting as '+esc(s.user)+', not the Manager ('+esc(s.manager)+')</span>':'')
      +'</div>';}
   h+='</div>';
-  if(OFF)h+='<div class="page" style="padding-bottom:0"><div class="card" role="status" style="border-color:var(--warn,var(--danger))"><b class="warnline">offline copy, data from '+esc(new Date(OFF.created*1000).toLocaleString())+'</b> <span class="muted">No GitHub call is made; actions are off.'+(OFF.gaps&&OFF.gaps.length?' Not in the backup: '+esc(OFF.gaps.map(g=>g.pane).join(', '))+'.':'')+'</span></div></div>';
+  if(OFF)h+='<div class="page" style="padding-bottom:0"><div class="card" role="status" style="border-color:var(--warn,var(--danger))"><b class="warnline">offline copy, data from '+tm(OFF.created)+'</b> <span class="muted">No GitHub call is made; actions are off.'+(OFF.gaps&&OFF.gaps.length?' Not in the backup: '+esc(OFF.gaps.map(g=>g.pane).join(', '))+'.':'')+'</span></div></div>';
   h+=paneBar(R);
   const LOCAL=R==='settings'||R==='usage'||R==='questions'||R==='backlog'||R==='code';  /* tabs with a local part: shown without the GitHub state */
   const GHR=PANE_STATE.includes(R);  /* only these tabs show GitHub-state banners */
   if(GHR&&D&&(D.staleNote||D.newWork===false))h+=ageBanner(D);
-  if(GHR&&D&&D.warming)h+='<div class="page" style="padding-bottom:0"><div class="card" role="status"><b>warming up, data from '+esc(D.source.fetched)+'</b> <span class="muted">The Cockpit has just restarted and is filling its caches; this is its copy on disk. Fresh data follows by itself; actions work meanwhile.</span></div></div>';
+  if(GHR&&D&&D.warming)h+='<div class="page" style="padding-bottom:0"><div class="card" role="status"><b>warming up, data from '+tm(D.source.fetchedAt)+'</b> <span class="muted">The Cockpit has just restarted and is filling its caches; this is its copy on disk. Fresh data follows by itself; actions work meanwhile.</span></div></div>';
   if(GHR&&UI.err&&!D)h+='<div class="page" style="padding-bottom:0"><div class="card" style="border-color:var(--danger)"><b class="warnline">Could not load from GitHub, and no earlier copy exists.</b> <span class="muted">'+esc(UI.err)+'</span> <button class="btn small" data-act="refresh">Retry</button></div></div>';
   else if(GHR&&UI.err)h+='<div class="page" style="padding-bottom:0"><div class="card" style="border-color:var(--danger)"><span class="warnline">Some parts could not be loaded:</span> <span class="muted">'+esc(UI.err)+'</span></div></div>';
   if(!D&&!LOCAL){if(!UI.err)h+='<div class="page"><span class="muted">Loading…</span></div>';}
