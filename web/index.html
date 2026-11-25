@@ -197,7 +197,7 @@ function conflict(d,t){
 function cmp(d){return (a,b)=>
   ((a.prio||9)-(b.prio||9))||((eff(d,a).d||'9999').localeCompare(eff(d,b).d||'9999'))||(blocksCount(d,b)-blocksCount(d,a))||
   ((a.cls===b.cls)?0:(a.cls==='must'?-1:1))||a.key.localeCompare(b.key);}
-function ranked(d){return d.tasks.filter(t=>t.stage==='released'&&unfinished(d,t).length===0).sort(cmp(d));}
+function ranked(d){return d.tasks.filter(t=>t.pick).sort(cmp(d));}  /* pick: the Dispatcher's own rule (logic.pickable), set by the server */
 function overdue(d,t){const e=eff(d,t).d;return isOpen(t)&&e&&e<TODAY;}
 
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -215,7 +215,9 @@ function blockHtml(t){
   if(bc&&isOpen(t))h+=' <span class="chip blocks">blocks '+bc+'</span>';
   return h;}
 function findingChip(t){return t.finding?'<span class="chip" title="Filed because a file contradicts a standing policy; released at once">finding</span>':'';}
-function stageHtml(t){return t.stage==='wip'?'<b>WIP</b>':(t.stage==='embryo'||t.stage==='cancelled'?'<span class="muted">'+STAGE_LABEL[t.stage]+'</span>':STAGE_LABEL[t.stage]);}
+function stageHtml(t){
+  const s=t.stage==='wip'?(t.noWorker?'<b title="Labelled WIP, but the Dispatcher runs no Worker on it; the table is refreshed soon">WIP?</b> <span class="muted">(no Worker running)</span>':'<b>WIP</b>'):(t.stage==='embryo'||t.stage==='cancelled'?'<span class="muted">'+STAGE_LABEL[t.stage]+'</span>':STAGE_LABEL[t.stage]);
+  return s+(t.live?' <span class="chip" title="from the Dispatcher\'s log, newer than the data from '+(D?hm(D.source.fetchedAt):'?')+' ('+hm(t.live.at)+'; was '+esc(STAGE_LABEL[t.live.was]||t.live.was)+')">live</span>':'');}
 function sortKey(t){return t.stage==='wip'?0:(t.stage==='released'?1:(t.stage==='embryo'?2:3));}
 
 
@@ -534,7 +536,7 @@ function vQueueLocal(){
   const nf=t=>D&&D.tasks.find(x=>x.key===t),L=QL;
   if(!L)return '<div class="card"><h2>Being processed now</h2><span class="muted">The Dispatcher files could not be read.</span></div>';
   const t0=x=>typeof x==='string'&&x?esc(x.replace('T',' ').slice(0,16)):'?';
-  return '<div class="card"><h2>Being processed now</h2>'+(L.workers.length?L.workers.map(w=>{const t=nf(w.task);return '<div class="row" style="gap:10px;margin-top:8px"><b class="mono">'+esc(w.worker)+'</b><b class="mono">'+esc(w.task||'?')+'</b>'+(t?'<button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button>':'')+'<span class="muted">launched '+t0(w.launched)+(w.started?'':' · starting')+'</span></div>';}).join(''):'<p class="muted" style="margin:8px 0 0">No Worker is running now.</p>')
+  return '<div class="card"><div class="row" style="gap:10px"><h2>Being processed now</h2><span class="muted" style="font-size:13px" title="Read from the Dispatcher\'s files on every page load; the task table below is GitHub data'+(D?' from '+hm(D.source.fetchedAt):'')+', with newer Dispatcher events marked live">live, '+hm(L.asOf)+'</span></div>'+(L.workers.length?L.workers.map(w=>{const t=nf(w.task);return '<div class="row" style="gap:10px;margin-top:8px"><b class="mono">'+esc(w.worker)+'</b><b class="mono">'+esc(w.task||'?')+'</b>'+(t?'<button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button>':'')+'<span class="muted">launched '+t0(w.launched)+(w.started?'':' · starting')+'</span></div>';}).join(''):'<p class="muted" style="margin:8px 0 0">No Worker is running now.</p>')
    +'<p class="muted" style="font-size:12px;margin:10px 0 0">From the Dispatcher: '+(L.settings.values.enabled?'on':'off')+', '+L.settings.values.workers+' Worker'+(L.settings.values.workers===1?'':'s')+' at most, every '+L.settings.values.interval_minutes+' min (settings in the Settings tab).</p>'
    +bkLine(L.backup)
    +(L.log.length?'<details style="margin-top:8px"><summary class="muted">Processing log, newest '+L.log.length+'</summary><div class="mono" style="font-size:12px;margin-top:6px">'+L.log.map(r=>t0(r.time)+' '+esc(r.heartbeat?r.heartbeat:[r.task,r.state,r.reason,r.worker].filter(Boolean).join(' '))).join('<br>')+'</div></details>':'')+'</div>';

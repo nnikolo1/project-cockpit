@@ -17,9 +17,7 @@ log = logging.getLogger("dispatcher.tasks")
 
 STATES = ("wip", "unmerged", "failed", "merged")
 FINAL = ("merged", "failed")              # 2c: only the owner or an interactive agent moves a task out of these
-NOT_RELEASABLE = ("question", "type:decision", "interactive-only")   # 2b: embryos apart from questions, decisions and the Task Queue's own tasks count as released
-TASK_ID = re.compile(r"^(?P<short>[A-Za-z0-9][A-Za-z0-9._-]*)-(?P<number>\d+)$")
-INTERACTIVE_DAYS = 10                     # 2b: an interactive agent's embryo counts as released after this many days
+TASK_ID = re.compile(r"^(?P<short>[A-Za-z0-9][A-Za-z0-9._-]*)-(?P<number>\d+)$")   # 2b's release rule is logic.dispatchable, shared with the Cockpit's "Next up"
 BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 
 
@@ -74,8 +72,7 @@ def _rank_inputs(task, by_key, unblocks):
             deadline = t["deadline"]
             break
         t = by_key.get(t.get("parent"))
-    return dict(deadline=deadline, blocked=any(by_key[b]["stage"] != "merged" for b in task["blockedBy"] if b in by_key),
-                unblocks=unblocks.get(task["key"], 0))
+    return dict(deadline=deadline, blocked=L.is_blocked(task, by_key), unblocks=unblocks.get(task["key"], 0))
 
 
 class GitHubTasks:
@@ -107,16 +104,11 @@ class GitHubTasks:
         tasks, _ = L.derive(issues, events, {}, self.manager, [], False)
         by_key = {t["key"]: t for t in tasks}
         unblocks = _unblock_counts(tasks)
-        labels = {i["number"]: set(i["labels"]) for i in issues}
         body = {i["number"]: i["body"] for i in issues}
-        created = {i["number"]: i["created_at"] for i in issues}
         now = self.now()
         out = []
         for t in tasks:
-            lab = labels[t["number"]]
-            if t["stage"] not in ("embryo", "released") or lab & set(STATES) or lab & set(NOT_RELEASABLE) or t["type"] == "decision":
-                continue
-            if not (t["stage"] == "released" or "released" in lab or self._author_releases(lab, created[t["number"]], now)):
+            if not L.dispatchable(t, now):   # the one release rule, shared with the Cockpit's "Next up"
                 continue
             r = _rank_inputs(t, by_key, unblocks)
             out.append(Task(id=f"{self.short}-{t['number']}", repo=self.repo, number=t["number"], title=t["title"], text=body[t["number"]],
@@ -124,15 +116,6 @@ class GitHubTasks:
                             filed_by=t["filed_by"]))
         log.info("%s: %d released task(s)", self.repo, len(out))
         return out
-
-    @staticmethod
-    def _author_releases(lab, created, now):
-        """2b: whether an embryo counts as released by its author label alone."""
-        if "author:job" in lab:
-            return False
-        if "author:interactive" in lab and "author:owner" not in lab:
-            return L.age_days(created, now) >= INTERACTIVE_DAYS
-        return True
 
     def _number(self, task_id):
         m = TASK_ID.match(task_id)

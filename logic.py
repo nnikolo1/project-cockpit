@@ -136,6 +136,40 @@ def is_finding(labels):
     return FINDING in labels and "question" not in labels and "type:decision" not in labels
 
 
+NOT_DISPATCHABLE = ("question", "type:decision", "interactive-only")   # spec 2b: questions, decisions and the Task Queue's own tasks never go to a Worker
+INTERACTIVE_DAYS = 10                     # spec 2b: an interactive agent's embryo counts as released after this many days
+
+
+def _author_releases(lab, created, now):
+    """Spec 2b: whether an embryo counts as released by its author label alone."""
+    if "author:job" in lab:
+        return False
+    if "author:interactive" in lab and "author:owner" not in lab:
+        return age_days(created, now) >= INTERACTIVE_DAYS
+    return True
+
+
+def dispatchable(t, now):
+    """The Dispatcher's release rule (spec 2b), the one copy: a derived task (logic.derive) that is open, unassigned, without a state label,
+    not a question, decision or `interactive-only`, and released (stage, label, or its author label). Blockers are checked by is_blocked."""
+    lab = set(t["labels"])
+    if t["stage"] not in ("embryo", "released") or lab & set(STATES) or lab & set(NOT_DISPATCHABLE) or t["type"] == "decision":
+        return False
+    return t["stage"] == "released" or "released" in lab or _author_releases(lab, t["created"], now)
+
+
+def is_blocked(t, by_key):
+    """Blocked while a blocker (a known task) is not merged (owner, 2026-11-25)."""
+    return any(by_key[b]["stage"] != "merged" for b in t["blockedBy"] if b in by_key)
+
+
+def pickable(tasks, now, held=()):
+    """The keys of the tasks the Dispatcher would really pick from ("Next up" and the rank column): dispatchable, not blocked and not held
+    by a running Worker (`held`: issue numbers)."""
+    by_key = {t["key"]: t for t in tasks}
+    return {t["key"] for t in tasks if dispatchable(t, now) and not is_blocked(t, by_key) and t["number"] not in held}
+
+
 def parse_filed_by(body):
     """The agent id in the body's `<!-- filed-by: <agent id> -->` line, or None."""
     m = FILED_BY.search(body or "")
@@ -1848,6 +1882,56 @@ def queue_local(state_text, plog_text, limit=15):
     log_ = [dict(time=r["time"], task=r.get("task"), state=r.get("state"), reason=r.get("reason"), worker=r.get("worker"), heartbeat=r.get("heartbeat"))
             for r in recs[-limit:]][::-1]
     return dict(workers=workers, log=log_)
+
+
+# ---------- the live overlay on the cached task table (PC-119) ----------
+LIVE_STAGE = {"launched": "wip", "wip": "wip", "unmerged": "unmerged", "failed": "failed"}   # processing-log state -> task stage
+RECONCILED = re.compile(r"-> (unmerged|failed)$")   # the Dispatcher's PC-98 reconciliation entries ("wip with no Worker -> failed")
+LIVE_REFRESH_S = 120                                # a newer log event refreshes the task list at most this often
+
+
+def task_number(task_id, shorts):
+    """The issue number of a Dispatcher task id `<short>-<number>` whose short name is one of `shorts` (lower case), else None."""
+    m = re.fullmatch(r"(.+)-(\d+)", task_id) if isinstance(task_id, str) else None
+    return int(m.group(2)) if m and m.group(1).lower() in shorts else None
+
+
+def live_events(plog_text, shorts):
+    """Issue number -> (epoch, stage) of the newest state change of each task of this project in the processing log."""
+    out = {}
+    for r in _json_lines(plog_text) or []:
+        st = r.get("state") if isinstance(r.get("state"), str) else ""
+        m = RECONCILED.search(st)
+        stage, num = LIVE_STAGE.get(st) or (m and m.group(1)), task_number(r.get("task"), shorts)
+        try:
+            at = dt.datetime.fromisoformat(r.get("time")).timestamp()   # the log writes local time
+        except (TypeError, ValueError):
+            continue
+        if stage and num is not None and (num not in out or at >= out[num][0]):
+            out[num] = (at, stage)
+    return out
+
+
+def overlay_live(tasks, fetched_at, events, held, state_known):
+    """The cached tasks with the newer facts of the processing log: a state change newer than `fetched_at` replaces the cached stage and is
+    marked `live` (at, was); a WIP task that no running Worker (issue numbers in `held`) holds gets `noWorker`, when the Dispatcher's
+    state file could be read (`state_known`). Merged and cancelled are final and stay. The input is not changed."""
+    out = []
+    for t in tasks:
+        e = events.get(t["number"])
+        if e and e[0] > fetched_at and e[1] != t["stage"] and t["stage"] not in ("merged", "cancelled"):
+            t = dict(t, stage=e[1], running=is_running(e[1]), live=dict(at=e[0], was=t["stage"]))
+        if state_known and t["stage"] == "wip" and t["number"] not in held:
+            t = dict(t, noWorker=True)
+        out.append(t)
+    return out
+
+
+def live_refresh_due(events, fetched_at, last_try, now, gh_ok):
+    """True when the processing log has a state change newer than the cached task list, the last such refresh was LIVE_REFRESH_S or more
+    ago and GitHub may be called (`gh_ok`: no rate-limit pause, room in the hourly cap, not an offline copy)."""
+    newest = max((at for at, _ in events.values()), default=None)
+    return bool(gh_ok) and newest is not None and newest > fetched_at and now - last_try >= LIVE_REFRESH_S
 
 
 def local_modules(mods):
