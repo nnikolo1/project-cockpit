@@ -32,7 +32,8 @@ class ProcessingLog:
         self.now, self.project_of = now, project_of
 
     def _write(self, **rec):
-        rec = dict(time=self.now().isoformat(timespec="seconds"), **rec)
+        t = self.now()
+        rec = dict(time=(t if t.tzinfo else t.astimezone()).isoformat(timespec="seconds"), **rec)   # with the offset (PC-134): 2026-11-25T09:59:01+02:00
         with open(self.path, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec) + "\n")
         log.info("processing log: %s", rec)

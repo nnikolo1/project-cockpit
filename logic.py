@@ -128,6 +128,14 @@ def stage(issue, eff):
     return "released" if "released" in eff else "embryo"
 
 
+def task_lookup(raw):
+    """One issue as the REST API returns it -> {n, stage, title}: the answer the page gets when an action of its own got no answer (PC-136).
+    The labels count as they stand; the authorship of protected labels is checked on the next full read of the state."""
+    i = dict(state=raw.get("state"), state_reason=raw.get("state_reason"), labels=[x["name"] for x in raw.get("labels") or []],
+             assignees=[x["login"] for x in raw.get("assignees") or []])
+    return dict(n=raw.get("number"), stage=stage(i, set(i["labels"])), title=raw.get("title") or "")
+
+
 FINDING = "policy-finding"
 FILED_BY = re.compile(r"<!--\s*filed-by:\s*(\S+?)\s*-->")
 
@@ -190,6 +198,25 @@ def split_text(body):
 def join_text(text, kept):
     """The edited text with the kept parts re-attached below it (the inverse of split_text)."""
     return "\n\n".join([text.strip()] + list(kept)).strip() + "\n"
+
+
+CHECKABLE_ACTIONS = ("release", "cancel", "edit")  # actions whose effect can be read back on the issue (PC-131)
+
+
+def action_applied(form, issue):
+    """Whether the action of `form` is visible on `issue` as GitHub shows it now (`gh issue view --json state,labels,title,body`):
+    True = applied (never apply it again), False = not (fully) applied, None = cannot be told from the issue. A partly applied
+    release, cancel or edit counts as not applied: running it again is harmless (labels and texts are set, not added up)."""
+    labels = {l["name"] if isinstance(l, dict) else l for l in issue.get("labels") or ()}
+    a = form.get("action")
+    if a == "release":
+        return "released" in labels
+    if a == "cancel":
+        return "cancelled" in labels and str(issue.get("state", "")).upper() == "CLOSED"
+    if a == "edit":
+        title, text = (form.get("title") or "").strip(), split_text(form.get("body"))[0]
+        return split_title(issue.get("title") or "", 0)[1].strip() == title and split_text(issue.get("body"))[0] == text
+    return None
 
 
 def analysis_state(comments):
@@ -609,8 +636,9 @@ def group_commits(commits, assign, repo):
     """Same-day commits of one module -> one feed entry with several commit links (shown as short shas)."""
     g = {}
     for c in commits:
+        d = dt.date.fromisoformat(c["date"][:10]) if isinstance(c["date"], str) else c["date"]  # a disk copy keeps the day as an ISO string
         for lane in sorted(commit_lanes(c["files"], assign)):
-            g.setdefault((c["date"], lane), []).append(c)
+            g.setdefault((d, lane), []).append(c)
     out = []
     for (d, lane), cs in g.items():
         links = [(c["sha"][:7], f"https://github.com/{repo}/commit/{c['sha']}") for c in cs[:5]]
@@ -781,6 +809,95 @@ def norm_issue(n):
                 assignees=[a["login"] for a in n["assignees"]["nodes"]], parent=(n.get("parent") or {}).get("number"),
                 blocked_by=[b["number"] for b in n["blockedBy"]["nodes"]], body=n.get("body") or "",
                 comments=[dict(body=c["body"], author=(c.get("author") or {}).get("login"), t=c["createdAt"]) for c in n["comments"]["nodes"]])
+
+
+def _flag(op, name):
+    """The values of `name` options in one gh argument list (`--add-label x` or `-f title=x` style)."""
+    return [op[k + 1] for k in range(len(op) - 1) if op[k] == name]
+
+
+def _fields(op):
+    return dict(f.split("=", 1) for f in _flag(op, "-f") + _flag(op, "-F") if "=" in f)
+
+
+def apply_ops(raw, deadlines, ops, outs, actor, now):
+    """PC-135: the known effect of gh calls that succeeded, laid on the raw copy (issues, events) and the module deadlines, with no GitHub call.
+    ops: the argument lists run, outs: each one's JSON answer ({} when none). Labels, assignees, closing, comments, title and body, blockers
+    and new issues change as GitHub changes them; label events carry `actor` (the gh login), so the policy sees who set them.
+    -> (raw, deadlines, numbers of the issues touched). The inputs are not changed."""
+    issues = {i["number"]: dict(i, labels=list(i["labels"]), assignees=list(i.get("assignees") or []), blocked_by=list(i.get("blocked_by") or []),
+                                comments=list(i.get("comments") or [])) for i in raw["issues"]}
+    by_db = {i.get("id"): n for n, i in issues.items()}
+    events, touched, created = list(raw["events"]), [], None
+    ev = lambda n, kind, name: events.append(dict(number=n, kind=kind, name=name, actor=actor, t=now))
+    for op, out in zip(ops, outs):
+        if op[0] == "variable" and op[1:3] == ["set", "MODULE_DEADLINES"]:
+            deadlines = parse_module_deadlines(_flag(op, "--body")[0])
+            continue
+        if op[0] == "issue" and len(op) > 2 and op[2].isdigit() and int(op[2]) in issues:
+            i = issues[int(op[2])]
+            if op[1] == "edit":
+                for l in _flag(op, "--remove-label"):
+                    if l in i["labels"]:
+                        i["labels"].remove(l)
+                    ev(i["number"], "unlabeled", l)
+                for l in _flag(op, "--add-label"):
+                    i["labels"] += [] if l in i["labels"] else [l]
+                    ev(i["number"], "labeled", l)
+                for a in _flag(op, "--add-assignee"):
+                    a = actor if a == "@me" else a
+                    i["assignees"] += [] if a in i["assignees"] else [a]
+                    ev(i["number"], "assigned", a)
+            elif op[1] == "close":
+                reason = "not_planned" if _flag(op, "--reason") == ["not planned"] else "completed"
+                i.update(state="closed", state_reason=reason, closed_at=now)
+                ev(i["number"], "closed", reason)
+            elif op[1] == "comment":
+                i["comments"] = (i["comments"] + [dict(body=_flag(op, "--body")[0], author=actor, t=now)])[-10:]
+            else:
+                continue
+            i["updated_at"] = now
+            touched.append(i["number"])
+            continue
+        if op[0] != "api":
+            continue
+        path, f = next((x for x in op[1:] if x.startswith("repos/")), ""), _fields(op)
+        m = re.fullmatch(r"repos/[^/]+/[^/]+/issues(?:/(\d+)(/.*)?)?", path)
+        if not m:
+            continue
+        n, rest = int(m.group(1)) if m.group(1) else None, m.group(2) or ""
+        if n is None and isinstance(out, dict) and out.get("number"):   # a new issue
+            created = int(out["number"])
+            issues[created] = dict(number=created, id=out.get("id"), title=f.get("title", ""), url=out.get("html_url", ""), state="open", state_reason=None,
+                                   created_at=out.get("created_at") or now, updated_at=now, closed_at=None, edited=None, author=actor,
+                                   labels=[x.split("=", 1)[1] for x in _flag(op, "-f") if x.startswith("labels[]=")],
+                                   assignees=[], parent=None, blocked_by=[], body=f.get("body", ""), comments=[])
+            by_db[out.get("id")] = created
+            for l in issues[created]["labels"]:
+                ev(created, "labeled", l)
+            touched.append(created)
+        elif n in issues and rest == "" and "-X" in op and op[op.index("-X") + 1] == "PATCH":
+            i = issues[n]
+            i.update({k: f[k] for k in ("title", "body") if k in f}, edited=now, updated_at=now)
+            touched.append(n)
+        elif n in issues and rest == "/sub_issues" and created:
+            issues[created]["parent"] = n
+            touched.append(created)
+        elif n in issues and rest.startswith("/dependencies/blocked_by"):
+            b = by_db.get(int(f["issue_id"])) if "issue_id" in f else by_db.get(int(rest.rsplit("/", 1)[1])) if rest.count("/") == 3 else None
+            if b is not None:
+                bl = [x for x in issues[n]["blocked_by"] if x != b]
+                issues[n].update(blocked_by=bl + ([b] if "issue_id" in f else []), updated_at=now)
+                touched.append(n)
+    return dict(raw, issues=list(issues.values()), events=events), deadlines, list(dict.fromkeys(touched))
+
+
+def replace_issues(raw, issues, events):
+    """PC-135: the raw copy with the given issues (and all their events) replaced by a newer reading of them; new ones are added."""
+    got = {i["number"]: i for i in issues}
+    old = [got.pop(i["number"], i) for i in raw["issues"]]
+    nums = {i["number"] for i in issues}
+    return dict(raw, issues=old + list(got.values()), events=[e for e in raw["events"] if e["number"] not in nums] + list(events))
 
 
 def norm_events(n):
@@ -1232,7 +1349,10 @@ QUALITY_DEFAULTS = {
 }
 QUOTA_SETTING_DEFAULTS = {"quota_plan_start": "2026-11-01",  # the first day of the current plan (and so of the same quota; owner, 2026-11-25, PC-111)
                           "quota_weak_readings": 20}          # an estimate resting on fewer readings is marked weak
-CARD_SETTING_DEFAULTS = {"churn_colour": "size", "quality_thresholds": QUALITY_DEFAULTS, **QUOTA_SETTING_DEFAULTS}  # churn: what the overview showed before the option moved to Settings
+QUEUE_REFRESH_DEFAULT, QUEUE_REFRESH_MIN = 120, 60  # PC-130: the Task Queue pane's refresh (owner, 2026-11-25: every 2 min); the page may narrow it to 60 s
+QUEUE_BUDGET_RESERVE = 100  # below this many calls left in the hourly cap, the Queue pane falls back to the hourly refresh
+CARD_SETTING_DEFAULTS = {"churn_colour": "size", "quality_thresholds": QUALITY_DEFAULTS, **QUOTA_SETTING_DEFAULTS,  # churn: what the overview showed before the option moved to Settings
+                         "queue_refresh_s": QUEUE_REFRESH_DEFAULT}
 
 
 def _is_num(v):
@@ -1272,7 +1392,31 @@ def validate_card_settings(form, strict=True):
     v = form.get("churn_colour")
     if v not in CARD_CHURN_COLOURS:
         raise ValueError("churn colour must be one of: " + ", ".join(CARD_CHURN_COLOURS))
-    return {"churn_colour": v, "quality_thresholds": validate_thresholds(form.get("quality_thresholds"), strict), **validate_quota_settings(form, strict)}
+    return {"churn_colour": v, "quality_thresholds": validate_thresholds(form.get("quality_thresholds"), strict), **validate_quota_settings(form, strict),
+            "queue_refresh_s": validate_queue_refresh(form.get("queue_refresh_s"), strict)}
+
+
+def validate_queue_refresh(v, strict=True):
+    """queue_refresh_s: whole seconds, at least QUEUE_REFRESH_MIN; missing -> the default. strict: ValueError on a bad value, else the default."""
+    if v in (None, ""):
+        return QUEUE_REFRESH_DEFAULT
+    if isinstance(v, str) and re.fullmatch(r"\s*\d+\s*", v):
+        v = int(v)
+    if isinstance(v, int) and not isinstance(v, bool) and v >= QUEUE_REFRESH_MIN:
+        return v
+    if strict:
+        raise ValueError(f"Task Queue refresh must be a whole number of seconds, at least {QUEUE_REFRESH_MIN}")
+    return QUEUE_REFRESH_DEFAULT
+
+
+def queue_interval(setting, remaining, paused_until, now, slow=3600, reserve=QUEUE_BUDGET_RESERVE):
+    """The Task Queue pane's task-list refresh interval -> (seconds, reason or None). The setting while the hourly call budget allows it;
+    the hourly interval (slow) while a rate-limit pause is on or fewer than `reserve` calls are left of the Cockpit's own cap."""
+    if paused_until and now < paused_until:
+        return slow, "GitHub rate limit"
+    if remaining < reserve:
+        return slow, "call budget low"
+    return setting, None
 
 
 def validate_quota_settings(form, strict=True):
@@ -2191,30 +2335,89 @@ def rate_limit_reset(msg, now):
     return None
 
 
-def _iso_utc(t):
-    """The Dispatcher's state stores times as epoch seconds; the page shows ISO strings. A string passes through, anything unreadable is None (PC-114)."""
+_TOKEN_MARKS = ("bad credentials", "http 401", "requires authentication", "gh auth login", "not logged in", "token is invalid", "token has expired")
+_UNREACHABLE_MARKS = ("error connecting to", "could not resolve", "no such host", "connection refused", "connection reset", "network is unreachable",
+                      "timed out", "timeout", "dial tcp", "tls handshake", "http 502", "http 503", "http 504", "eof")
+
+
+def offline_kind(msg, rate_limited=False):
+    """Why GitHub could not be read (owner, offline behaviour): 'rate_limit', 'token' (the login's token was rejected), 'unreachable'
+    (network or GitHub down) or 'error' (anything else)."""
+    m = (msg or "").lower()
+    if rate_limited or is_rate_limited(m):
+        return "rate_limit"
+    if any(x in m for x in _TOKEN_MARKS):
+        return "token"
+    if any(x in m for x in _UNREACHABLE_MARKS):
+        return "unreachable"
+    return "error"
+
+
+def offline_reason(kind, until=None, clock=None):
+    """One sentence for the page: what is wrong, and for a rate limit when GitHub is tried again (clock formats an epoch time)."""
+    if kind == "rate_limit":
+        return "GitHub rate limit reached" + (f"; next try at {clock(until)}" if until and clock else "")
+    return {"token": "GitHub rejected the login's token (run gh auth login)", "unreachable": "GitHub is unreachable"}.get(kind, "GitHub could not be read")
+
+
+NEW_WORK_MAX_AGE_S = 3600  # owner: an assistant starts no new task from state older than one hour (in-progress work may continue)
+
+
+def may_start_new(age_s):
+    """True when the task state is young enough to start a new task from it (unknown age: no)."""
+    return age_s is not None and 0 <= age_s <= NEW_WORK_MAX_AGE_S
+
+
+def stagger_plan(keys, window, jitter, rng):
+    """{key: (offset, jitter)}: the refresh slots of the GitHub resources of all projects, spread evenly over `window` seconds in sorted key
+    order, each plus its own random jitter in [0, jitter) from rng (a random.Random), so that no two refreshes fall due together."""
+    keys = sorted(set(keys))
+    out = {}
+    for i, k in enumerate(keys):
+        j = rng.uniform(0, jitter) if jitter > 0 else 0.0
+        out[k] = (i * window / len(keys) + j, j)
+    return out
+
+
+def refresh_due(fetched_at, ttl, slot, started):
+    """When a copy fetched at fetched_at may be refreshed: ttl after the fetch plus the key's jitter, and never before its staggered slot
+    after the start of the service (a restart with old copies refreshes them one after another, not in one burst)."""
+    offset, jitter = slot
+    return max(fetched_at + ttl + jitter, started + offset)
+
+
+def _when(t):
+    """A time for the Task Queue page (PC-114, PC-134): epoch seconds stay a number (the browser shows them in its own zone); an ISO string gets
+    an offset: one without (the Dispatcher's processing log before PC-134) is the server machine's local time. Anything unreadable is None."""
     if isinstance(t, bool) or t is None:
         return None
     if isinstance(t, (int, float)):
         try:
-            return dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+            dt.datetime.fromtimestamp(t, dt.timezone.utc)
+            return t
         except (OverflowError, OSError, ValueError):
             return None
-    return t if isinstance(t, str) else None
+    if not isinstance(t, str):
+        return None
+    try:
+        d = dt.datetime.fromisoformat(re.sub(r"Z$", "+00:00", t))
+    except ValueError:
+        return None
+    return (d if d.tzinfo else d.astimezone()).isoformat(timespec="seconds")
 
 
 def queue_local(state_text, plog_text, limit=15):
     """The Task Queue facts that need no GitHub: the Workers the Dispatcher's state file lists as running (worker, task id, launched, started)
-    and the newest `limit` lines of the processing log (newest first). Missing or unreadable files give empty lists."""
+    and the newest `limit` lines of the processing log (newest first). Missing or unreadable files give empty lists. Times as `_when` gives them."""
     try:
         st = json.loads(state_text) if state_text else {}
     except ValueError:
         st = {}
     ws = st.get("workers") if isinstance(st, dict) and isinstance(st.get("workers"), dict) else {}
-    workers = [dict(worker=u, task=w.get("task_id"), launched=_iso_utc(w.get("launched")), started=bool(w.get("started")))
+    workers = [dict(worker=u, task=w.get("task_id"), launched=_when(w.get("launched")), started=bool(w.get("started")))
                for u, w in sorted(ws.items()) if isinstance(w, dict)]
     recs = [r for r in (_json_lines(plog_text) or []) if r.get("time")]
-    log_ = [dict(time=r["time"], task=r.get("task"), state=r.get("state"), reason=r.get("reason"), worker=r.get("worker"), heartbeat=r.get("heartbeat"))
+    log_ = [dict(time=_when(r["time"]), task=r.get("task"), state=r.get("state"), reason=r.get("reason"), worker=r.get("worker"), heartbeat=r.get("heartbeat"))
             for r in recs[-limit:]][::-1]
     return dict(workers=workers, log=log_)
 
@@ -2239,7 +2442,7 @@ def live_events(plog_text, shorts):
         m = RECONCILED.search(st)
         stage, num = LIVE_STAGE.get(st) or (m and m.group(1)), task_number(r.get("task"), shorts)
         try:
-            at = dt.datetime.fromisoformat(r.get("time")).timestamp()   # the log writes local time
+            at = dt.datetime.fromisoformat(r.get("time")).timestamp()   # with an offset, or (before PC-134) the server's local time
         except (TypeError, ValueError):
             continue
         if stage and num is not None and (num not in out or at >= out[num][0]):
@@ -2374,3 +2577,112 @@ def compliance_run_state(status, alive):
     if status.get("state") == "running":
         return "running" if alive else "interrupted"
     return "done" if status.get("exit") == 0 else "failed"
+
+
+# ---------- action log (PC-132): one JSON line per state-changing action or page failure; never a token, a credential or a task text ----------
+ACTION_LOG_LIMIT = 200  # the Settings view shows at most this many events
+_LOG_PARAMS = ("p", "d", "b", "module", "type", "cls", "parent", "id", "enabled")  # short, non-secret values kept as given
+_LOG_SIZES = ("body", "desc")  # texts: only their size is kept
+_SECRETISH = re.compile(r"\b(gh[pousr]_[A-Za-z0-9_]{10,}|github_pat_[A-Za-z0-9_]{10,}|sk-[A-Za-z0-9_-]{10,})\b|([?&]t=)[^ &\"']+")
+
+
+def scrub(text, secrets=(), limit=300):
+    """A message safe for the action log: known secrets and token-shaped strings replaced, cut to `limit` characters."""
+    s = str(text if text is not None else "")
+    for x in secrets:
+        if x:
+            s = s.replace(x, "<secret>")
+    return _SECRETISH.sub(lambda m: (m.group(2) or "") + "<secret>", s)[:limit]
+
+
+def _short(v, limit=40):
+    return v if isinstance(v, (bool, int, float)) else scrub(v, limit=limit)
+
+
+def _page_id(v):
+    return v if isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,40}", v) else ""
+
+
+def _now_iso(now):
+    return (now or dt.datetime.now(dt.timezone.utc)).isoformat(timespec="seconds")
+
+
+def action_record(form, outcome, msg, ms, task=None, version=None, now=None, secrets=()):
+    """The action log's line of one action posted to /api/act: what, on which task, the non-secret parameters (the new title, the size of an
+    edited text, never the text), outcome (ok | refused | failed), message, duration in ms, the page's id and the code version."""
+    params = {k: _short(form[k]) for k in _LOG_PARAMS if form.get(k) not in (None, "")}
+    if form.get("title"):
+        params["title"] = scrub(form["title"], secrets, 200)
+    params.update({f"{k}_chars": len(str(form[k])) for k in _LOG_SIZES if form.get(k) is not None})
+    return dict(t=_now_iso(now), source="server", project=_short(form.get("project") or "", 60), action=_short(form.get("action") or "", 30),
+                task=_short(task if task is not None else form.get("n") or "", 30), params=params, outcome=outcome, msg=scrub(msg, secrets),
+                ms=int(ms), page=_page_id(form.get("page")), version=version or "")
+
+
+PAGE_KINDS = dict(network="failed", script="failed", refused="refused")
+
+
+def page_record(ev, project, version=None, now=None, secrets=()):
+    """A failure the page reports (/api/event): a network error on an action, a script error, a refusal it showed -> the action log's line.
+    ValueError when it is not one (unknown kind, no page id): the endpoint refuses it rather than log noise."""
+    kind, page = ev.get("kind"), _page_id(ev.get("page"))
+    if kind not in PAGE_KINDS or not page:
+        raise ValueError("an event needs a kind (network, script, refused) and the page's id")
+    ms = ev.get("ms")
+    ok_ms = isinstance(ms, (int, float)) and not isinstance(ms, bool) and math.isfinite(ms)
+    return dict(t=_now_iso(now), source="page", kind=kind, project=_short(project or "", 60), action=_short(ev.get("action") or "", 30),
+                task=_short(ev.get("task") or "", 30), params={}, outcome=PAGE_KINDS[kind], msg=scrub(ev.get("msg"), secrets),
+                ms=int(ms) if ok_ms else None, at=scrub(ev.get("at"), limit=40), page=page, version=version or "")
+
+
+def filter_events(lines, action="", outcome="", task="", limit=ACTION_LOG_LIMIT):
+    """Action log lines, newest first, -> the parsed events that match every given filter, at most `limit`.
+    Unreadable lines are skipped. `task` matches the task key or number (with or without '#')."""
+    out, want = [], str(task).strip().lstrip("#").lower()
+    for line in lines:
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(e, dict) or (action and e.get("action") != action) or (outcome and e.get("outcome") != outcome):
+            continue
+        if want and str(e.get("task", "")).lstrip("#").lower() != want:
+            continue
+        out.append(e)
+        if len(out) >= limit:
+            break
+    return out
+
+
+# ---------- open issues per module (PC-128): the Task Queue's module chips ----------
+OPEN_KINDS = ("embryo", "released", "wip", "unmerged", "failed", "question")   # the order of the chip's tooltip
+
+
+def open_kind(t):
+    """The kind a task counts as on a module chip: None when its issue is no longer open (merged, cancelled), `question` for an open
+    question (label `question`), else its stage."""
+    if t["stage"] in ("merged", "cancelled"):
+        return None
+    return "question" if "question" in (t.get("labels") or []) else t["stage"]
+
+
+def open_tip(counts):
+    """{kind: n} -> the chip's tooltip, e.g. '3 embryo, 1 WIP, 4 question'; 'no open issue' when there is none."""
+    parts = [f"{counts[k]} {'WIP' if k == 'wip' else k}" for k in OPEN_KINDS if counts.get(k)]
+    return ", ".join(parts) or "no open issue"
+
+
+def open_counts(tasks, mods):
+    """-> {module id: {n, tip}} for every module (its sub-modules rolled up) and `all` (every open issue). A task without a module
+    carries the module `unassigned`, so that chip counts it."""
+    kinds = [(t.get("module") or "unassigned", k) for t in tasks if (k := open_kind(t))]
+
+    def one(keep):
+        c = {}
+        for mid, k in kinds:
+            if keep(mid):
+                c[k] = c.get(k, 0) + 1
+        return dict(n=sum(c.values()), tip=open_tip(c))
+    out = {m["id"]: one(lambda mid, m=m: mid == m["id"] or mid.startswith(m["id"] + "/")) for m in mods}
+    out["all"] = one(lambda mid: True)
+    return out

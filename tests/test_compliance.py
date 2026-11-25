@@ -113,6 +113,7 @@ def test_tab_lists_violations_of_every_project_and_never_run(env):
     assert view["beta"]["report"] is None and view["beta"]["run"]["state"] == "idle"   # "never run"
 
 
+@pytest.mark.ui_action("server:compliance")
 def test_button_starts_the_command_shows_running_then_date_changes_on_a_second_run(env):
     a, b = env(pause="0.6")
     code, body = C.do_act(dict(action="compliance", project="beta"))
@@ -140,6 +141,7 @@ def test_failed_and_interrupted_runs_are_shown(env):
     assert C.compliance_of(a)["run"]["state"] == "interrupted"
 
 
+@pytest.mark.ui_action("server:compliance/refused")
 def test_refusals(env, monkeypatch):
     a, _ = env()
     monkeypatch.setitem(C.CFG, "steer", False)
@@ -161,7 +163,7 @@ def test_projects_file_takes_the_command():
 def run_node(code):
     esc = re.search(r"^function esc\(s\).*$", PAGE, re.M).group(0)
     block = PAGE[PAGE.index("/* compliance:start */"):PAGE.index("/* compliance:end */")]
-    r = subprocess.run(["node", "-e", esc + "const hm=t=>'HH:MM';" + block + code], capture_output=True, text=True)
+    r = subprocess.run(["node", "-e", esc + "const hm=t=>'HH:MM';const tmTxt=hm;" + block + code], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     return r.stdout
 

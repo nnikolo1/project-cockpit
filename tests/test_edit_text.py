@@ -51,6 +51,7 @@ def test_split_and_join_keep_the_provenance_block_and_the_filed_by_marker():
     assert L.split_text("") == ("", [])
 
 
+@pytest.mark.ui_action("server:edit")
 def test_save_carries_title_and_body_and_the_markers_survive(steer):
     code, out, calls = save(dict(n=1, title="New title", body="New text."))
     assert code == 200 and calls[0][:4] == ["api", "-X", "PATCH", f"repos/{R}/issues/1"]
@@ -93,6 +94,7 @@ def test_a_saved_edit_marks_the_analysis_stale_and_release_is_refused(steer):
     assert S3["tasks"][0]["analysis"] == "clear" and C.plan_action(dict(action="release", n=1, p="2"), S3, R)[0]
 
 
+@pytest.mark.ui_action("server:edit/refused")
 def test_nothing_changed_writes_nothing_and_an_empty_title_is_refused(steer):
     code, out, calls = save(dict(n=1, title="t1", body="Old text."))
     assert code == 200 and calls == [] and "nothing changed" in out["msg"]

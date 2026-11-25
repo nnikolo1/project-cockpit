@@ -32,6 +32,14 @@
      "note": "module-card options of the Settings tab (churn colour and the quality-band thresholds; mode 0600, written atomically); an owner decision; a missing file means the defaults"
     },
     {
+     "path": "~/.local/share/project-cockpit/<project>/actions.jsonl",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "githubclient",
+     "volume": true,
+     "note": "the action log (PC-132): one JSON line per action posted by the page (outcome, task, non-secret parameters, duration, page id, code version) and per failure a page reports; never a token, a credential or a task text (titles and text sizes only); appended, mode 0600; at 1 MB rotated to actions.jsonl.1 .. .4 (five files kept, the oldest dropped); read by Settings > Action log; an offline copy writes none"
+    },
+    {
      "path": "~/.local/share/project-cockpit/<project>/projects.json",
      "kind": "file",
      "personal_data": false,
@@ -65,6 +73,13 @@
      "personal_data": false,
      "written_by": "githubclient",
      "note": "disk copies of the state, rules, timeline, card data, code view and module-page inputs (JSON, the --cache-dir argument); shown at once after a restart (a copy younger than one hour is not refreshed at all, so a restart costs no GitHub call) and refreshed behind; holds GitHub issue data (titles, bodies, labels), no token; rebuildable"
+    },
+    {
+     "path": "~/.local/share/project-cockpit/actions-seen.json",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "githubclient",
+     "note": "the ids of the last 200 actions sent by the page (PC-131), each started or done with its answer, so that a retried action is applied once, also across a restart; rewritten whole on each action, bounded, safe to delete when no action is in flight"
     }
    ],
    "logging": [

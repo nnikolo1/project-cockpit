@@ -7,6 +7,7 @@ import logging
 import importlib.util
 import os
 import pathlib
+import random
 import re
 import secrets
 import shutil
@@ -188,11 +189,12 @@ TL_BATCH = 10  # issues per on-demand timeline query
 TIMELINE = """timelineItems(last:100,itemTypes:[LABELED_EVENT,UNLABELED_EVENT,ASSIGNED_EVENT,CLOSED_EVENT]){nodes{__typename
   ... on LabeledEvent{createdAt actor{login} label{name}} ... on UnlabeledEvent{createdAt actor{login} label{name}}
   ... on AssignedEvent{createdAt actor{login} assignee{... on User{login}}} ... on ClosedEvent{createdAt actor{login}}}}"""
-GQL = """query($o:String!,$r:String!,$after:String,$n:Int!){repository(owner:$o,name:$r){issues(first:$n,after:$after,orderBy:{field:CREATED_AT,direction:ASC}){
- pageInfo{hasNextPage endCursor} nodes{number databaseId title url body state stateReason createdAt updatedAt lastEditedAt closedAt author{login}
+NODE = """number databaseId title url body state stateReason createdAt updatedAt lastEditedAt closedAt author{login}
  labels(first:50){nodes{name}} assignees(first:5){nodes{login}} parent{number} blockedBy(first:50){nodes{number}}
  comments(last:10){nodes{body createdAt author{login}}}
- """ + TIMELINE + "}}}}"
+ """ + TIMELINE  # the fields of one issue: the full load and the re-read of single issues (PC-135) read the same
+GQL = """query($o:String!,$r:String!,$after:String,$n:Int!){repository(owner:$o,name:$r){issues(first:$n,after:$after,orderBy:{field:CREATED_AT,direction:ASC}){
+ pageInfo{hasNextPage endCursor} nodes{""" + NODE + "}}}}"
 
 
 def fetch_issues(p):
@@ -209,6 +211,22 @@ def fetch_issues(p):
         if not page["pageInfo"]["hasNextPage"]:
             return issues, repair_events(p, issues, events)
         after = page["pageInfo"]["endCursor"]
+
+
+def fetch_issue_nodes(p, numbers):
+    """PC-135: a fresh reading of the given issues only, TL_BATCH per GraphQL call (one call for an action's one or two issues)
+    -> (raw issues, events). An issue GitHub no longer returns is left out."""
+    owner, name = p["repo"].split("/")
+    issues, events = [], []
+    for k in range(0, len(numbers), TL_BATCH):
+        chunk = numbers[k:k + TL_BATCH]
+        body = " ".join(f"i{n}:issue(number:{n}){{{NODE}}}" for n in chunk)
+        data = json.loads(run_gh(["api", "graphql", "-f", f"query=query($o:String!,$r:String!){{repository(owner:$o,name:$r){{{body}}}}}", "-f", f"o={owner}", "-f", f"r={name}"]))["data"]["repository"]
+        for n in chunk:
+            if data.get(f"i{n}"):
+                issues.append(L.norm_issue(data[f"i{n}"]))
+                events += L.norm_events(data[f"i{n}"])
+    return issues, events
 
 
 def fetch_timelines(p, numbers):
@@ -288,6 +306,13 @@ def _disk_load(key):
         return None
 
 
+def _jsonable(o):
+    """Dates (the commits' days) are kept on disk as ISO strings; logic.group_commits reads both forms."""
+    if isinstance(o, (dt.date, dt.datetime)):
+        return o.isoformat()
+    raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
+
+
 def _disk_save(key, v):
     f = _disk_path(key)
     if not f or OFFLINE:  # the restored backup is never written to
@@ -295,7 +320,7 @@ def _disk_save(key, v):
     try:
         f.parent.mkdir(parents=True, exist_ok=True)
         tmp = f.with_suffix(".tmp")
-        tmp.write_text(json.dumps(v))
+        tmp.write_text(json.dumps(v, default=_jsonable))
         os.replace(tmp, f)
     except (OSError, TypeError, ValueError) as ex:
         log.warning("cache %s not written to disk: %s", key, ex)
@@ -309,6 +334,22 @@ def drop_cache(prefix):
     if CACHE_DIR and CACHE_DIR.is_dir():
         for f in CACHE_DIR.glob(re.sub(r"[^A-Za-z0-9_.-]", "_", prefix) + "*.json"):
             f.unlink(missing_ok=True)
+
+
+STAGGER_WINDOW_S = 900   # the GitHub refreshes of all projects and resources are spread over this window (owner: staggered offsets, no burst)
+STAGGER_JITTER_S = 120   # plus a random jitter per key, so that slots do not line up again
+GH_RESOURCES = ("state", "ci", "commits", "rulesprs")  # the queued GitHub resources of a project (cached(..., queue=True))
+_started, _slots = time.time(), {}
+
+
+def _slot(key):
+    """(offset, jitter) of `key` in the staggered plan of every configured project's resources; a key outside the plan gets a slot of its own."""
+    with _lock:
+        if key not in _slots:
+            keys = {pk(p, r) for p in (PROJECTS.values() or [CFG]) for r in GH_RESOURCES} | set(_slots) | {key}
+            _slots.clear()
+            _slots.update(L.stagger_plan(keys, STAGGER_WINDOW_S, STAGGER_JITTER_S, random.Random()))
+        return _slots[key]
 
 
 _failures = {}  # key -> dict(at, error, until, rate_limited) of the last failed refresh that was answered with an older copy; removed by the next success
@@ -326,6 +367,8 @@ def cached(key, fn, ttl, swr=False, persist=False, disk_fresh=0, queue=False):
             _cache.setdefault(key, (t, v))
     if v is not None and (OFFLINE or time.time() - t <= ttl):
         return v
+    if v is not None and swr and queue and time.time() < L.refresh_due(t, ttl, _slot(key), _started):
+        return v  # staggered: this key's refresh slot has not come yet
     if v is not None and swr:
         with _lock:
             if key in _refreshing:
@@ -405,6 +448,15 @@ def build_state(p):
     with ThreadPoolExecutor(4) as ex:
         fi, fp, fd = ex.submit(fetch_issues, p), ex.submit(fetch_project, p), ex.submit(fetch_module_deadlines, p)
         (issues, events), project, deadlines = fi.result(), fp.result(), fd.result()
+    S = state_from_raw(p, dict(issues=issues, events=events, project=project), deadlines)
+    log.info("state: %d tasks, %d events, %d open proposals in %.1fs", len(S["tasks"]), len(events), len(S["proposals"]), time.time() - t0)
+    return S
+
+
+def state_from_raw(p, raw, deadlines, source=None):
+    """The task state derived from the raw copy (no GitHub call). The raw copy is kept in the state (`raw`, never served to the page), so an
+    action's known effect and a re-read of single issues can be laid on it and the state derived again (PC-135). `source`: keep this one."""
+    issues, events, project = raw["issues"], raw["events"], {int(k): v for k, v in raw["project"].items()}  # JSON keys are strings on disk
     cfgm = load_modules(p)
     tasks, mods = L.derive(issues, events, project, p["manager"], (cfgm or {}).get("modules", []), grow=not cfgm)
     for t in tasks:
@@ -412,12 +464,11 @@ def build_state(p):
     keys = {i["number"]: L.split_title(i["title"], i["number"])[0] for i in issues}
     nums = {t["number"]: t for t in tasks}
     proposals = [dict(p, n=i["number"], key=keys[i["number"]]) for i in issues for p in L.parse_proposals(i["comments"])]
-    log.info("state: %d tasks, %d events, %d open proposals in %.1fs", len(tasks), len(events), len(proposals), time.time() - t0)
     return dict(
         today=dt.date.today().isoformat(), tasks=tasks, questions=L.parse_questions(issues, p.get("name", "")), modules=mods, modDeadline=deadlines, proposals=proposals,
-        events=L.task_events(events, keys, p["manager"])[:400], unauthorised=sum(len(t["flags"]) for t in nums.values()),
-        source=dict(name=p.get("name", ""), repo=p["repo"], steering=CFG["steer"], simulate=CFG["simulate"] and CFG["steer"], project=p["project"],
-                    manager=p["manager"], user=gh_user(), fetched=time.strftime("%H:%M:%S"), fetchedAt=time.time()))
+        events=L.task_events(events, keys, p["manager"])[:400], unauthorised=sum(len(t["flags"]) for t in nums.values()), raw=raw,
+        source=source or dict(name=p.get("name", ""), repo=p["repo"], steering=CFG["steer"], simulate=CFG["simulate"] and CFG["steer"], project=p["project"],
+                              manager=p["manager"], user=gh_user(), fetched=time.strftime("%H:%M:%S"), fetchedAt=time.time()))
 
 
 def build_questions(fresh=False, now=None):
@@ -626,20 +677,24 @@ def _plan(form, S, repo, simulate):
 
 
 def execute(ops, run=run_gh):
-    """Run the planned gh calls in order; '{id}' is filled from the previous call's JSON; `label create` may fail (exists)."""
-    last = {}
+    """Run the planned gh calls in order; '{id}' is filled from the previous call's JSON; `label create` may fail (exists).
+    -> each call's JSON answer ({} when none), for the known effect of the action (PC-135)."""
+    last, outs = {}, []
     for op in ops:
         op = [x.replace("{id}", str(last.get("id", ""))) for x in op]
         try:
             out = run(op)
         except RuntimeError:
             if op[0] == "label":
+                outs.append({})
                 continue
             raise
         try:
-            last = json.loads(out) if out.strip().startswith("{") else {}
+            last = json.loads(out) if (out or "").strip().startswith("{") else {}
         except ValueError:
             last = {}
+        outs.append(last)
+    return outs
 
 
 def settings_path(p):
@@ -780,22 +835,239 @@ def save_settings(p, form):
     return "settings saved"
 
 
-def do_act(form, run=run_gh, state=None, p=None):
-    """-> (http status, body). 403 when the app is read-only; acts on the project named in form["project"] (default project otherwise)."""
-    if not CFG["steer"]:
-        log.warning("refused action %s: read-only", form.get("action"))
-        return 403, dict(error="read-only: this is an offline copy from a backup" if OFFLINE else "read-only: this instance was started with --read-only")
+def get_task(p, n, run=run_gh):
+    """The current state of one task, read from GitHub now (one call, bypassing the cached state): the page asks for it when an action of
+    its own got no answer, so that it can say what happened (PC-136)."""
+    if not str(n).isdigit():
+        raise ValueError(f"bad task number: {n!r}")
+    return L.task_lookup(json.loads(run(["api", f"repos/{p['repo']}/issues/{n}"])))
+
+
+# ---------- after an action (PC-135): the known effect at once, then a re-read of only the touched issues ----------
+REREAD_DELAY_S = 3   # the actions of a burst within this many seconds are re-read together: one call per TL_BATCH issues, not one per action
+_reread, _reread_lock = {}, threading.Lock()   # state key -> issue numbers waiting for their re-read
+
+
+def _key_lock(k):
+    with _lock:
+        return _locks.setdefault(k, threading.Lock())
+
+
+def _store(k, t, S):
+    """Replace the cached state, keeping the time of its full load (a patch never resets the hour)."""
+    _cache[k] = (t, S)
+    _disk_save(k, S)
+
+
+APPLY_WAIT_S = 1.0     # an action's answer waits at most this long for a full load that holds the state (a warm-up, a Refresh): actions never wait for it (PC-131)
+_deferred = set()      # state keys with a known effect still waiting for a full load to finish
+
+
+def after_action(p, ops, outs, now=None, schedule=True, wait=APPLY_WAIT_S):
+    """Lay the known effect of the gh calls that succeeded on the cached state (logic.apply_ops, no GitHub call) and queue a re-read of the
+    touched issues. -> their numbers, or None when the cache holds no raw copy (an older copy: it counts as expired, the next look reloads it)
+    or a full load holds the state longer than `wait` (the effect is then laid on it in the background once the load is stored)."""
+    k, now = pk(p, "state"), now or time.time()
+    lock = _key_lock(k)   # never between a full load's fetch and its store
+    if not lock.acquire(timeout=-1 if wait is None else wait):
+        log.info("%s: a full load holds the state; the effect of the action is applied when it is stored", p.get("name", ""))
+        _deferred.add(k)
+
+        def later():
+            try:
+                after_action(p, ops, outs, now, schedule, wait=None)
+            except Exception:
+                log.exception("the deferred known effect of an action could not be applied")
+            finally:
+                _deferred.discard(k)
+        threading.Thread(target=later, daemon=True).start()
+        return None
+    try:
+        t, S = _cache.get(k, (0, None))
+        if S is None and (S := _disk_load(k)) is not None:
+            t = _disk_time(k, DISK_FRESH_S)
+        if S is None:
+            return None
+        if "raw" not in S:
+            _cache[k] = (0, S)
+            return None
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
+        raw, dl, nums = L.apply_ops(S["raw"], S["modDeadline"], ops, outs, S["source"].get("user") or p["manager"], stamp)
+        _store(k, t, state_from_raw(p, raw, dl, dict(S["source"], patchedAt=now, rereadNote=None)))
+    finally:
+        lock.release()
+    if nums:
+        with _reread_lock:
+            first = k not in _reread
+            _reread.setdefault(k, set()).update(nums)
+        if first and schedule:
+            threading.Timer(REREAD_DELAY_S, _reread_safe, (p,)).start()
+    log.info("%s: action applied to the cached state; issue(s) %s re-read from GitHub in %d s", p.get("name", ""), nums, REREAD_DELAY_S)
+    return nums
+
+
+def _reread_safe(p):
+    try:
+        reread(p)
+    except Exception:
+        log.exception("re-read after an action failed")
+
+
+def reread(p, fetch=None):
+    """Read the issues touched by the last actions afresh (one light call per TL_BATCH issues, counted in the hourly cap) and put them in the cached
+    state. When GitHub cannot be asked (rate-limit pause, cap, error) the applied change stays and `source.rereadNote` says so."""
+    k = pk(p, "state")
+    with _reread_lock:
+        nums = sorted(_reread.pop(k, ()))
+    if not nums:
+        return
+    try:
+        with _gh_queue:
+            issues, events = (fetch or (lambda ns: fetch_issue_nodes(p, ns)))(nums)
+        note = None
+    except Exception as ex:
+        issues, note = None, f"GitHub could not be asked about {', '.join(f'#{n}' for n in nums)} ({str(ex)[:150]}); the change is shown as applied here"
+        log.warning("%s: re-read after an action failed: %s", p.get("name", ""), str(ex)[:150])
+    with _key_lock(k):
+        t, S = _cache.get(k, (0, None))
+        if not S or "raw" not in S:
+            return
+        if issues is None:
+            S = dict(S, source=dict(S["source"], rereadNote=note))
+        else:
+            with _reread_lock:   # an issue acted on again meanwhile keeps its newer applied change until its own re-read
+                again = _reread.get(k, set())
+            keep = [i for i in issues if i["number"] not in again]
+            S = state_from_raw(p, L.replace_issues(S["raw"], keep, [e for e in events if e["number"] not in again]), S["modDeadline"],
+                               dict(S["source"], rereadAt=time.time(), rereadNote=None))
+            log.info("%s: issue(s) %s re-read from GitHub after an action", p.get("name", ""), [i["number"] for i in keep])
+        _store(k, t, S)
+
+
+# ---------- action ids: the page retries an action after a network failure; a repeat is never applied twice (PC-131) ----------
+ACTS_KEEP, ACT_WAIT_S = 200, 120
+_acts_lock, _acts_running = threading.Lock(), {}  # aid -> Event of an action that runs in this process right now
+
+
+def acts_path():
+    """The last ACTS_KEEP action ids with their state (started, or done with the answer): <data dir>/actions-seen.json. On disk, so that
+    an action interrupted by a restart is recognised when the page sends it again."""
+    return DATA_DIR / "actions-seen.json"
+
+
+def _acts():
+    try:
+        return json.loads(acts_path().read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _acts_put(aid, rec):
+    with _acts_lock:
+        a = _acts()
+        a[aid] = dict(rec, at=time.time())
+        for k in sorted(a, key=lambda k: a[k]["at"])[:-ACTS_KEEP]:
+            del a[k]
+        try:
+            _write_json(acts_path(), a)
+        except OSError as ex:
+            log.warning("action ids not written to disk: %s", ex)
+
+
+def applied_now(form, run, p=None):
+    """True/False: the effect of the action can be read on the issue as it is on GitHub now; None: it cannot be told."""
+    if form.get("action") not in L.CHECKABLE_ACTIONS:
+        return None
     try:
         p = p or proj(form.get("project"))
+        issue = json.loads(run(["issue", "view", str(_int(form.get("n"))), "-R", p["repo"], "--json", "state,labels,title,body"]))
+    except (RuntimeError, ValueError, UnknownProject) as ex:
+        log.warning("cannot read back the task of an interrupted %s: %s", form.get("action"), str(ex)[:100])
+        return None
+    return L.action_applied(form, issue)
+
+
+def do_act(form, run=None, state=None, p=None):
+    """-> (http status, body). With an action id (`aid`, sent by the page) the action is applied at most once: a repeat of a finished
+    action gets the first answer (repeat=True); a repeat of one that is still running waits for it; a repeat of one interrupted by a
+    restart first reads the task's current state on GitHub and is only run again when its effect is not there."""
+    run = run or run_gh
+    aid = str(form.get("aid") or "")[:64]
+    if not aid or not CFG["steer"]:
+        return _logged_act(form, run, state, p)
+    with _acts_lock:
+        ev = _acts_running.get(aid)
+    if ev:
+        ev.wait(ACT_WAIT_S)
+    rec = _acts().get(aid)
+    if rec and rec.get("state") == "done":
+        log.info("action %s repeated (id %s): answered as the first time, not applied again", form.get("action"), aid)
+        return rec["code"], dict(rec["body"], repeat=True)
+    if rec:
+        if aid in _acts_running:
+            return 409, dict(error="this action is still running; look at the task in a minute")
+        done = applied_now(form, run, p)
+        log.info("action %s (id %s) was interrupted by a restart; its effect on GitHub: %s", form.get("action"), aid, done)
+        if done:
+            body = dict(ok=True, msg=f"{form.get('action')} had already been applied before the Cockpit restarted; not applied again", repeat=True)
+            _acts_put(aid, dict(state="done", code=200, body=body))
+            return 200, body
+        if done is None:
+            return 409, dict(error="this action was interrupted by a restart of the Cockpit and its effect cannot be read back; look at the task before trying again")
+    with _acts_lock:
+        if aid in _acts_running:  # another repeat claimed it in the meantime
+            return 409, dict(error="this action is still running; look at the task in a minute")
+        ev = _acts_running[aid] = threading.Event()
+    try:
+        _acts_put(aid, dict(state="started", action=form.get("action")))
+        code, body = _logged_act(form, run, state, p)
+        _acts_put(aid, dict(state="done", code=code, body={k: v for k, v in body.items() if k != "state"}))  # the page's copy of the state (PC-135) is not kept for repeats
+        return code, body
+    finally:
+        with _acts_lock:
+            _acts_running.pop(aid, None)
+        ev.set()
+
+
+def _logged_act(form, run, state=None, p=None):
+    """-> (http status, body). 403 when the app is read-only; acts on the project named in form["project"] (default project otherwise).
+    Every action, whatever its outcome, leaves one line in the project's action log (PC-132)."""
+    ctx, t0 = dict(p=p), time.monotonic()
+    try:
+        code, body = _do_act(form, run, state, ctx)
+    except Exception as ex:  # an unexpected error is a failed action too: logged, and answered rather than dropping the connection
+        log.exception("action %s failed", form.get("action"))
+        code, body = 500, dict(error=f"{type(ex).__name__}: {ex}")
+    outcome = "ok" if code == 200 else "failed" if code >= 500 else "refused"
+    log_action(ctx.get("p"), L.action_record(form, outcome, body.get("msg") or body.get("error"), (time.monotonic() - t0) * 1000,
+                                             task=ctx.get("task"), version=code_version(), secrets=(H.token,)))
+    return code, body
+
+
+def _do_act(form, run, state, ctx):
+    if not CFG["steer"]:
+        log.warning("refused action %s: read-only", form.get("action"))
+        try:
+            ctx["p"] = ctx["p"] or proj(form.get("project"))
+        except UnknownProject:
+            pass
+        return 403, dict(error="read-only: this is an offline copy from a backup" if OFFLINE else "read-only: this instance was started with --read-only")
+    try:
+        p = ctx["p"] = ctx["p"] or proj(form.get("project"))
         if form.get("action") == "settings":  # a local file, not a GitHub operation; same guard, same errors
             return 200, dict(ok=True, msg=save_settings(p, form))
         if form.get("action") == "cardsettings":  # same: a local file, same guard
             return 200, dict(ok=True, msg=save_card_settings(p, form))
         if form.get("action") == "compliance":  # starts the project's compliance check; same guard (the UI is the owner's alone)
             return 200, dict(ok=True, msg=start_compliance(p))
+        why = steer_block(p)
+        if why:  # owner: the write side refuses while GitHub cannot be read; nothing is queued for later
+            log.warning("refused action %s on %s: %s", form.get("action"), p.get("name", ""), why)
+            return 503, dict(error=f"not done, and not queued: {why}")
         S = state or get_state(p=p)  # the cached state: an action does not bypass the hour (owner F-701)
+        ctx["task"] = next((t["key"] for t in S["tasks"] if str(t["number"]) == str(form.get("n", "")).lstrip("#")), None)
         ops, msg = plan_action(form, S, p["repo"], CFG["simulate"])
-        execute(ops, run)
+        outs = execute(ops, run)
     except UnknownProject as ex:
         return 404, dict(error=ex.args[0])
     except PermissionError as ex:
@@ -807,7 +1079,98 @@ def do_act(form, run=run_gh, state=None, p=None):
         log.error("action %s failed: %s", form.get("action"), ex)
         return 502, dict(error=f"GitHub: {ex}")
     log.info("action ok on %s: %s -> %s", p.get("name", ""), form.get("action"), msg)
-    return 200, dict(ok=True, msg=msg)
+    try:
+        nums = after_action(p, ops, outs) if ops else []
+    except Exception:  # the action itself succeeded: its answer must not fail; the next look reloads the state
+        log.exception("the known effect of %s could not be applied to the cached state", form.get("action"))
+        if pk(p, "state") in _cache:
+            _expire(pk(p, "state"))
+        nums = None
+    # the page's copy at once (PC-135): the served state with the known effect, when the cache holds one (no GitHub call)
+    return 200, dict(ok=True, msg=msg, issues=nums or [], **({"state": get_state_served(p)} if nums is not None and ops and state is None else {}))
+
+
+# ---------- action log (PC-132): <data dir>/<project>/actions.jsonl, appended, mode 0600, rotated by size keeping five files ----------
+ACTION_LOG_MAX = 1_000_000  # bytes of one file before it is rotated
+ACTION_LOG_KEEP = 5         # files kept: actions.jsonl and actions.jsonl.1 .. .4 (the oldest is dropped)
+_action_log_lock = threading.Lock()
+_version = []
+
+
+def code_version():
+    """The Cockpit's own commit (short hash), read once; '' when it is not a git checkout."""
+    if not _version:
+        try:
+            _version.append(subprocess.run(["git", "-C", str(HERE), "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=5).stdout.strip())
+        except (OSError, subprocess.SubprocessError):
+            _version.append("")
+    return _version[0]
+
+
+def action_log_path(p):
+    """<data dir>/<project>/actions.jsonl; None for a project without a name or repo (nothing to file it under)."""
+    name = p.get("name") or (p.get("repo") or "").split("/")[-1]
+    return DATA_DIR / name / "actions.jsonl" if name else None
+
+
+def log_action(p, rec):
+    """Append one event to the project's action log; rotate first when the file is full. Never fails the action: a write error is a warning.
+    An offline copy writes nothing (its data folder is the backup)."""
+    f = action_log_path(p) if p and not OFFLINE else None
+    if not f:
+        return
+    try:
+        with _action_log_lock:
+            f.parent.mkdir(parents=True, exist_ok=True)
+            if f.exists() and f.stat().st_size >= ACTION_LOG_MAX:
+                for i in range(ACTION_LOG_KEEP - 1, 0, -1):
+                    src = f.with_name(f"{f.name}.{i - 1}" if i > 1 else f.name)
+                    if src.exists():
+                        os.replace(src, f.with_name(f"{f.name}.{i}"))
+            fd = os.open(f, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "a") as fh:
+                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except OSError as ex:
+        log.warning("action log of %s not written: %s", p.get("name", ""), ex)
+
+
+def read_action_log(p, action="", outcome="", task=""):
+    """The last events of the project's action log (newest first, at most 200) that match the filters; the rotated files are read as needed."""
+    f = action_log_path(p)
+
+    def lines():
+        if not f:
+            return
+        for x in [f] + [f.with_name(f"{f.name}.{i}") for i in range(1, ACTION_LOG_KEEP)]:
+            try:
+                yield from reversed(x.read_text(errors="replace").splitlines())
+            except OSError:
+                continue
+    events = L.filter_events(lines(), action, outcome, task)
+    return dict(events=events, limit=L.ACTION_LOG_LIMIT, path=str(f or ""))
+
+
+def page_events(form):
+    """POST /api/event {project, events: [...]}: the failures a page reports (each with its page id; the ones it kept while the server could not be
+    reached come in one batch) are appended to the project's action log. -> (http status, body); the invalid ones are counted, not logged."""
+    try:
+        p = proj(form.get("project") or None)
+    except UnknownProject as ex:
+        return 404, dict(error=ex.args[0])
+    evs = form.get("events")
+    if not isinstance(evs, list) or not evs or len(evs) > 50:
+        return 400, dict(error="events: a list of 1 to 50 events")
+    bad = 0
+    for ev in evs:
+        try:
+            rec = L.page_record(ev if isinstance(ev, dict) else {}, p.get("name", ""), version=code_version(), secrets=(H.token,))
+        except ValueError:
+            bad += 1
+            continue
+        log.warning("page %s reports %s on %s: %s", rec["page"], rec["kind"], rec["action"] or "-", rec["msg"])
+        log_action(p, rec)
+    return 200, dict(ok=True, logged=len(evs) - bad, refused=bad)
 
 
 # ---------- compliance check (Settings > Policies): the report is the check's (PC-108); the Cockpit shows it and starts the check ----------
@@ -994,7 +1357,7 @@ def build_timeline(S, p=None, fresh=False):
 def get_timeline(p, fresh=False):
     """The timeline built from the state that is served right now (a refreshed state gets a rebuilt timeline at once, never one from older data)."""
     S = get_state(p=p)
-    k, at = pk(p, "timeline"), S["source"]["fetchedAt"]
+    k, at = pk(p, "timeline"), state_version(S)
     build = lambda: dict(build_timeline(S, p, fresh), stateAt=at)
     if fresh:
         _expire(k)
@@ -1003,13 +1366,32 @@ def get_timeline(p, fresh=False):
     return tl if tl.get("stateAt") == at else cached(k, build, -1, persist=True)
 
 
+def state_version(S):
+    """When the state last changed: its full load, an action's applied effect or a re-read of single issues (PC-135)."""
+    src = S.get("source", {})
+    return max(src.get("fetchedAt") or 0, src.get("patchedAt") or 0, src.get("rereadAt") or 0)
+
+
 def stale_note(p, now=None):
     """None, or why the state served for p is older than it should be: dict(age_s, error, until, rate_limited) of the failed refresh (until = when GitHub is tried again)."""
     f, now = _failures.get(pk(p, "state")), now or time.time()
     v = _cache.get(pk(p, "state"), (0, None))[1]
     if not f or not v:
         return None
-    return dict(age_s=max(0, round(now - v["source"]["fetchedAt"])), error=f["error"], until=f["until"], rate_limited=f["rate_limited"])
+    kind = L.offline_kind(f["error"], f["rate_limited"])
+    return dict(age_s=max(0, round(now - v["source"]["fetchedAt"])), error=f["error"], until=f["until"], rate_limited=f["rate_limited"],
+                kind=kind, reason=L.offline_reason(kind, f["until"], _clock))
+
+
+def steer_block(p, now=None):
+    """None, or why the steering actions on GitHub are off now (owner: the write side refuses while GitHub cannot be read and never queues)."""
+    now = time.time() if now is None else now
+    if OFFLINE:
+        return "offline copy from a backup"
+    if now < _gh_pause["until"]:
+        return L.offline_reason("rate_limit", _gh_pause["until"], _clock)
+    n = stale_note(p, now)
+    return n["reason"] if n else None
 
 
 STATE_CALLS = 12   # gh calls of one state load (see GH_CALLS_PER_HOUR)
@@ -1042,18 +1424,63 @@ def live_state(p, S, fresh=False):
     held = {n for w in L.queue_local(state_text, None)["workers"] if (n := L.task_number(w["task"], shorts)) is not None}
     tasks = L.overlay_live(S["tasks"], at, events, held, state_text is not None)
     pick = L.pickable(tasks, dt.datetime.now(dt.timezone.utc), held)
-    return dict(S, tasks=[dict(t, pick=t["key"] in pick) for t in tasks])
+    return dict(S, tasks=[dict(t, pick=t["key"] in pick) for t in tasks], openCounts=L.open_counts(tasks, S.get("modules", [])))
 
 
 def get_state_served(p, fresh=False):
     """The state for the page: `stale` is true while a newer copy is being fetched in the background, so the page asks again shortly;
     `staleNote` is set when the last refresh failed and an older copy is shown (its age, the reason and when GitHub is tried again)."""
-    S = live_state(p, get_state(fresh=fresh, p=p), fresh)
+    return _served(p, live_state(p, get_state(fresh=fresh, p=p), fresh))
+
+
+def gh_calls_left(now=None):
+    """How many gh calls the Cockpit's own hourly cap still allows now."""
+    now = time.time() if now is None else now
+    with _gh_lock:
+        return GH_CALLS_PER_HOUR - sum(1 for t in _gh_calls if t > now - 3600)
+
+
+def get_queue_poll(p, since=0, now=None):
+    """PC-130: the Task Queue pane's light poll (the page asks every queue_refresh_s while the tab is visible). Always the local part
+    (Workers, Dispatcher line, processing log) and the CI line (its own hourly cache); the task state is refreshed from GitHub when older
+    than the pane's interval, which falls back to the hourly one while a rate-limit pause is on or the call budget is low (`slowed`).
+    The state itself is sent only when it differs from the copy the page has (`since` = its fetchedAt); a failed refresh keeps the old copy."""
+    now = time.time() if now is None else now
+    every = get_card_settings(p)["values"]["queue_refresh_s"]
+    interval, slowed = L.queue_interval(every, gh_calls_left(now), _gh_pause["until"], now, GH_REFRESH_S)
+    k, S, err = pk(p, "state"), None, None
+    t = _cache.get(k, (None,))[0]
+    if t is not None and now - t > interval and not OFFLINE:
+        _expire(k)  # due: fetch now, in this request (the page waits for it; one request in flight at a time)
+    try:
+        S = cached(k, lambda: build_state(p), interval, persist=True, disk_fresh=DISK_FRESH_S, queue=True)
+    except Exception as ex:
+        log.warning("queue poll of %s: no state (%s)", p.get("name", ""), str(ex)[:120])
+        err = str(ex)[:200]
+    at = S["source"].get("fetchedAt", 0) if S else 0
+    out = dict(local=get_queue(p), ci=get_ci(p), every=every, interval=interval, slowed=slowed, fetchedAt=at or None,
+               nextAt=max(at + interval, now) if at else None, staleNote=stale_note(p), error=err)
+    if S and at != since:
+        out["state"] = _served(p, live_state(p, S))
+    return out
+
+
+def _served(p, S):
+    """A cached state as the page gets it (modules in size order, steering off in an offline copy, its refresh flags)."""
     if OFFLINE:  # the copy was taken from a steering instance: steering is off here whatever the cached state says
         S = dict(S, source=dict(S.get("source", {}), steering=False, simulate=False))
     if "modules" in S:
         S = dict(S, modules=ordered(p, S["modules"]))
-    return dict(S, stale=refreshing(pk(p, "state")), staleNote=stale_note(p), refreshAfter=S.get("source", {}).get("fetchedAt", 0) + GH_REFRESH_S)
+    S = {k: v for k, v in S.items() if k != "raw"}   # the raw copy stays on the server (PC-135)
+    at = S.get("source", {}).get("fetchedAt")
+    new_work = L.may_start_new(time.time() - at if at else None)
+    if not new_work and "tasks" in S:  # owner: no new task is started from state older than an hour; work in progress may continue
+        S = dict(S, tasks=[dict(t, pick=False) for t in S["tasks"]])
+    return dict(S, stale=refreshing(pk(p, "state")) or pk(p, "state") in _reread or pk(p, "state") in _deferred, staleNote=stale_note(p), refreshAfter=(at or 0) + GH_REFRESH_S,
+                steerBlock=steer_block(p) if CFG["steer"] else None, newWork=new_work, warming=WARM["on"])
+
+
+WARM = dict(on=False, since=0.0)  # on from the moment the server listens until the startup warm-up is done (PC-131): the page shows "warming up, data from <time>"
 
 
 def warm_module_pages(p):
@@ -1370,6 +1797,11 @@ class H(BaseHTTPRequestHandler):
             p = proj(name_q or None)
             if u.path == "/api/state":
                 return self.send(200, get_state_served(p, fresh=bool(q.get("fresh"))))
+            if u.path == "/api/task":
+                try:
+                    return self.send(200, get_task(p, q.get("n", [""])[0]))
+                except ValueError as ex:
+                    return self.send(400, dict(error=str(ex)))
             if u.path == "/api/questions":
                 return self.send(200, build_questions(fresh=bool(q.get("fresh"))))
             if u.path == "/api/timeline":
@@ -1380,12 +1812,16 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, get_card_settings(p))
             if u.path == "/api/queue":
                 return self.send(200, get_queue(p))
+            if u.path == "/api/queuepoll":
+                return self.send(200, get_queue_poll(p, since=_since(q)))
             if u.path == "/api/ci":
                 return self.send(200, get_ci(p))
             if u.path == "/api/usage":
                 return self.send(200, usage_served(p))
             if u.path == "/api/compliance":
                 return self.send(200, build_compliance())
+            if u.path == "/api/actionlog":
+                return self.send(200, read_action_log(p, *(q.get(k, [""])[0] for k in ("action", "outcome", "task"))))
             if u.path == "/compliance-report":
                 f = compliance_report_file(p)
                 return self.send(200, f.read_bytes(), "text/plain; charset=utf-8") if f else self.send(404, dict(error="no compliance report yet"))
@@ -1419,7 +1855,7 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         u = urlparse(self.path)
-        if not self.authed() or u.path != "/api/act":
+        if not self.authed() or u.path not in ("/api/act", "/api/event"):
             return self.send(403, dict(error="forbidden"))
         try:
             form = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
@@ -1427,7 +1863,41 @@ class H(BaseHTTPRequestHandler):
             return self.send(400, dict(error="bad JSON"))
         if not form.get("project") and parse_qs(u.query).get("project"):
             form["project"] = parse_qs(u.query)["project"][0]
-        self.send(*do_act(form))
+        if not isinstance(form, dict):
+            return self.send(400, dict(error="bad JSON"))
+        self.send(*(page_events(form) if u.path == "/api/event" else do_act(form)))
+
+
+def check_manager(projects, steer):
+    """Warn when gh acts as someone else than a project's Manager (a gh call: run after the server listens)."""
+    for p in projects:
+        if steer and gh_user() and gh_user() != p["manager"]:
+            log.warning("%s: gh is logged in as %s but the Manager is %s: protected labels set now would be flagged unauthorised", p["name"], gh_user(), p["manager"])
+
+
+def serve(host, port, warm_up):
+    """Listen first, then warm up in the background (PC-131): a restarted service answers the page at once from its disk copies, marked
+    `warming` until warm_up() returns, instead of refusing connections for the whole warm-up. -> the server (the caller runs serve_forever)."""
+    WARM.update(on=True, since=time.time())
+    srv = Server((host, port), H)
+
+    def go():
+        try:
+            warm_up()
+        except Exception:
+            log.exception("warm-up failed")
+        finally:
+            WARM["on"] = False
+    threading.Thread(target=go, daemon=True).start()
+    return srv
+
+
+def _since(q):
+    """The `since` query value (the fetchedAt of the page's copy) as a number; 0 when missing or not a number."""
+    try:
+        return float(q.get("since", ["0"])[0])
+    except ValueError:
+        return 0
 
 
 def load_token(path=None):
@@ -1499,18 +1969,16 @@ def main():
     CFG.update(steer=steer, simulate=a.simulate_orchestrator)
     for p in projects:
         log.info("project %s: repo=%s project=%s manager=%s mode=%s", p["name"], p["repo"], p["project"], p["manager"], "STEERING" if steer else "READ-ONLY")
-        if steer and gh_user() and gh_user() != p["manager"]:
-            log.warning("%s: gh is logged in as %s but the Manager is %s: protected labels set now would be flagged unauthorised", p["name"], gh_user(), p["manager"])
     global CACHE_DIR
     if not a.offline:
         CACHE_DIR = None if a.cache_dir == "none" else pathlib.Path(a.cache_dir or DATA_DIR / "cache").expanduser()
     H.token = load_token(a.token_file)
-    threading.Thread(target=warm, daemon=True).start()
     host = "0.0.0.0" if a.lan else "127.0.0.1"
     if a.lan:
         log.warning("--lan: plain HTTP, the token travels unencrypted; trusted network only")
+    srv = serve(host, a.port, lambda: (check_manager(projects, steer), warm()))
     log.info("open http://%s:%d/?t=%s  (acting as the gh user; manager=%s)", host, a.port, "<token file>" if a.token_file else H.token, ", ".join(f"{p['name']}={p['manager']}" for p in projects))
-    Server((host, a.port), H).serve_forever()
+    srv.serve_forever()
 
 
 if __name__ == "__main__":
