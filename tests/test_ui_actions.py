@@ -19,10 +19,11 @@ KIND = {
                                       "complete", "settings", "cardsettings", "compliance")},
     **{f"form:{a}": STATE for a in ("edit", "release", "change", "block", "settings", "cardsettings", "moddl", "new")},
     "form:alog": VIEW,   # the action log's filter (PC-132): a read of the log
+    "form:qlog": VIEW,   # the processing log's task, Worker and limit selectors (PC-120)
     **{f"page:{a}": STATE for a in ("arm", "take", "complete", "unblock", "accept", "dismiss", "rev", "unrev", "revall", "retryact")},
     **{f"page:{a}": VIEW for a in ("go", "code", "codetab", "codem", "fit", "mod", "filter", "modf", "qproj", "tlm", "tlt", "rg", "setsec",
                                    "open", "close", "edit", "noedit", "new", "subtask", "followup", "hotspot", "refresh", "qtdefaults",
-                                   "toastx", "notex", "problems")},
+                                   "toastx", "notex", "problems", "qlogbeats", "qlogrow")},
 }
 LOCAL = {"page:rev", "page:unrev", "page:revall"}   # state-changing in the browser only: no server, so no refusal
 

@@ -72,7 +72,7 @@ def test_the_queue_page_formats_every_time_with_the_shared_function():
     for f in ("vQueueLocal", "ciLine", "bkLine", "paneBar", "drawerTask"):
         b = body(f)
         assert "toLocale" not in b and "toISOString" not in b and ".slice(5)" not in b and "t0(" not in b, f
-    assert "launched '+tm(w.launched)" in PAGE and "L.log.map(r=>tm(r.time)" in PAGE
+    assert "launched '+tm(w.launched)" in PAGE and "'+tmSec(r.time)+'" in PAGE
     assert "' started '+tm(c.time)" in PAGE and "tm(x.t)" in PAGE and "'data from '+tm(at)" in PAGE
 
 
