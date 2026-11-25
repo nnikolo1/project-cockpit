@@ -424,7 +424,7 @@ function vCockpit(){
   if(RULES.configured)h+='<div class="card" style="border-color:var(--warn-ink)"><div class="row spread"><h2>Policies changed</h2><button class="btn small" data-act="go" data-r="rules">Review policy changes</button></div><div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">'
    +(ruleChanges().slice(0,3).map(r=>'<div class="row" style="gap:10px"><span class="mono muted" style="width:86px">'+r.date+'</span><span class="chip rc">policy change</span><span><b class="mono">'+esc(r.files.map(f=>f.path).slice(0,2).join(', '))+'</b> '+esc(r.subject)+'</span>'+(isUn(r)?'<span class="chip blocks">to review</span>':'<span class="muted" style="font-size:12px">reviewed</span>')+'</div>').join('')||'<span class="muted">No rule changes in the last 90 days.</span>')
    +'</div><p class="muted" style="font-size:12px;margin:10px 0 0">Instructions and decisions steer every agent, so changes to them are tracked here, not only in git.</p></div>';
-  h+=metaNote()+moduleLevelAmb();
+  h+=metaNote()+compLine(QL&&QL.compliance)+moduleLevelAmb();
   h+='<div class="grid">';
   MODULES.filter(m=>!m.virtual&&!m.parent).forEach(m=>{
     const cnt=m.rollup,n=STAGES.reduce((a,s)=>a+cnt[s],0);const c=(CODE.modules||{})[m.id]||{};
@@ -523,6 +523,12 @@ function bkLine(b){
   return '<p class="'+(b.ok&&!old?'muted':'warnline')+'" style="font-size:12px;margin:6px 0 0">Daily backup: '+t(b.time)+', '
    +(b.ok?'ok ('+b.files+' files, '+(b.size/1048576).toFixed(1)+' MB)':'failed: '+esc(b.reason||'no reason given')+'; last good one '+t(b.last_ok))
    +(b.ok&&old?'; older than 24 hours':'')+'.</p>';
+}
+/* The last compliance check (tools/compliance_check.py, PC-108): violations are highlighted; fixing them is the owner's own act. */
+function compLine(c){
+  if(!c)return '<p class="warnline" style="font-size:12px;margin:6px 0 0">Compliance check: none recorded.</p>';
+  return '<p class="'+(c.violations?'warnline':'muted')+'" style="font-size:12px;margin:6px 0 0">Compliance check '+esc(c.checked)+' against constitution '+esc(c.release)+': '
+   +(c.violations?c.violations+' violation'+(c.violations===1?'':'s')+' (report compliance-report.md in the data folder).':'compliant.')+'</p>';
 }
 function vQueueLocal(){
   const nf=t=>D&&D.tasks.find(x=>x.key===t),L=QL;
