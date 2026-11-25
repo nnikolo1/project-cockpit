@@ -22,6 +22,7 @@ def no_stagger(monkeypatch):
 def _private_data_dir(tmp_path, monkeypatch):
     if "cockpit" in sys.modules:
         monkeypatch.setattr(sys.modules["cockpit"], "DATA_DIR", tmp_path / "cockpit-data")
+        monkeypatch.setattr(sys.modules["cockpit"], "QUEUE_ROOT", tmp_path / "queue-root")   # not migrated unless a test makes it so (PC-67)
 
 
 def pytest_configure(config):

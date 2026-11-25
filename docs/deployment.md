@@ -88,10 +88,11 @@ Before: one Dispatcher job, one quota job and one data folder per project (`com.
 4. **By hand, the move of the live data**: copy, do not move, the old files into the data root, then check them; keep the old folder until step 8.
    `mkdir -p ~/.local/share/project-cockpit/task-queue/area`
    `cp -p OLD/dispatcher-state.json OLD/proxy-usage.jsonl OLD/quota-history.jsonl ROOT/`
+   `cp -p OLD/dispatcher-settings.json ROOT/` (last: from this copy on, the Cockpit reads the queue's settings, state and processing log from ROOT for every project, and its Settings page writes ROOT's settings file, keeping `projects`)
    `cp -Rp OLD/processing ROOT/processing`
    `cp -Rp OLD/area ROOT/area/cockpit`
-   (OLD is `~/.local/share/project-cockpit/cockpit`, ROOT the data root.) Open: whether old processing-log lines get a `project` field added (the specification 5a wants it on every entry) or stay without it; the reader's tolerance of old lines is the code's to state. The task folders hold the Workers' good-bye notes and bundles: copied with the area, so they must be kept.
-5. Add `projects` to the settings (the Project cockpit with `first: true`, plus only the projects the owner has configured); the Dispatcher switch stays off.
+   (OLD is `~/.local/share/project-cockpit/cockpit`, ROOT the data root.) Old processing-log lines stay without a `project` field: the Cockpit takes a task's project from its id (spec 2d) and shows it in the Task Queue tab's Project column. The task folders hold the Workers' good-bye notes and bundles: copied with the area, so they must be kept.
+5. Add `projects` to ROOT's settings file by hand; the Settings page does not edit the list (the Project cockpit with `first: true`, plus only the projects the owner has configured); the Dispatcher switch stays off.
 6. Render and load the new job: the new `render` command prints the property lists and the `launchctl bootstrap` lines (quota job first); run them **by hand**. Rebuild or keep the image: no change needed (open: image recipes per project, PC-71).
 7. Switch the Dispatcher on in Settings. Expected: the heartbeat in `ROOT/processing/processing.jsonl`, entries naming the project `cockpit`; the Task Queue tab shows the old and new history.
 8. After a day of normal runs, **by hand**, delete the copied files from the old folder (not its cardmeta, token or backup files). Log each by-hand step in `docs/manual-interventions-log.md`.
