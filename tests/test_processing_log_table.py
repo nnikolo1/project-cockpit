@@ -2,6 +2,7 @@
 one row, the container's JSON becomes sizes and never shows raw, event rows are kept, the page's toggle and filters choose the rows,
 unreadable lines are "other" with their text, never an exception. The page part runs the page's own script in node (skipped without node)."""
 import json
+import re
 import pathlib
 import shutil
 import sys
@@ -161,7 +162,7 @@ def test_page_table_has_date_headings_clock_times_tags_highlights_and_no_raw_jso
     h = run_node("UI.qlog.beats=true;return vQlog(%s);" % page_rows())
     assert '<tr class="qday"><td colspan="5">2026-11-25</td></tr>' in h and "Unknown date" in h
     assert ">06:35:00</span>" in h and 'class="chip qk-failed">failed' in h and 'class="qrow qalert"' in h
-    assert "nothing to do, 2 heartbeats, " in h and "1.2 GiB of 4 GiB, 37 processes" in h and "memoryUsageBytes" not in h
+    assert "nothing to do, 2 heartbeats, " in h and "1.2 GiB of 4 GiB, 37 processes" in h and "memoryUsageBytes" not in re.sub(r"<[^>]*>", "", h)   # not as visible text; the expandable full record keeps it in an attribute
 
 
 @node
