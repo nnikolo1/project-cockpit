@@ -1285,7 +1285,10 @@ def _iso(epoch):
     """An epoch-seconds number as an ISO UTC time to the minute, or None."""
     if not isinstance(epoch, (int, float)) or isinstance(epoch, bool):
         return None
-    return dt.datetime.fromtimestamp(epoch, dt.timezone.utc).isoformat(timespec="minutes")
+    try:
+        return dt.datetime.fromtimestamp(epoch, dt.timezone.utc).isoformat(timespec="minutes")
+    except (OverflowError, OSError, ValueError):   # out of range or NaN
+        return None
 
 
 MONTHLY_MONTHS = 2      # whole months before the current one that are shown per month
@@ -1824,13 +1827,16 @@ def rate_limit_reset(msg, now):
 
 def queue_local(state_text, plog_text, limit=15):
     """The Task Queue facts that need no GitHub: the Workers the Dispatcher's state file lists as running (worker, task id, launched, started)
-    and the newest `limit` lines of the processing log (newest first). Missing or unreadable files give empty lists."""
+    and the newest `limit` lines of the processing log (newest first). Missing or unreadable files give empty lists. `launched` is an ISO UTC
+    string: the Dispatcher stores it as epoch seconds (PC-114), a string is passed through, anything else gives None."""
     try:
         st = json.loads(state_text) if state_text else {}
     except ValueError:
         st = {}
     ws = st.get("workers") if isinstance(st, dict) and isinstance(st.get("workers"), dict) else {}
-    workers = [dict(worker=u, task=w.get("task_id"), launched=w.get("launched"), started=bool(w.get("started")))
+    def iso(v):
+        return v if isinstance(v, str) else _iso(v)
+    workers = [dict(worker=u, task=w.get("task_id"), launched=iso(w.get("launched")), started=bool(w.get("started")))
                for u, w in sorted(ws.items()) if isinstance(w, dict)]
     recs = [r for r in (_json_lines(plog_text) or []) if r.get("time")]
     log_ = [dict(time=r["time"], task=r.get("task"), state=r.get("state"), reason=r.get("reason"), worker=r.get("worker"), heartbeat=r.get("heartbeat"))

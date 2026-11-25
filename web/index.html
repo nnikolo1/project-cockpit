@@ -524,17 +524,31 @@ function bkLine(b){
    +(b.ok?'ok ('+b.files+' files, '+(b.size/1048576).toFixed(1)+' MB)':'failed: '+esc(b.reason||'no reason given')+'; last good one '+t(b.last_ok))
    +(b.ok&&old?'; older than 24 hours':'')+'.</p>';
 }
+/* safe-block:start (PC-114) */
+/* A time as "YYYY-MM-DD HH:MM" (UTC): an ISO string as given, a number as epoch seconds; anything unreadable gives "?", never an exception. */
+function t0(x){
+  if(typeof x==='number'){const d=new Date(x*1000);x=isNaN(d)?'':d.toISOString();}
+  return typeof x==='string'&&x?esc(x.replace('T',' ').slice(0,16)):'?';
+}
+/* One block (card) of a view: its HTML, or, when drawing it throws, an error card in its place (logged to the console), so one bad value
+   cannot leave a whole tab undrawn. A whole tab passes page=true: its error card is put in a page frame. */
+function block(name,fn,page){
+  try{return fn();}
+  catch(e){console.error('Cockpit: block "'+name+'" could not be drawn:',e);
+    const c='<div class="card" role="alert" data-block-error="'+esc(name)+'"><b class="warnline">This block could not be drawn: '+esc(String(e&&e.message||e))+'</b> <span class="muted">('+esc(name)+')</span></div>';
+    return page?'<div class="page">'+c+'</div>':c;}
+}
+/* safe-block:end */
 function vQueueLocal(){
   const nf=t=>D&&D.tasks.find(x=>x.key===t),L=QL;
   if(!L)return '<div class="card"><h2>Being processed now</h2><span class="muted">The Dispatcher files could not be read.</span></div>';
-  const t0=x=>x?esc(x.replace('T',' ').slice(0,16)):'';
   return '<div class="card"><h2>Being processed now</h2>'+(L.workers.length?L.workers.map(w=>{const t=nf(w.task);return '<div class="row" style="gap:10px;margin-top:8px"><b class="mono">'+esc(w.worker)+'</b><b class="mono">'+esc(w.task||'?')+'</b>'+(t?'<button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button>':'')+'<span class="muted">launched '+t0(w.launched)+(w.started?'':' · starting')+'</span></div>';}).join(''):'<p class="muted" style="margin:8px 0 0">No Worker is running now.</p>')
    +'<p class="muted" style="font-size:12px;margin:10px 0 0">From the Dispatcher: '+(L.settings.values.enabled?'on':'off')+', '+L.settings.values.workers+' Worker'+(L.settings.values.workers===1?'':'s')+' at most, every '+L.settings.values.interval_minutes+' min (settings in the Settings tab).</p>'
    +bkLine(L.backup)
    +(L.log.length?'<details style="margin-top:8px"><summary class="muted">Processing log, newest '+L.log.length+'</summary><div class="mono" style="font-size:12px;margin-top:6px">'+L.log.map(r=>t0(r.time)+' '+esc(r.heartbeat?r.heartbeat:[r.task,r.state,r.reason,r.worker].filter(Boolean).join(' '))).join('<br>')+'</div></details>':'')+'</div>';
 }
 function vBacklog(){
-  if(!D)return '<div class="page">'+vQueueLocal()+'<p class="muted">The task list needs GitHub and is not available yet.</p></div>';
+  if(!D)return '<div class="page">'+block('Being processed now',vQueueLocal)+'<p class="muted">The task list needs GitHub and is not available yet.</p></div>';
   const rq=ranked(D),nx=rq[0];
   const f=UI.filter;let ts=D.tasks.slice();
   if(UI.mod!=='all')ts=ts.filter(t=>UI.ex?t.module===UI.mod:inMod(t.module,UI.mod));
@@ -542,8 +556,8 @@ function vBacklog(){
   ts.sort((a,b)=>sortKey(a)-sortKey(b)||((a.prio||9)-(b.prio||9))||((eff(D,a).d||'9').localeCompare(eff(D,b).d||'9'))||a.key.localeCompare(b.key,undefined,{numeric:true}));
   const fl=['all','embryo','released','wip','unmerged','failed','merged','cancelled','blocked'];
   const mp=modPage();
-  let h='<div class="page">'+(mp?modFilter(UI.mod,'modf','all modules','all of {}',true)+vModPage(UI.mod)+'<h2>Tasks</h2>':'')+''+vQueueLocal()+'<div class="card">'+'<p style="margin:12px 0 0">'+(nx?'Next up: <button class="linkbtn" data-act="open" data-k="'+nx.key+'"><b>'+esc(nx.key)+'</b> '+esc(nx.title)+'</button> <span class="muted">'+(nx.prio?'P'+nx.prio:'no priority')+' · '+(eff(D,nx).d?'due '+eff(D,nx).d:'no deadline')+' · unblocks '+blocksCount(D,nx)+' · '+nx.cls+'</span> '+(SIM()?'<button class="btn small" data-act="take" data-k="'+nx.key+'">Simulate: Orchestrator takes it</button>':''):'<span class="muted">Nothing released and unblocked.</span>')+'</p>'
-   +'<p class="muted" style="font-size:12px;margin:6px 0 0">Ranking (column #): your priority, then deadline, then tasks that unblock the most, then must before nice.</p></div>'
+  let h='<div class="page">'+(mp?block('Module filter',()=>modFilter(UI.mod,'modf','all modules','all of {}',true))+block('Module page',()=>vModPage(UI.mod))+'<h2>Tasks</h2>':'')+block('Being processed now',vQueueLocal)+block('Next up',()=>'<div class="card">'+'<p style="margin:12px 0 0">'+(nx?'Next up: <button class="linkbtn" data-act="open" data-k="'+nx.key+'"><b>'+esc(nx.key)+'</b> '+esc(nx.title)+'</button> <span class="muted">'+(nx.prio?'P'+nx.prio:'no priority')+' · '+(eff(D,nx).d?'due '+eff(D,nx).d:'no deadline')+' · unblocks '+blocksCount(D,nx)+' · '+nx.cls+'</span> '+(SIM()?'<button class="btn small" data-act="take" data-k="'+nx.key+'">Simulate: Orchestrator takes it</button>':''):'<span class="muted">Nothing released and unblocked.</span>')+'</p>'
+   +'<p class="muted" style="font-size:12px;margin:6px 0 0">Ranking (column #): your priority, then deadline, then tasks that unblock the most, then must before nice.</p></div>')
    +'<div class="row spread"><div><h1>Task Queue</h1><span class="muted">'+ts.length+' of '+D.tasks.length+' tasks</span></div>'+(ST()?'<button class="btn primary" data-act="new">New task</button>':'')+'</div>';
   h+='<div class="filters" role="group" aria-label="Stage filter">'+fl.map(x=>'<button class="f" data-act="filter" data-v="'+x+'" aria-pressed="'+(f===x)+'">'+(STAGE_LABEL[x]||x)+'</button>').join('')+'</div>';
   if(!mp)h+=modFilter(UI.mod,'modf','all modules','all of {}',true);
@@ -936,8 +950,9 @@ function render(){
   else if(GHR&&UI.err)h+='<div class="page" style="padding-bottom:0"><div class="card" style="border-color:var(--danger)"><span class="warnline">Some parts could not be loaded:</span> <span class="muted">'+esc(UI.err)+'</span></div></div>';
   if(!D&&!LOCAL){if(!UI.err)h+='<div class="page"><span class="muted">Loading…</span></div>';}
   else{
-  h+=R==='cockpit'?vCockpit():R==='backlog'?vBacklog():R==='questions'?vQuestions():R==='timeline'?vTimeline():R==='settings'?vSettings():R==='usage'?vUsage():vCode();
-  if(UI.drawer){const t=UI.drawer.key&&byKey(D,UI.drawer.key);h+='<div class="drawer-bg" data-act="close"></div><div class="drawer" role="dialog" aria-modal="true" aria-label="Task">'+(UI.drawer.mode==='new'&&ST()?drawerNew(UI.drawer.prefill):(t?drawerTask(t):''))+'</div>';}
+  const V={cockpit:vCockpit,backlog:vBacklog,questions:vQuestions,timeline:vTimeline,settings:vSettings,usage:vUsage}[R]||vCode;
+  h+=block(R,V,true);  /* a tab that throws still draws (PC-114) */
+  if(UI.drawer){const t=UI.drawer.key&&byKey(D,UI.drawer.key);h+='<div class="drawer-bg" data-act="close"></div><div class="drawer" role="dialog" aria-modal="true" aria-label="Task">'+(UI.drawer.mode==='new'&&ST()?drawerNew(UI.drawer.prefill):(t?block('Task',()=>drawerTask(t)):''))+'</div>';}
   }
   if(UI.toast)h+='<div class="toast" role="status">'+esc(UI.toast)+'</div>';
   document.getElementById('app').innerHTML=h;
