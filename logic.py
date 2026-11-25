@@ -1822,6 +1822,18 @@ def rate_limit_reset(msg, now):
     return None
 
 
+def _iso_utc(t):
+    """The Dispatcher's state stores times as epoch seconds; the page shows ISO strings. A string passes through, anything unreadable is None (PC-114)."""
+    if isinstance(t, bool) or t is None:
+        return None
+    if isinstance(t, (int, float)):
+        try:
+            return dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+        except (OverflowError, OSError, ValueError):
+            return None
+    return t if isinstance(t, str) else None
+
+
 def queue_local(state_text, plog_text, limit=15):
     """The Task Queue facts that need no GitHub: the Workers the Dispatcher's state file lists as running (worker, task id, launched, started)
     and the newest `limit` lines of the processing log (newest first). Missing or unreadable files give empty lists."""
@@ -1830,7 +1842,7 @@ def queue_local(state_text, plog_text, limit=15):
     except ValueError:
         st = {}
     ws = st.get("workers") if isinstance(st, dict) and isinstance(st.get("workers"), dict) else {}
-    workers = [dict(worker=u, task=w.get("task_id"), launched=w.get("launched"), started=bool(w.get("started")))
+    workers = [dict(worker=u, task=w.get("task_id"), launched=_iso_utc(w.get("launched")), started=bool(w.get("started")))
                for u, w in sorted(ws.items()) if isinstance(w, dict)]
     recs = [r for r in (_json_lines(plog_text) or []) if r.get("time")]
     log_ = [dict(time=r["time"], task=r.get("task"), state=r.get("state"), reason=r.get("reason"), worker=r.get("worker"), heartbeat=r.get("heartbeat"))
