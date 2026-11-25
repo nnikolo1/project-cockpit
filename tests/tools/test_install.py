@@ -23,7 +23,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 import install  # noqa: E402
 
-MUTATING = ("bootstrap", "bootout", "enable", "daemon-reload", "setup.sh", "code_snapshot_refresh", "cardmeta_collect")
+MUTATING = ("bootstrap", "bootout", "enable", "daemon-reload", "setup.sh", "pre_push", "code_snapshot_refresh", "cardmeta_collect")
 
 
 class Machine:
@@ -235,6 +235,7 @@ def test_full_run_all_yes(box, out, system):
     pf = json.loads((home / ".config/project-cockpit/projects.json").read_text())
     assert [p["repo"] for p in pf["projects"]] == ["acme/beta", "acme/alpha"] and pf["default"] == "beta"
     assert ["bash", str(ROOT / "kit/setup.sh"), "acme/alpha"] in m.calls
+    assert [c[1:] for c in m.calls if "pre_push.py" in " ".join(c)] == [[str(ROOT / "tools/pre_push.py"), "--install", "--repo", str(home / "src/alpha")]]
     assert not any("acme/beta" in " ".join(c) or "localonly" in " ".join(c) for c in m.mutations())
     saved = json.loads((home / ".config/project-cockpit/install.json").read_text())
     assert saved == {"model_credential": str(home / ".config/project-cockpit/model-token"), "project_dirs": [str(home / "src")]}

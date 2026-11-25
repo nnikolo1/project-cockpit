@@ -2181,6 +2181,7 @@ def backup_status_gaps(text, now, max_age_h=GAPS_MAX_AGE_H):
 
 # ---------- the last CI run of main (tools/ci_main.py, the Task Queue page) ----------
 CI_WORKFLOW = "test.yml"
+GATE_LOG = "merge-gate-last.json"  # tools/merge_gate writes it into the clone's git folder (its LOG_NAME)
 CI_FIELDS = "databaseId,status,conclusion,headSha,createdAt,url"
 CI_RED = ("failure", "timed_out", "startup_failure")
 RED_MAIN_TITLE = "CI is red on main: the test workflow fails"
@@ -2201,10 +2202,34 @@ def ci_run(text):
     return dict(state=state, conclusion=c, sha=r.get("headSha"), time=r.get("createdAt"), url=r.get("url"))
 
 
+def gate_result(text, branch="main"):
+    """The merge gate's log (tools/merge_gate, LOG_NAME) -> the same dict as ci_run plus source="local gate", or None when there is
+    none or it is not a plain run on `branch` (a gate run with another branch merged in says nothing about `branch` itself)."""
+    try:
+        r = json.loads(text or "null")
+    except ValueError:
+        return None
+    if not isinstance(r, dict) or r.get("branch") != branch or r.get("merged") or r.get("state") not in ("green", "red"):
+        return None
+    return dict(state=r["state"], conclusion=r.get("reason") or ("success" if r["state"] == "green" else "failure"), sha=r.get("sha"),
+                time=r.get("time"), url=None, source="local gate")
+
+
+def ci_latest(*results):
+    """The newest of the results that exist (ci_run's hosted run, gate_result's local run; None or state none is no result).
+    PC-94/PC-129: the red-main report reads whichever result exists, the newer one when both do."""
+    have = [r for r in results if r and r.get("state") not in (None, "none", "unknown")]
+    if not have:
+        return next((r for r in results if r), dict(state="none", conclusion=None, sha=None, time=None, url=None))
+    return max(have, key=lambda r: _epoch(r.get("time")) or 0)
+
+
 def red_main_body(run):
     """The text of the red-main finding (tools/file_finding.py adds the policy, the files and the Origin block)."""
-    return (f"The last run of the workflow `{CI_WORKFLOW}` on main is red ({run['conclusion']}): {run['url']}, commit {run['sha']}, "
-            f"started {run['time']}.\n\nWork: find the failing jobs, fix the cause (not the test), and confirm that `tools/merge_gate` passes.")
+    where = (f"The last local merge gate run on main (`tools/merge_gate`, pre-push hook) is red ({run['conclusion']})" if run.get("source") == "local gate"
+             else f"The last run of the workflow `{CI_WORKFLOW}` on main is red ({run['conclusion']}): {run['url']}")
+    return (f"{where}, commit {run['sha']}, started {run['time']}.\n\n"
+            "Work: find the failing tests, fix the cause (not the test), and confirm that `tools/merge_gate` passes.")
 
 
 RETENTION_MIN_DAYS = 3650  # owner, 2026-11-24: keep the session transcripts (the source of the token statistics) as long as possible

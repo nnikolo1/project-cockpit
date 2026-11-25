@@ -5,9 +5,13 @@ The merge step runs it before a Worker branch is merged (CLAUDE.md, Merging); FA
   tools/merge_gate              tests the working tree of the current repository
   tools/merge_gate BRANCH       tests HEAD with BRANCH merged into it, in a temporary worktree (the working tree is not touched)
 Node is required: without it the page-code tests would be skipped, so the gate fails instead of passing a partial run.
+Each run records its result in the clone's git folder (LOG_NAME, never in the tree): the red-main report and the Task Queue page
+read it when it is newer than the hosted run (logic.gate_result, PC-129).
 Exit: 0 PASS, 1 FAIL.
 """
 import argparse
+import datetime as dt
+import json
 import logging
 import pathlib
 import shutil
@@ -16,6 +20,7 @@ import sys
 import tempfile
 
 log = logging.getLogger("merge_gate")
+LOG_NAME = "merge-gate-last.json"
 GIT_ID = ["-c", "user.name=merge-gate", "-c", "user.email=merge-gate@localhost"]
 
 
@@ -49,6 +54,18 @@ def gate(repo, branch=None):
             git(repo, "worktree", "remove", "--force", str(tree))
 
 
+def write_log(repo, branch, reason):
+    """Record the result in `<git common dir>/LOG_NAME`: state, reason, the tested commit and branch, the merged branch, the time."""
+    out = lambda *a: git(repo, *a).stdout.strip()
+    path = pathlib.Path(repo) / out("rev-parse", "--git-common-dir") / LOG_NAME
+    rec = dict(state="green" if reason is None else "red", reason=reason, sha=out("rev-parse", "HEAD"), branch=out("branch", "--show-current"),
+               merged=branch, time=dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    try:
+        path.write_text(json.dumps(rec) + "\n")
+    except OSError as e:
+        log.warning("could not record the result in %s: %s", path, e)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("branch", nargs="?", help="the branch to merge into HEAD before testing (default: test the working tree)")
@@ -59,6 +76,7 @@ def main(argv=None):
         reason = "not inside a git repository"
     else:
         reason = gate(pathlib.Path(top.stdout.strip()), a.branch)
+        write_log(top.stdout.strip(), a.branch, reason)
     print("merge gate: PASS" if reason is None else f"merge gate: FAIL ({reason})")
     return 0 if reason is None else 1
 

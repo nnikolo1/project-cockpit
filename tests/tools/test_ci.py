@@ -84,13 +84,16 @@ def test_gate_tests_a_branch_merged_into_head_and_leaves_the_tree_alone(tmp_path
 @pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
 def test_task_queue_page_shows_a_red_main_as_a_warning():
     page = (ROOT / "web" / "index.html").read_text()
+    local = L.gate_result(json.dumps(dict(state="red", reason="pytest exited with 1", sha="abc", branch="main", time="2026-11-25T10:00:00Z")))
+    states = [L.ci_run(runs(conclusion=c)) for c in ("failure", "success")] + [local]
     code = "\n".join(["const tmTxt=t=>'HH:MM',tm=tmTxt;", re.search(r"^function esc\(s\).*$", page, re.M).group(0), page[page.index("function ciLine(c){"):page.index("function vQueueLocal(){")],
-                      "process.stdout.write(JSON.stringify([%s].map(ciLine)))" % ",".join(json.dumps(L.ci_run(runs(conclusion=c))) for c in ("failure", "success"))])
+                      "process.stdout.write(JSON.stringify(%s.map(ciLine)))" % json.dumps(states)])
     r = subprocess.run(["node", "-e", code], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
-    red, green = json.loads(r.stdout)
+    red, green, local = json.loads(r.stdout)
     assert 'class="warnline"' in red and "CI on main: failed (failure)" in red and "https://x/runs/7" in red
     assert 'class="muted"' in green and "CI on main: passed" in green
+    assert 'class="warnline"' in local and "CI on main: failed (pytest exited with 1), local gate" in local and "<a " not in local
 
 
 def runs(status="completed", conclusion="failure"):

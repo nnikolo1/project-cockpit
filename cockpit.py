@@ -1299,15 +1299,28 @@ def get_rule_prs(p, fresh=False):
     return dict(configured=True, available=True, pending=L.pending_rule_prs(v["prs"], rc["groups"]), at=v["at"])
 
 
+def local_gate(p):
+    """The last plain merge gate run on main in the project's clone (logic.gate_result), or None."""
+    if not p.get("git"):
+        return None
+    try:
+        common = pathlib.Path(p["git"]) / run_git(p, ["rev-parse", "--git-common-dir"], timeout=5).strip()
+        return L.gate_result((common / L.GATE_LOG).read_text())
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def get_ci(p):
-    """The last run of the test workflow on main, for the Task Queue page (until the daily job reports a red main, PC-91); hourly cache,
-    served on its own so that it can never block the page. -> logic.ci_run(...) plus at, or dict(state="unknown", error)."""
+    """The state of main for the Task Queue page (until the daily job reports a red main, PC-91): the newer of the last hosted run of
+    the test workflow (hourly cache, served on its own so that it can never block the page) and the local merge gate's last run on
+    main (PC-129). -> logic.ci_run(...) plus at, the local result, or dict(state="unknown", error)."""
     fetch = lambda: dict(L.ci_run(run_gh(["run", "list", "-R", p["repo"], "--workflow", L.CI_WORKFLOW, "--branch", "main", "--limit", "1", "--json", L.CI_FIELDS])), at=time.time())
     try:
-        return cached(pk(p, "ci"), fetch, GH_REFRESH_S, swr=True, persist=True, disk_fresh=DISK_FRESH_S, queue=True)
+        hosted = cached(pk(p, "ci"), fetch, GH_REFRESH_S, swr=True, persist=True, disk_fresh=DISK_FRESH_S, queue=True)
     except (RuntimeError, ValueError) as ex:
         log.warning("ci: last run of main unavailable (%s)", str(ex)[:80])
-        return dict(state="unknown", error=str(ex)[:200])
+        hosted = dict(state="unknown", error=str(ex)[:200])
+    return L.ci_latest(hosted, local_gate(p))
 
 
 # ---------- timeline / code ----------
