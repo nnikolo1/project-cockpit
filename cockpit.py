@@ -1012,10 +1012,43 @@ def stale_note(p, now=None):
     return dict(age_s=max(0, round(now - v["source"]["fetchedAt"])), error=f["error"], until=f["until"], rate_limited=f["rate_limited"])
 
 
+STATE_CALLS = 12   # gh calls of one state load (see GH_CALLS_PER_HOUR)
+_live_try = {}     # state key -> epoch of the last refresh asked for by a newer processing-log event (PC-119)
+
+
+def gh_room(now=None):
+    """GitHub may be called for one state load now: no rate-limit pause, room in the hourly cap, not an offline copy."""
+    now = time.time() if now is None else now
+    with _gh_lock:
+        return not OFFLINE and now >= _gh_pause["until"] and sum(c > now - 3600 for c in _gh_calls) + STATE_CALLS <= GH_CALLS_PER_HOUR
+
+
+def live_state(p, S, fresh=False):
+    """PC-119: the cached state with the Dispatcher's newer facts laid over it (logic.overlay_live), `pick` set by the Dispatcher's own rule,
+    and, when the processing log has a state change newer than the cache, one background refresh at most every LIVE_REFRESH_S seconds."""
+    if "tasks" not in S:
+        return S
+    d = DATA_DIR / (p.get("name") or p["repo"].split("/")[-1])
+    shorts = {s.lower() for s in (p.get("short"), p.get("name"), p["repo"].split("/")[-1]) if s}
+    events, k, now = L.live_events(_read_text(d / PLOG_FILE), shorts), pk(p, "state"), time.time()
+    at = S.get("source", {}).get("fetchedAt", 0)
+    if not fresh and L.live_refresh_due(events, at, _live_try.get(k, 0), now, gh_room(now)):
+        _live_try[k] = now
+        log.info("%s: the processing log is newer than the task list (data from %s): refreshing it", p.get("name", ""), _clock(at))
+        _expire(k)
+        S = get_state(p=p)   # the old copy at once, the new one fetched in the background
+        at = S.get("source", {}).get("fetchedAt", 0)
+    state_text = _read_text(d / "dispatcher-state.json")
+    held = {n for w in L.queue_local(state_text, None)["workers"] if (n := L.task_number(w["task"], shorts)) is not None}
+    tasks = L.overlay_live(S["tasks"], at, events, held, state_text is not None)
+    pick = L.pickable(tasks, dt.datetime.now(dt.timezone.utc), held)
+    return dict(S, tasks=[dict(t, pick=t["key"] in pick) for t in tasks])
+
+
 def get_state_served(p, fresh=False):
     """The state for the page: `stale` is true while a newer copy is being fetched in the background, so the page asks again shortly;
     `staleNote` is set when the last refresh failed and an older copy is shown (its age, the reason and when GitHub is tried again)."""
-    S = get_state(fresh=fresh, p=p)
+    S = live_state(p, get_state(fresh=fresh, p=p), fresh)
     if OFFLINE:  # the copy was taken from a steering instance: steering is off here whatever the cached state says
         S = dict(S, source=dict(S.get("source", {}), steering=False, simulate=False))
     if "modules" in S:

@@ -100,6 +100,7 @@
   {"path": "tests/test_install_commands.py", "module": "devops/installation", "basis": "owner decision 2026-11-25 (PC-116): checks that every command in the README install section exists; the README itself stays in docs"},
   {"path": "tests/test_module_order.py", "module": "githubclient", "basis": "tests the order of the module cards by code lines"},
   {"path": "tests/test_queue_local_times.py", "module": "githubclient", "basis": "tests the launch time shown for running Workers in the Task Queue view"},
+  {"path": "tests/test_live_overlay.py", "module": "githubclient", "basis": "tests the live overlay of Dispatcher events on the cached task stages (PC-119)"},
   {"path": "tests/test_safe_render.py", "module": "cockpitwebpage", "basis": "tests the page's time helper and the per-block error guard in web/index.html (PC-114)"},
   {"path": "tests/test_projects.py", "module": "githubclient", "basis": "tests the --projects handling in cockpit.py"},
   {"path": "tests/test_stage_pills.py", "module": "cockpitwebpage", "basis": "tests the colour-coded stage pills, filter chips, tokens and tooltips in web/index.html (PC-127)"},
