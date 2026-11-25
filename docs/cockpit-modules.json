@@ -53,6 +53,8 @@
   {"path": "tests/dispatcher/test_queue_integration.py", "module": "taskqueue/dispatcher", "basis": "tests that the core builds the real multi-project task adapter"},
   {"path": "tests/dispatcher/test_blockers.py", "module": "taskqueue/dispatcher", "basis": "tests that a task blocked by an unmerged task is never assigned"},
   {"path": "tests/dispatcher/test_layout.py", "module": "taskqueue/dispatcher", "basis": "tests the layout module of the queue's files (PC-67)"},
+  {"path": "ckp/", "module": "githubclient", "basis": "the new command-line-first package (PC-140); modules are redefined when the package shape settles; its tests are under tests/ckp/"},
+  {"path": "tests/ckp/", "module": "githubclient", "basis": "tests of the ckp package (mirrors ckp/)"},
   {"path": "tests/dispatcher/test_reconcile_wip.py", "module": "taskqueue/dispatcher", "basis": "tests the reconciliation of stale wip tasks (PC-98)"},
   {"path": "dispatcher/__init__.py", "module": "taskqueue", "candidates": ["taskqueue/dispatcher", "taskqueue/worker"], "basis": "package marker of dispatcher/, imported by the Dispatcher and, with note.py, by the Worker side; it belongs to neither alone"},
   {"path": "dispatcher/agent.py", "module": "taskqueue/dispatcher", "basis": "the agent adapter (command, environment, activity glob) the Dispatcher side calls through runtime.py; it has no test of its own"},

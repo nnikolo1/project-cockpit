@@ -25,6 +25,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlparse
 
 import logic as L
+from ckp.store import io as store_io, layout as store_layout
+from ckp.store.cache import DiskCache
 from dispatcher.core import DEFAULTS as SETTING_DEFAULTS, load_settings
 from dispatcher.runtime import Config as RuntimeConfig
 
@@ -294,16 +296,19 @@ _locks, _refreshing = {}, set()
 CACHE_DIR = None  # folder of the on-disk copies of the slow answers (set by main); None = memory only. Lets a restarted service answer at once.
 
 
+CACHE_SCHEMA = 1  # the shape of what is cached: bump it when a cached payload changes its shape; a new folder (cache/s<N>) is then used and no old shape is read
+
+
+def _dc():
+    return DiskCache(CACHE_DIR)
+
+
 def _disk_path(key):
-    return CACHE_DIR / (re.sub(r"[^A-Za-z0-9_.-]", "_", key) + ".json") if CACHE_DIR else None
+    return _dc().path(key)
 
 
 def _disk_load(key):
-    f = _disk_path(key)
-    try:
-        return json.loads(f.read_text()) if f else None
-    except (OSError, ValueError):
-        return None
+    return _dc().load(key)
 
 
 def _jsonable(o):
@@ -314,14 +319,10 @@ def _jsonable(o):
 
 
 def _disk_save(key, v):
-    f = _disk_path(key)
-    if not f or OFFLINE:  # the restored backup is never written to
+    if not CACHE_DIR or OFFLINE:  # the restored backup is never written to
         return
     try:
-        f.parent.mkdir(parents=True, exist_ok=True)
-        tmp = f.with_suffix(".tmp")
-        tmp.write_text(json.dumps(v, default=_jsonable))
-        os.replace(tmp, f)
+        _dc().save(key, v, default=_jsonable)
     except (OSError, TypeError, ValueError) as ex:
         log.warning("cache %s not written to disk: %s", key, ex)
 
@@ -331,9 +332,7 @@ def drop_cache(prefix):
     with _lock:
         for k in [k for k in _cache if k.startswith(prefix)]:
             del _cache[k]
-    if CACHE_DIR and CACHE_DIR.is_dir():
-        for f in CACHE_DIR.glob(re.sub(r"[^A-Za-z0-9_.-]", "_", prefix) + "*.json"):
-            f.unlink(missing_ok=True)
+    _dc().drop(prefix)
 
 
 STAGGER_WINDOW_S = 900   # the GitHub refreshes of all projects and resources are spread over this window (owner: staggered offsets, no burst)
@@ -738,12 +737,7 @@ def save_card_settings(p, form):
     """Validate and write the module-card options atomically, mode 0600. ValueError on a refused value."""
     values = L.validate_card_settings(form)
     f = card_settings_path(p)
-    f.parent.mkdir(parents=True, exist_ok=True)
-    tmp = f.with_name(f.name + ".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as fh:
-        json.dump(values, fh, indent=2)
-    os.replace(tmp, f)
+    store_io.atomic_write_json(f, values, mode=0o600, indent=2)
     log.info("card settings saved for %s: %s", p.get("name", ""), values)
     return "card settings saved"
 
@@ -825,12 +819,7 @@ def save_settings(p, form):
     """Validate and write the settings file atomically, mode 0600. ValueError on a refused value."""
     values = L.validate_settings(form, SETTING_DEFAULTS, RuntimeConfig.image_workers)
     f = settings_path(p)
-    f.parent.mkdir(parents=True, exist_ok=True)
-    tmp = f.with_name(f.name + ".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as fh:
-        json.dump(values, fh, indent=2)
-    os.replace(tmp, f)
+    store_io.atomic_write_json(f, values, mode=0o600, indent=2)
     log.info("dispatcher settings saved for %s: %s", p.get("name", ""), values)
     return "settings saved"
 
@@ -1183,10 +1172,7 @@ def compliance_status_path(p):
 
 
 def _write_json(f, data):
-    f.parent.mkdir(parents=True, exist_ok=True)
-    tmp = f.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data))
-    os.replace(tmp, f)
+    store_io.atomic_write_json(f, data)
 
 
 def _alive(pid):
@@ -1971,7 +1957,7 @@ def main():
         log.info("project %s: repo=%s project=%s manager=%s mode=%s", p["name"], p["repo"], p["project"], p["manager"], "STEERING" if steer else "READ-ONLY")
     global CACHE_DIR
     if not a.offline:
-        CACHE_DIR = None if a.cache_dir == "none" else pathlib.Path(a.cache_dir or DATA_DIR / "cache").expanduser()
+        CACHE_DIR = None if a.cache_dir == "none" else pathlib.Path(a.cache_dir).expanduser() if a.cache_dir else store_layout.cache_dir(CACHE_SCHEMA, DATA_DIR)
     H.token = load_token(a.token_file)
     host = "0.0.0.0" if a.lan else "127.0.0.1"
     if a.lan:
