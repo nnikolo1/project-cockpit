@@ -1,6 +1,7 @@
 """GitHub adapter of the deploy command (PC-84): releases and deployments through the `gh` command line."""
 import hashlib
 import json
+import tempfile
 import logging
 from pathlib import Path
 
@@ -24,8 +25,11 @@ def create_release(repo, tag, notes, asset=None, *, run=_run):
 
 def record_deployment(repo, tag, environment, state, description, *, run=_run):
     """Create a GitHub deployment of `tag` to `environment` and set its status (`state`: success, failure, ...)."""
-    out = run(["gh", "api", f"repos/{repo}/deployments", "-X", "POST", "-f", f"ref={tag}", "-f", f"environment={environment}",
-               "-F", "auto_merge=false", "-F", "required_contexts=[]", "-f", f"description={description[:140]}"])
+    body = dict(ref=tag, environment=environment, auto_merge=False, required_contexts=[], description=description[:140])
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=True) as fh:
+        json.dump(body, fh)
+        fh.flush()
+        out = run(["gh", "api", f"repos/{repo}/deployments", "-X", "POST", "--input", fh.name])
     dep_id = json.loads(out)["id"]
     run(["gh", "api", f"repos/{repo}/deployments/{dep_id}/statuses", "-X", "POST", "-f", f"state={state}",
          "-f", f"description={description[:140]}"])

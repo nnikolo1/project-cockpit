@@ -22,7 +22,7 @@ class FakeProcess:
         self.restarts.append(label)
         return True, "restarted"
 
-    def health(self, port, **kw):
+    def health(self, port, path="/", **kw):
         return (self.healthy, "ok" if self.healthy else "no answer")
 
     def running_workers(self, state_file):
@@ -63,7 +63,8 @@ def repo(tmp_path):
 
 def adapter(repo, tmp_path, process, github, gate=True):
     # the working clone has no remote: HEAD is compared with itself through a fake ref
-    ad = GitDeployAdapter("p", "o/p", repo, "production", home=tmp_path / "home", process=process, github=github, tests_green=gate)
+    ad = GitDeployAdapter("p", "o/p", repo, "production", home=tmp_path / "home", process=process, github=github, tests_green=gate,
+                          health_wait_s=0, sleep=lambda s: None)
     ad._sha = lambda ref: sh(repo, "rev-parse", ref.replace("origin/main", "HEAD"))
     return ad
 

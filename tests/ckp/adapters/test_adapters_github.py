@@ -44,9 +44,9 @@ def test_create_release_failure_propagates():
 def test_record_deployment_creates_then_sets_status():
     run = Fake(json.dumps({"id": 42}), "{}")
     github.record_deployment("o/r", "v1", "production", "success", "ok " * 100, run=run)
-    assert run.calls[0][2] == "repos/o/r/deployments" and "ref=v1" in run.calls[0] and "environment=production" in run.calls[0]
+    assert run.calls[0][2] == "repos/o/r/deployments" and "--input" in run.calls[0]
     assert run.calls[1][2] == "repos/o/r/deployments/42/statuses" and "state=success" in run.calls[1]
-    assert all(len(a) <= 140 + len("description=") for c in run.calls for a in c)
+    assert all(len(a) <= 140 + len("description=") for c in run.calls[1:] for a in c)
 
 
 def test_record_deployment_failure_on_create_stops():

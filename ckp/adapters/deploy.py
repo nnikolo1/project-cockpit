@@ -14,12 +14,15 @@ SMOKE = "import ckp, logic, cockpit, dispatcher.core"   # the release tree must 
 
 class GitDeployAdapter:
     def __init__(self, project, repo, repo_dir, env_name, home=None, *, git=_git, github=_github, process=_process, releases=_releases,
-                 layout=_layout, run=_run, tests_green=None):
+                 layout=_layout, run=_run, tests_green=None, health_wait_s=90, health_interval_s=2, sleep=None, clock=None):
         """`repo`: OWNER/NAME on the hosting service; `repo_dir`: the working clone; `env_name`: the environment being deployed;
         `tests_green`: a bool or a callable returning one (default: run tools/merge_gate in the clone)."""
         self.project, self.repo, self.repo_dir, self.env_name, self.home = project, repo, repo_dir, env_name, home
         self.git, self.github, self.process, self.releases, self.layout, self.run = git, github, process, releases, layout, run
         self._tests_green = tests_green
+        import time
+        self.health_wait_s, self.health_interval_s = health_wait_s, health_interval_s
+        self.sleep, self.clock = sleep or time.sleep, clock or time.monotonic
         self.lock_path = layout.deploy_lock(home)
 
     # -- what the core asks for before it changes anything --
@@ -84,10 +87,16 @@ class GitDeployAdapter:
         return self.process.restart_service(env["label"], run=self.run)
 
     def health(self, env):
-        return self.process.health(env["port"])
+        """Poll /health until the server answers or the grace window is over (a restarted viewer needs seconds to listen)."""
+        deadline, last = self.clock() + self.health_wait_s, (False, "no check made")
+        while True:
+            last = self.process.health(env["port"], "/health")
+            if last[0] or self.clock() >= deadline:
+                return last
+            self.sleep(self.health_interval_s)
 
     def record(self, project, tag, env, state, detail):
         try:
             self.github.record_deployment(self.repo, tag, self.env_name, state, detail, run=self.run)
         except Exception as e:  # noqa: BLE001 - the record of a deploy must not undo it
-            log.warning("deployment record not written: %s", e)
+            log.warning("deployment record not written: %s %s", e, (getattr(e, "stderr", "") or "")[:300])

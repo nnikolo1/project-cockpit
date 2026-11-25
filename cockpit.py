@@ -1768,6 +1768,8 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlparse(self.path)
         q = parse_qs(u.query)
+        if u.path == "/health":   # no data, no token: only that the server answers and whether it is still warming up (the deploy's health check, PC-84)
+            return self.send(200, dict(ok=True, warming=bool(WARM["on"])))
         if q.get("t", [""])[0] and secrets.compare_digest(q["t"][0], self.token):
             return self.send(303, headers=[("Set-Cookie", f"t={self.token}; HttpOnly; SameSite=Strict; Path=/"), ("Location", u.path)])
         if not self.authed():
