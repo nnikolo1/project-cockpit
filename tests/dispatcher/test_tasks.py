@@ -59,11 +59,6 @@ def test_author_labels_decide_release():
     assert sorted(t.id for t in make(gh, now=day(11)).released()) == ["cockpit-1", "cockpit-2", "cockpit-4", "cockpit-5"]   # 10 days old
 
 
-def test_interactive_only_tasks_are_never_given_to_workers():
-    gh = Gh([node(1, ["author:owner"]), node(2, ["author:owner", "interactive-only"]), node(3, ["released", "interactive-only"])])
-    assert [t.id for t in make(gh).released()] == ["cockpit-1"]
-
-
 def test_policy_finding_is_released_whatever_its_author():
     gh = Gh([node(1, ["policy-finding", "author:job"], body="<!-- filed-by: worker1 -->"), node(2, ["policy-finding", "author:interactive"]),
              node(3, ["policy-finding", "question"]), node(4, ["policy-finding", "type:decision"]), node(5, ["author:job"])])

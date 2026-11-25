@@ -145,7 +145,7 @@ def is_finding(labels):
     return FINDING in labels and "question" not in labels and "type:decision" not in labels
 
 
-NOT_DISPATCHABLE = ("question", "type:decision", "interactive-only")   # spec 2b: questions, decisions and the Task Queue's own tasks never go to a Worker
+NOT_DISPATCHABLE = ("question", "type:decision")   # spec 2b: questions and decisions never go to a Worker
 INTERACTIVE_DAYS = 10                     # spec 2b: an interactive agent's embryo counts as released after this many days
 
 
@@ -160,7 +160,7 @@ def _author_releases(lab, created, now):
 
 def dispatchable(t, now):
     """The Dispatcher's release rule (spec 2b), the one copy: a derived task (logic.derive) that is open, unassigned, without a state label,
-    not a question, decision or `interactive-only`, and released (stage, label, or its author label). Blockers are checked by is_blocked."""
+    not a question or decision, and released (stage, label, or its author label). Blockers are checked by is_blocked."""
     lab = set(t["labels"])
     if t["stage"] not in ("embryo", "released") or lab & set(STATES) or lab & set(NOT_DISPATCHABLE) or t["type"] == "decision":
         return False

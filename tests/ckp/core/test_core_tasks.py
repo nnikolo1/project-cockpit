@@ -96,3 +96,9 @@ def test_comment_refusals():
 
 def test_no_release_cancel_or_priority_function():
     assert not [n for n in dir(T) if any(w in n for w in ("release", "cancel", "priority"))]
+
+
+def test_file_task_refuses_the_retired_label():
+    from ckp.core import tasks
+    r = tasks.file_task({"repo": "o/p", "short": "p"}, "t", "b", ["interactive-only"], run=lambda a: "")
+    assert not r["ok"]

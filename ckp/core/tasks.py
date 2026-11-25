@@ -13,7 +13,8 @@ from dispatcher import tasks as T
 
 log = logging.getLogger("ckp.tasks")
 
-_FORBIDDEN = lambda name: L.is_protected(name) or name in L.STATES   # noqa: E731 - labels only the owner or the Dispatcher sets
+RETIRED = ("interactive-only",)   # removed by the owner 2026-11-25: nothing may set it
+_FORBIDDEN = lambda name: L.is_protected(name) or name in L.STATES or name in RETIRED   # noqa: E731 - labels only the owner or the Dispatcher sets
 
 
 def _result(ok, data=None, error=None):

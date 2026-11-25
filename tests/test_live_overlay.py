@@ -111,8 +111,8 @@ def test_served_state_refreshes_once_on_a_newer_event_and_respects_pause(cockpit
 
 
 # --- Next up: the Dispatcher's own rule ---
-def test_next_up_skips_interactive_only_question_decision_blocked_and_held_tasks():
-    tasks = [task(1), task(2, labels=["interactive-only"]), task(3, labels=["question"]), task(4, labels=["type:decision"]),
+def test_next_up_skips_question_decision_blocked_and_held_tasks():
+    tasks = [task(1), task(3, labels=["question"]), task(4, labels=["type:decision"]),
              task(5, type_="decision"), task(6, blocked=["PJ-9"]), task(9, "wip", ["wip"]), task(7, blocked=["PJ-8"]), task(8, "merged"),
              task(10, "embryo", ["author:job"]), task(11, "embryo", ["author:owner"]), task(12)]
     assert L.pickable(tasks, NOW, held={12}) == {"PJ-1", "PJ-7", "PJ-11"}
@@ -125,6 +125,6 @@ def test_dispatcher_uses_the_same_rule(monkeypatch):
     monkeypatch.setattr(L, "dispatchable", lambda t, now: (seen.append(t["number"]), real(t, now))[1])
     gh = lambda args: json.dumps({"data": {"repository": {"issues": {"pageInfo": {"hasNextPage": False}, "nodes": [
         {"number": 1, "databaseId": 1, "title": "x", "url": "u", "body": "", "state": "OPEN", "stateReason": None, "createdAt": "2026-11-01T00:00:00Z",
-         "updatedAt": None, "closedAt": None, "author": {"login": "own"}, "labels": {"nodes": [{"name": "interactive-only"}]},
+         "updatedAt": None, "closedAt": None, "author": {"login": "own"}, "labels": {"nodes": [{"name": "question"}]},
          "assignees": {"nodes": []}, "parent": None, "blockedBy": {"nodes": []}, "comments": {"nodes": []}, "timelineItems": {"nodes": []}}]}}}})
     assert T.GitHubTasks("own/proj", gh, lambda a, c: "", "/r", now=lambda: NOW).released() == [] and seen == [1]
