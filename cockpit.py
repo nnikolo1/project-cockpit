@@ -625,7 +625,7 @@ def get_queue(p):
     the Dispatcher settings and the last daily backup's status record (None when there is none). The token and quota files are read for the Token Usage tab (`/api/usage`), also local."""
     d = DATA_DIR / (p.get("name") or p["repo"].split("/")[-1])
     return dict(L.queue_local(_read_text(d / "dispatcher-state.json"), _read_text(d / PLOG_FILE)), settings=get_settings(p), asOf=time.time(),
-                backup=L.backup_status(_read_text(d / L.BACKUP_STATUS_FILE)))
+                backup=L.backup_status(_read_text(d / L.BACKUP_STATUS_FILE)), compliance=L.compliance_summary(_read_text(d / L.COMPLIANCE_REPORT_FILE)))
 
 
 def card_settings_path(p):

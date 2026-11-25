@@ -27,6 +27,7 @@
   {"path": "tools/cardmeta_collect.py", "module": "internal/metadata", "basis": "card-metadata collector entry point (ADR 0013); its test follows it"},
   {"path": "tools/cardmeta_common.py", "module": "internal/metadata", "basis": "shared helper of the card-metadata collectors"},
   {"path": "tools/cardmeta_footprint.py", "module": "internal/metadata", "basis": "card-metadata collector (ADR 0013); its test follows it"},
+  {"path": "tools/compliance_check.py", "module": "internal/devops", "basis": "the compliance check of local policy files (PC-108), a policy check like kit/policy.py; its test tests/tools/test_compliance_check.py follows it"},
   {"path": "tools/metadata_gaps.py", "module": "internal/metadata", "basis": "gap checker of the project metadata"},
   {"path": "tools/code_snapshot_refresh.py", "module": "internal/metadata", "basis": "refreshes the code snapshot for the daily staleness check, next to the gap checker; its test tests/tools/test_code_snapshot_refresh.py follows it"},
   {"path": "tests/tools/test_committed_metadata.py", "module": "internal/metadata", "basis": "gap tests on the committed metadata"},

@@ -1915,3 +1915,15 @@ def pane_problem(api, body):
     if api == "/api/code":
         return None if body.get("wired") else "code snapshot not wired"
     return None
+
+
+COMPLIANCE_REPORT_FILE = "compliance-report.md"  # in the project's data folder; written by tools/compliance_check.py (PC-108)
+
+
+def compliance_summary(text):
+    """The compliance report's text -> dict(checked, release, violations) for the Cockpit page, or None when missing or unreadable."""
+    m = re.search(r"Checked (\S+) against constitution (\S+)\.", text or "")
+    if not m:
+        return None
+    n = re.search(r"(?m)^(\d+) violation\(s\):", text)
+    return dict(checked=m.group(1), release=m.group(2), violations=int(n.group(1)) if n else 0)
