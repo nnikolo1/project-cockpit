@@ -627,7 +627,12 @@ function cardSettingsForm(){
   return '<form class="card" data-form="cardsettings" style="display:flex;flex-direction:column;gap:12px"><h2>Module cards</h2><div class="field"><label for="s_churn_colour">Colour churn by</label>'
    +'<select id="s_churn_colour" name="churn_colour"'+(ro?' disabled':'')+'>'+o('size','size (changed lines / current lines)')+o('absolute','absolute churn (lines added + removed)')+'</select>'
    +'<span class="muted" style="font-size:12px">Sets the colour of the churn chips on the overview and the module cards.</span></div>'
-   +qThForm(ro)+(ro?'':'<div><button class="btn primary">Save</button></div>')+'</form>';}
+   +qThForm(ro)
+   +'<h3>Quota estimates</h3><div class="field"><label for="s_quota_plan_start">Plan period starts on</label><input id="s_quota_plan_start" name="quota_plan_start" type="date" value="'+esc(String(CSET.values.quota_plan_start||''))+'"'+(ro?' disabled':'')+'>'
+   +'<span class="muted" style="font-size:12px">The first day of the current plan (UTC): quota percentages are estimated only for windows from this day on; earlier ones show “no readings, other plan”.</span></div>'
+   +'<div class="field"><label for="s_quota_weak_readings">Readings for a firm estimate</label><input id="s_quota_weak_readings" name="quota_weak_readings" type="number" step="1" min="1" value="'+esc(String(CSET.values.quota_weak_readings||''))+'"'+(ro?' disabled':'')+'>'
+   +'<span class="muted" style="font-size:12px">An estimate resting on fewer readings is marked weak.</span></div>'
+   +(ro?'':'<div><button class="btn primary">Save</button></div>')+'</form>';}
 function vSettings(){
   const sec=UI.setSec,head='<div class="page"><div><h1>Settings</h1></div><div class="filters" role="group" aria-label="Section">'+[['dispatcher','Dispatcher settings'],['cards','Module cards'],['policies','Policies']].map(x=>'<button class="f" data-act="setsec" data-v="'+x[0]+'" aria-pressed="'+(sec===x[0])+'">'+x[1]+'</button>').join('')+'</div>';
   if(sec==='policies')return head+vRules()+'</div>';
@@ -685,6 +690,21 @@ function latestCard(q,today){
   return card('Today’s readings','One row per hour of today (UTC) that has recorded readings, newest first; an hour without readings has no row. '+rule,rows.filter(isToday),'no readings today')
    +card('Earlier readings','The earlier days of this week per day, the earlier weeks of this month per week, the two months before per month (all UTC). '+rule,rows.filter(r=>!isToday(r)),'no data');
 }
+function estimateCard(E){
+  /* The quota per vendor window (PC-111): a measured value wins; else an estimate from the window's tokens, italic and marked "est.", its basis in the tooltip */
+  const T='Quota per vendor window';
+  if(!E)return '<div class="card"><h2>'+T+'</h2><span class="muted">no data</span></div>';
+  const nf=x=>Math.round(x).toLocaleString('en-US'),hm=s=>esc(String(s).replace('T',' ').slice(0,16));
+  const cell=r=>r.state==='measured'?'<td class="mono" title="'+esc(r.note)+'">'+r.percent+' %</td>'
+    :r.state==='estimate'?'<td class="mono est" title="'+esc(r.note)+'"><i>'+r.percent+' % est.</i>'+(r.weak?' <span class="muted">weak</span>':'')+'</td>'
+    :'<td class="muted" title="'+esc(r.note)+'">'+(r.state==='none'?'no calibration yet':'no readings, other plan')+'</td>';
+  const cal=(c,n)=>c?'Calibration: '+nf(c.factor)+' tokens per percent, from '+c.readings+' readings in '+c.windows+' '+n+' windows, '+esc(c.first)+' to '+esc(c.last)+(c.weak?'; weak: fewer than '+E.weak_readings+' readings':'')+'.':'No calibration yet: no window of the plan period has a reading.';
+  const tbl=(k,n)=>{const K=E[k]||{rows:[]},rs=recentRows(K.rows);return '<h3>'+n[0].toUpperCase()+n.slice(1)+' windows</h3><span class="muted">'+cal(K.calibration,n)+'</span><div class="tblbox narrow"><table><thead><tr><th>Window (UTC)</th><th>Kind</th><th>Tokens</th><th>Readings</th><th>Quota used</th></tr></thead><tbody>'
+    +rs.map(r=>'<tr><td class="mono">'+hm(r.start)+' – '+hm(r.end)+'</td><td>'+esc(r.kind)+'</td><td class="mono">'+nf(r.tokens)+'</td><td class="mono">'+r.readings+'</td>'+cell(r)+'</tr>').join('')
+    +(rs.length?'':'<tr><td class="muted" colspan="5">no data</td></tr>')+'</tbody></table></div>';};
+  return '<div class="card"><h2>'+T+'</h2><span class="muted">Tokens of the Workers and the interactive sessions per vendor window, newest first, with the quota used: the highest reading where there is one, else an estimate (<i>italic, “est.”</i>) from the tokens and the tokens one percent stood for in the windows with readings of the plan period since '+esc(E.plan_start)+' (Settings › Module cards). Hover a value for its basis.</span>'
+   +tbl('seven_day','weekly')+tbl('five_hour','5-hour')+'</div>';
+}
 function sessionCards(T){
   const nf=x=>x.toLocaleString('en-US'),pc=x=>x==null?'':x+' %',none='<td class="muted">no readings</td>';
   /* day, week and month rows: 5-hour = mean of the peaks of the vendor windows ending in the period, weekly = the period's highest reading (PC-110) */
@@ -727,7 +747,7 @@ function projectsCard(){
    +'</tbody></table></div></div>';
 }
 /* The order of the Token Usage cards, top to bottom (owner, 2026-11-24, PC-81): the one place to change it; a card with nothing to show is left out without a gap */
-const USAGE_ORDER=['windows','heatmap','readings','sessions','days','quota','projects','fit','tasks'];  // the one list that fixes the order of the Token Usage cards
+const USAGE_ORDER=['windows','heatmap','readings','estimates','sessions','days','quota','projects','fit','tasks'];  // the one list that fixes the order of the Token Usage cards
 function vUsage(){
   const head='<div class="page"><div><h1>Token Usage</h1><span class="muted">Tokens the Workers used, counted by the proxy, for the last 90 days. 5-hour windows are the vendor’s own windows where quota readings exist, otherwise fixed blocks counted from the epoch (UTC); the label says which. The vendor’s quota percentages come from its readings, not from the proxy.</span></div>';
   if(!USE)return head+'<div class="card"><span class="muted">no data</span></div></div>';
@@ -736,7 +756,7 @@ function vUsage(){
   const dv={},fh={},ag=(USE.sessions&&USE.sessions.aggregate_days)||{};(USE.days||[]).forEach(r=>{dv[r.key]=r.total;});Object.keys(ag).forEach(d=>{dv[d]=(dv[d]||0)+ag[d];});((USE.quota&&USE.quota.days)||[]).forEach(r=>{if(r.five_hour!=null)fh[r.key]=r.five_hour;});
   const hm='<div class="card"><h2>Tokens per day</h2>'+heatmap(dv,(d,n)=>nf(n)+' tokens on '+d+(ag[d]!=null?'\nincl. '+nf(ag[d])+' daily aggregate, no split':'')+(fh[d]!=null?'\nhighest 5-hour reading '+fh[d]+' %':''),'Sum of the four token counts per day (UTC), as in the per-day table below; the proxy file has usage on '+((USE.days||[]).length)+' of the last 90 days. Days before the interactive transcripts add the statistics cache’s daily total (daily aggregate, no split).')+'</div>';
   const C={windows:()=>usageTable('Usage per 5-hour window',USE.windows&&USE.windows.map(r=>Object.assign({},r,{key:r.key+' ('+r.kind+')'})),NOUSE),heatmap:()=>hm,
-   readings:()=>latestCard(USE.quota),sessions:()=>sessionCards(USE.sessions),days:()=>usageTable('Usage per day',USE.days,NOUSE),quota:()=>quotaCard(USE.quota),
+   readings:()=>latestCard(USE.quota),estimates:()=>estimateCard(USE.estimates),sessions:()=>sessionCards(USE.sessions),days:()=>usageTable('Usage per day',USE.days,NOUSE),quota:()=>quotaCard(USE.quota),
    projects:()=>projectsCard(),fit:()=>fitCard(USE.reconcile),
    tasks:()=>'<div class="card"><h2>Per task</h2><div class="tblbox narrow"><table><thead><tr><th>Task</th><th>Worker</th><th>Launched (UTC)</th><th>Proxy sum</th><th>Good-bye note</th><th>Difference</th></tr></thead><tbody>'
    +(tk?recentRows(tk).map(t=>'<tr><td class="mono">'+esc(t.task)+'</td><td class="mono">'+esc(t.worker||'')+'</td><td class="mono">'+esc(t.start)+'</td><td class="mono">'+nf(t.proxy)+(t.overlap?' <span class="muted" title="Another task ran at the same time; the sum may include its requests">overlap</span>':'')+'</td><td class="mono">'+nf(t.note)+'</td><td class="mono">'+nf(t.diff)+'</td></tr>').join(''):'')
@@ -1023,7 +1043,7 @@ document.addEventListener('submit',async function(e){
   else if(kind==='block')fd.get('b')&&post({action:'block',n:t.number,b:num(fd.get('b'))});
   else if(kind==='settings'){const b={action:'settings',enabled:f.elements.enabled.checked};
     SETROWS.slice(1).forEach(r=>{b[r[0]]=fd.get(r[0]);});post(b);}
-  else if(kind==='cardsettings')post({action:'cardsettings',churn_colour:fd.get('churn_colour'),quality_thresholds:qThRead(fd)});
+  else if(kind==='cardsettings')post({action:'cardsettings',churn_colour:fd.get('churn_colour'),quality_thresholds:qThRead(fd),quota_plan_start:fd.get('quota_plan_start'),quota_weak_readings:fd.get('quota_weak_readings')});
   else if(kind==='moddl')post({action:'moddl',module:f.dataset.m,d:fd.get('d')||''});
   else if(kind==='new'){const title=fd.get('title');
     if(await post({action:'new',title:title,desc:fd.get('desc'),module:fd.get('module'),type:fd.get('type'),cls:fd.get('cls'),parent:fd.get('parent')||''})){
