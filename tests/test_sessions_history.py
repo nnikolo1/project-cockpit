@@ -90,7 +90,7 @@ def render(sessions):
 def test_card_title_legend_and_one_class_per_level():
     rep = L.transcript_report(TEXT, quota(ANCHOR))
     html = render(rep)
-    card = html[:html.index("Interactive sessions per source")]
+    card = html[:html.index("Interactive sessions with the most tokens")]
     assert "<h2>Interactive sessions history</h2>" in card and "<h2>Interactive sessions per period</h2>" not in card
     assert all(f'class="lvkey lv-{lv}"' in card and f"</i>{lv}</span>" in card for lv in LEVELS)
     rows = re.findall(r'<tr class="lv-(\w+)"><td[^>]*>.*?</td><td>(\w+)</td>', card)
@@ -106,7 +106,7 @@ def test_empty_current_day_says_no_sessions_today():
 
 @node
 def test_other_cards_unchanged():
-    html = render(L.transcript_report(TEXT, quota(ANCHOR)))
+    html = render(L.transcript_report(TEXT + "\n" + msg(ANCHOR, source="src-b"), quota(ANCHOR)))
     rest = html[html.index("<h2>Interactive sessions per source</h2>") - 18:]
-    assert "<h2>Sessions with the most tokens</h2>" in rest and "lv-" not in rest
+    assert "<h2>Interactive sessions with the most tokens</h2>" in rest and "lv-" not in rest
     assert render(None) == '<div class="card"><h2>Interactive sessions</h2><span class="muted">no data</span></div>'

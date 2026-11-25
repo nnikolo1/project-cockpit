@@ -1,4 +1,5 @@
 """Pure logic of the cockpit: no network, no subprocess. Everything here is unit-tested."""
+import bisect
 import datetime as dt
 import json
 import logging
@@ -140,6 +141,27 @@ def parse_filed_by(body):
     """The agent id in the body's `<!-- filed-by: <agent id> -->` line, or None."""
     m = FILED_BY.search(body or "")
     return m.group(1) if m else None
+
+
+KEPT = re.compile(r"<details>\s*<summary>\s*Origin.*?</details>|<!--\s*filed-by:.*?-->", re.S)
+ANALYSIS = re.compile(r"<!--\s*analysis:\s*(clear|flagged|stale)\b")
+
+
+def split_text(body):
+    """An issue body -> (the editable text, [the provenance block and the filed-by marker, verbatim]): the parts an edit keeps."""
+    body = body or ""
+    return KEPT.sub("", body).strip(), KEPT.findall(body)
+
+
+def join_text(text, kept):
+    """The edited text with the kept parts re-attached below it (the inverse of split_text)."""
+    return "\n\n".join([text.strip()] + list(kept)).strip() + "\n"
+
+
+def analysis_state(comments):
+    """The authority analysis of a task as its latest `<!-- analysis: clear|flagged|stale ... -->` comment records it; None = not recorded."""
+    marks = [(c.get("t") or "", m.group(1)) for c in comments or () for m in [ANALYSIS.search(c.get("body") or "")] if m]
+    return max(marks)[1] if marks else None
 
 
 def is_running(stage_):
@@ -340,15 +362,24 @@ def snapshot_lines(metrics):
 
 
 def order_modules(mods, lines):
-    """The one module order of every list (cards, chips, module navigation): top-level modules by size (`lines` {id: code lines}),
-    biggest first, equal sizes by name; unsized ones after them in their map order; virtual entries ("Unassigned") last. Each top-level
-    module is followed by its sub-modules in their own order. Sets `lines` (None when unknown) on every module; returns a new list."""
+    """The one module order of every list (cards, chips, module navigation): modules by size (`lines` {id: code lines}), biggest
+    first, equal sizes by name; unsized ones after them in their map order; virtual entries ("Unassigned") last. Top-level modules are
+    ordered among themselves, the sub-modules of one module among their siblings only (PC-90: same rule, a sub-module never leaves its
+    module); each top-level module is followed by its sub-modules, and its `children` list has the same order. Sets `lines` (None when
+    unknown) on every module; returns a new list."""
     mods = [dict(m, lines=lines.get(m["id"])) for m in mods]
     pos = {m["id"]: i for i, m in enumerate(mods)}
-    tops = [m for m in mods if not parent_id(m["id"])]
-    tops.sort(key=lambda m: (bool(m.get("virtual")), m["lines"] is None, -(m["lines"] or 0),
-                             m["name"].lower() if m["lines"] is not None else "", pos[m["id"]]))
-    out = [x for t in tops for x in [t] + [m for m in mods if m["id"].startswith(t["id"] + "/")]]
+
+    def by_size(ms):
+        return sorted(ms, key=lambda m: (bool(m.get("virtual")), m["lines"] is None, -(m["lines"] or 0),
+                                         m["name"].lower() if m["lines"] is not None else "", pos[m["id"]]))
+    tops = by_size([m for m in mods if not parent_id(m["id"])])
+    out = []
+    for t in tops:
+        subs = by_size([m for m in mods if m["id"].startswith(t["id"] + "/")])
+        if "children" in t:
+            t["children"] = [m["id"] for m in subs if m["id"] in t["children"]] + [c for c in t["children"] if c not in {m["id"] for m in subs}]
+        out += [t] + subs
     seen = {m["id"] for m in out}
     return out + [m for m in mods if m["id"] not in seen]  # a sub-module without its parent listed is never dropped
 
@@ -460,12 +491,14 @@ def derive(issues, events, project, manager, mods, grow):
         kind = _prefixed(i["labels"], "kind:")
         cls = "must" if "must" in eff else "nice" if "nice" in eff else ("must" if hint.lower() == "must" else "nice")
         body = i.get("body") or ""
+        text, kept = split_text(body)
         tasks.append(dict(
             key=key, number=i["number"], dbid=i.get("id"), url=i["url"], title=title, module=mid,
             type=_prefixed(i["labels"], "type:") or KIND_TYPE.get(kind, "") or "task", cls=cls, prio=prio, deadline=due,
             parent=keys.get(i.get("parent")), blockedBy=[keys[n] for n in i.get("blocked_by", []) if n in keys],
             stage=stage(i, eff), assignee=(i.get("assignees") or [None])[0], hint=hint, est=p.get("est"), used=p.get("used"),
             status=p.get("status", ""), finding=is_finding(i["labels"]), filed_by=parse_filed_by(body), created=i["created_at"], closed=i.get("closed_at"), author=i.get("author"),
+            text=text, kept=kept, edited=i.get("edited"), analysis=analysis_state(i.get("comments")),
             desc=body.split("**Evidence**")[0].strip()[:700], evidence=[dict(text=t, url=u) for t, u in LINK.findall(body)][:6],
             labels=i["labels"], running=is_running(stage(i, eff)), flags=[f"unauthorised: {n} set by {a}" for n, a in sorted(bad.items())], bad=sorted(bad)))
     with_parents(mods)
@@ -679,16 +712,16 @@ def snapshot_age(generated_at, now, max_h=None):
     return dict(age_h=None if age is None else round(age, 1), stale=age is None or age > max_h, max_age_h=max_h)
 
 
-def collect_command(value):
-    """The project setting `code_collect` (a list of arguments, or one string split like a shell would) -> argv list, or None when unset.
-    Raises ValueError for anything else."""
+def collect_command(value, what="code_collect"):
+    """A command project setting (`code_collect`, `compliance`: a list of arguments, or one string split like a shell would) -> argv list,
+    or None when unset. Raises ValueError for anything else."""
     if value in (None, "", []):
         return None
     if isinstance(value, str):
         return shlex.split(value)
     if isinstance(value, list) and all(isinstance(x, str) and x for x in value):
         return list(value)
-    raise ValueError(f"code_collect: expected a command string or a list of strings (got {value!r})")
+    raise ValueError(f"{what}: expected a command string or a list of strings (got {value!r})")
 
 
 def refresh_outcome(exit_code, metrics_after, now, max_h=None):
@@ -709,7 +742,7 @@ def refresh_outcome(exit_code, metrics_after, now, max_h=None):
 def norm_issue(n):
     """One GraphQL issue node -> the raw issue dict derive() takes."""
     return dict(number=n["number"], id=n.get("databaseId"), title=n["title"], url=n["url"], state=n["state"].lower(),
-                state_reason=(n.get("stateReason") or "").lower() or None, created_at=n["createdAt"], updated_at=n.get("updatedAt"), closed_at=n.get("closedAt"),
+                state_reason=(n.get("stateReason") or "").lower() or None, created_at=n["createdAt"], updated_at=n.get("updatedAt"), closed_at=n.get("closedAt"), edited=n.get("lastEditedAt"),
                 author=(n.get("author") or {}).get("login"), labels=[l["name"] for l in n["labels"]["nodes"]],
                 assignees=[a["login"] for a in n["assignees"]["nodes"]], parent=(n.get("parent") or {}).get("number"),
                 blocked_by=[b["number"] for b in n["blockedBy"]["nodes"]], body=n.get("body") or "",
@@ -1163,7 +1196,9 @@ QUALITY_DEFAULTS = {
     "coverage": {"direction": "high", "ok": 80, "warn": 60},
     "tests": {"direction": "high", "ok": 0.5, "warn": 0.2},
 }
-CARD_SETTING_DEFAULTS = {"churn_colour": "size", "quality_thresholds": QUALITY_DEFAULTS}  # churn: what the overview showed before the option moved to Settings
+QUOTA_SETTING_DEFAULTS = {"quota_plan_start": "2026-11-01",  # the first day of the current plan (and so of the same quota; owner, 2026-11-25, PC-111)
+                          "quota_weak_readings": 20}          # an estimate resting on fewer readings is marked weak
+CARD_SETTING_DEFAULTS = {"churn_colour": "size", "quality_thresholds": QUALITY_DEFAULTS, **QUOTA_SETTING_DEFAULTS}  # churn: what the overview showed before the option moved to Settings
 
 
 def _is_num(v):
@@ -1203,7 +1238,30 @@ def validate_card_settings(form, strict=True):
     v = form.get("churn_colour")
     if v not in CARD_CHURN_COLOURS:
         raise ValueError("churn colour must be one of: " + ", ".join(CARD_CHURN_COLOURS))
-    return {"churn_colour": v, "quality_thresholds": validate_thresholds(form.get("quality_thresholds"), strict)}
+    return {"churn_colour": v, "quality_thresholds": validate_thresholds(form.get("quality_thresholds"), strict), **validate_quota_settings(form, strict)}
+
+
+def validate_quota_settings(form, strict=True):
+    """quota_plan_start (YYYY-MM-DD) and quota_weak_readings (a whole number, at least 1) from a form/file; a missing one gets its default.
+    strict: ValueError on an invalid value; otherwise it falls back to its default."""
+    out = dict(QUOTA_SETTING_DEFAULTS)
+    d, n = form.get("quota_plan_start"), form.get("quota_weak_readings")
+    if d not in (None, ""):
+        try:
+            out["quota_plan_start"] = dt.date.fromisoformat(str(d)).isoformat()
+        except ValueError:
+            if strict:
+                raise ValueError("plan start must be a date YYYY-MM-DD") from None
+    if n not in (None, ""):
+        try:
+            k = int(n) if not isinstance(n, bool) and float(n) == int(float(n)) else 0
+        except (TypeError, ValueError):
+            k = 0
+        if k >= 1:
+            out["quota_weak_readings"] = k
+        elif strict:
+            raise ValueError("readings for a firm estimate must be a whole number of at least 1")
+    return out
 
 
 BAND_WORDS = {"ok": "normal", "warn": "borderline", "bad": "out of range", "none": "no figure"}
@@ -1382,6 +1440,13 @@ def _quota(quota_text, end_day):
     for r in sorted(resets):  # the same window's reset time can wobble by seconds: merge ends closer than 10 minutes
         if not ends or r - ends[-1] > 600:
             ends.append(r)
+    peaks = {}  # vendor window end -> the highest 5-hour percentage read in it; a reading without a reset time belongs to no window
+    for rec in recs:
+        f = rec.get("five_hour")
+        r, v = (f.get("resets_at"), _pct(f, "used_percentage")) if isinstance(f, dict) else (None, None)
+        if _epoch(rec.get("ts")) is not None and v is not None and isinstance(r, (int, float)) and not isinstance(r, bool):
+            e = ends[bisect.bisect_right(ends, r) - 1]
+            peaks[e] = max(peaks.get(e, v), v)
     if end_day is None and reads:
         end_day = dt.datetime.fromtimestamp(reads[-1]["t"], dt.timezone.utc).date()
     days = {}
@@ -1394,7 +1459,8 @@ def _quota(quota_text, end_day):
             for k in ("five_hour", "seven_day"):
                 if r[k] is not None and (d[k] is None or r[k] > d[k]):
                     d[k] = r[k]
-    return ends, dict(days=[dict(key=k, **v) for k, v in days.items()], periods=_periods(reads), anchor=reads[-1]["t"] if reads else None)
+    return ends, dict(days=[dict(key=k, **v) for k, v in days.items()], periods=_periods(reads), anchor=reads[-1]["t"] if reads else None,
+                      windows=[dict(end=e, peak=v) for e, v in sorted(peaks.items())])
 
 
 SESSIONS_SHOWN = 20
@@ -1417,14 +1483,23 @@ def _period_skeleton(anchor):
     return out
 
 
+def record_kind(rec):
+    """A transcript-usage record's `kind`; a record without one (earlier runs) is headless when its source label starts with `headless`."""
+    k = rec.get("kind")
+    return k if k in ("interactive", "headless") else "headless" if str(rec.get("source") or "").startswith("headless") else "interactive"
+
+
 def transcript_report(text, quota=None, aggregate=None):
-    """The counts of interactive sessions (contract transcript-usage.jsonl) -> dict(periods, sources, sessions, aggregate_days), or None when
+    """The counts of interactive sessions (contract transcript-usage.jsonl) -> dict(periods, sources, sessions, aggregate_days, headless), or None when
     neither file exists. periods: the graded rows of _period(), anchored on the newest quota reading (else the newest message or aggregate
     day), each with the message count, the four counts, their sum and the highest 5-hour and weekly percentage of the same period from
-    `quota` (the report of _quota()). sources, sessions: the last HISTORY_DAYS days; sessions are the SESSIONS_SHOWN with the most tokens.
+    `quota` (the report of _quota()); on a day, week or month row the 5-hour value is instead the mean of the peaks of the vendor 5-hour
+    windows ending in the period (five_hour_windows: their number, five_hour_high: the highest; a window without readings is not counted).
+    sources, sessions: the last HISTORY_DAYS days; sessions are the SESSIONS_SHOWN with the most tokens.
     aggregate: the text of stats-cache-usage.jsonl (its contract): its token totals per day count in a period's `total` and `aggregate`
     only (no split, no messages), never in sources or sessions; a day with per-message records ignores them (the exact data wins).
-    aggregate_days: {day: tokens} of the aggregates used."""
+    aggregate_days: {day: tokens} of the aggregates used. Only records of kind interactive (record_kind) count in periods, sources and
+    sessions; headless: the graded rows of the headless records alike (no aggregates), [] when there are none."""
     recs, agg = _json_lines(text), _json_lines(aggregate)
     if recs is None and agg is None:
         return None
@@ -1432,7 +1507,7 @@ def transcript_report(text, quota=None, aggregate=None):
     for rec in recs or []:
         t = _epoch(rec.get("ts"))
         if t is not None:
-            msgs.append((t, str(rec.get("source") or "?"), str(rec.get("session") or "?"), _message_counts(rec)))
+            msgs.append((t, str(rec.get("source") or "?"), str(rec.get("session") or "?"), _message_counts(rec), record_kind(rec) == "headless"))
     exact = {dt.datetime.fromtimestamp(m[0], dt.timezone.utc).date().isoformat() for m in msgs}
     days = {}
     for rec in agg or []:
@@ -1442,14 +1517,15 @@ def transcript_report(text, quota=None, aggregate=None):
     anchor = (quota or {}).get("anchor") or max([m[0] for m in msgs] + [_epoch(f"{d}T00:00:00+00:00") for d in days], default=None)
     empty = lambda: {k: 0 for k in ("messages", *USAGE_FIELDS, "total")}
     peaks = _held_peaks((quota or {}).get("periods", []))
-    rows = {p[:2]: dict(level=p[0], key=p[1], label=p[2], aggregate=0, **empty()) for p in (_period_skeleton(anchor) if anchor is not None else [])}
+    skeleton = _period_skeleton(anchor) if anchor is not None else []
+    rows, hrows = ({p[:2]: dict(level=p[0], key=p[1], label=p[2], aggregate=0, **empty()) for p in skeleton} for _ in range(2))
     sources, sessions = {}, {}
     since = anchor - HISTORY_DAYS * 86400 if anchor is not None else None
-    for t, src, ses, c in msgs:
+    for t, src, ses, c, headless in msgs:
         p = _period(t, anchor)
         if p is not None and p[:2] in rows:
-            _add_messages(rows[p[:2]], c)
-        if t >= since:
+            _add_messages((hrows if headless else rows)[p[:2]], c)
+        if t >= since and not headless:
             _add_messages(sources.setdefault(src, empty()), c)
             row = sessions.setdefault((src, ses), dict(source=src, **empty()))
             _add_messages(row, c)
@@ -1458,11 +1534,21 @@ def transcript_report(text, quota=None, aggregate=None):
         if p is not None and p[:2] in rows:
             rows[p[:2]]["aggregate"] += n
             rows[p[:2]]["total"] += n
-    for k, row in rows.items():
+    wins = {}
+    for w in (quota or {}).get("windows", []) if anchor is not None else []:
+        p = _period(w["end"], anchor)
+        if p is not None and p[0] != "hour":
+            wins.setdefault(p[:2], []).append(w["peak"])
+    for k, row in [(k, r) for k in rows for r in (rows[k], hrows[k])]:  # the interactive rows and the headless ones alike (PC-77)
         q = peaks.get(k, {})
         row["five_hour"], row["seven_day"] = q.get("five_hour"), q.get("seven_day")
+        if row["level"] != "hour":  # the mean of the peaks of the vendor 5-hour windows ending in the period (owner, 2026-11-25, PC-110)
+            ws = wins.get(k, [])
+            row["five_hour"] = round(sum(ws) / len(ws), 1) if ws else None
+            row["five_hour_windows"], row["five_hour_high"] = len(ws), max(ws, default=None)
     top = sorted(sessions.items(), key=lambda kv: (-kv[1]["total"], kv[0]))[:SESSIONS_SHOWN]
-    return dict(periods=_history(rows.values(), [m[0] for m in msgs] + [_epoch(f"{d}T00:00:00+00:00") for d in days]), sources=[dict(key=k, **v) for k, v in sorted(sources.items(), key=lambda kv: (-kv[1]["total"], kv[0]))],
+    return dict(periods=_history(rows.values(), [m[0] for m in msgs if not m[4]] + [_epoch(f"{d}T00:00:00+00:00") for d in days]),
+                headless=_history(hrows.values(), [m[0] for m in msgs if m[4]]), sources=[dict(key=k, **v) for k, v in sorted(sources.items(), key=lambda kv: (-kv[1]["total"], kv[0]))],
                 sessions=[dict(v, key=k[1]) for k, v in top], aggregate_days=dict(sorted(days.items())))
 
 
@@ -1480,14 +1566,96 @@ def _add_messages(into, c):
         into[k] += c[k]
 
 
-def usage_summary(rep):
-    """One project's row for the All projects table: the 90 days' counts, their sum, the number of tasks, the last day with use. None for no data."""
-    if not rep or rep["days"] is None:
-        return None
-    row = {}
-    for k in (*USAGE_FIELDS, "total"):
-        row[k] = sum(d[k] for d in rep["days"])
-    return dict(row, tasks=len(rep["tasks"] or []), last_day=max((d["key"] for d in rep["days"]), default=None))
+MONTHS_SHOWN = 3                          # owner, 2026-11-25 (PC-113): the current month and the two before it
+UNATTENDED_KINDS = ("headless", "unattended")  # a transcript record whose `kind` (PC-77) is one of these is unattended, not interactive
+UNASSIGNED = "unassigned"                  # the row group of transcript sources and aggregate days no project claims
+
+
+def _months(today):
+    y, m = today.year, today.month
+    out = []
+    for _ in range(MONTHS_SHOWN):
+        out.append(f"{y:04d}-{m:02d}")
+        y, m = (y, m - 1) if m > 1 else (y - 1, 12)
+    return out
+
+
+def source_project(label, projects):
+    """The project a transcript source (its label, the transcript folder's name) belongs to, or UNASSIGNED. projects: [dict(name, dir,
+    sources)]. An explicit `sources` list wins; otherwise the default folder rule: the label is the project's directory name or the tool's
+    encoded path of it (ends with "-DIR") or of a worktree inside it ("-DIR--..."); the longest matching directory wins."""
+    for p in projects:
+        if label in (p.get("sources") or ()):
+            return p["name"]
+    hits = [p for p in projects if p.get("dir") and (label == p["dir"] or label.endswith("-" + p["dir"]) or f"-{p['dir']}--" in label
+                                                    or label.startswith(p["dir"] + "--"))]
+    return max(hits, key=lambda p: len(p["dir"]))["name"] if hits else UNASSIGNED
+
+
+def monthly_by_project(projects, transcripts, aggregates, today):
+    """The Token Usage card "Per project, by month". projects: [dict(name, dir, sources, start (YYYY-MM or None), usage (proxy file text or
+    None), plog (processing log text or None))]; transcripts, aggregates: the texts of every transcript-usage and stats-cache-usage file
+    (None for a missing one; a message or day seen in several files counts once); today: a date (UTC).
+    -> dict(months, projects=[dict(name, rows)]), a row per month newest first: dict(month, state) with state "before_start" (the project's
+    start month is later), "no_data" (no source exists at all) or "data" with the four counts, `total`, `interactive` (transcripts),
+    `unattended` (proxy and transcript records of an unattended kind), `aggregate` (stats cache, no split: in `total` only), `tasks`
+    (launched that month) and `last_day`. total = interactive + unattended + aggregate. An aggregate day goes to the only project started
+    by its month, else to UNASSIGNED; so do transcript sources no project claims. The UNASSIGNED group is listed only when it has tokens."""
+    months = _months(today)
+    names = [p["name"] for p in projects]
+    blank = lambda: dict({k: 0 for k in (*USAGE_FIELDS, "total", "interactive", "unattended", "aggregate", "tasks")}, last_day=None)
+    acc = {n: {m: blank() for m in months} for n in names + [UNASSIGNED]}
+
+    def put(name, day, c, kind):
+        r = acc[name].get(day[:7])
+        if r is None:
+            return
+        if kind != "aggregate":
+            _add(r, c)
+        else:
+            r["total"] += c["total"]
+        r[kind] += c["total"]
+        if c["total"] and (r["last_day"] is None or day > r["last_day"]):
+            r["last_day"] = day
+    day_of = lambda t: dt.datetime.fromtimestamp(t, dt.timezone.utc).date().isoformat()
+    seen, exact = set(), set()
+    for text in transcripts:
+        for rec in _json_lines(text) or []:
+            t, key = _epoch(rec.get("ts")), (rec.get("session"), rec.get("agent"), rec.get("message"))
+            if t is None or key in seen:
+                continue
+            seen.add(key)
+            exact.add(day_of(t))
+            put(source_project(str(rec.get("source") or "?"), projects), day_of(t), _counts(rec),
+                "unattended" if rec.get("kind") in UNATTENDED_KINDS else "interactive")
+    agg_seen = set()
+    for text in aggregates:
+        for rec in _json_lines(text) or []:
+            d, n = rec.get("day"), rec.get("tokens")
+            if (rec.get("source") != "stats-cache" or not isinstance(n, int) or isinstance(n, bool) or _epoch(f"{d}T00:00:00+00:00") is None
+                    or d in exact or (d, rec.get("model")) in agg_seen):
+                continue
+            agg_seen.add((d, rec.get("model")))
+            live = [p["name"] for p in projects if not p.get("start") or p["start"] <= d[:7]]
+            put(live[0] if len(live) == 1 else UNASSIGNED, d, dict(total=n), "aggregate")
+    for p in projects:
+        for rec in _json_lines(p.get("usage")) or []:
+            t = _epoch(rec.get("ts"))
+            if t is not None:
+                put(p["name"], day_of(t), _counts(rec), "unattended")
+        for rec in _json_lines(p.get("plog")) or []:
+            t = _epoch(rec.get("time"))
+            if t is not None and rec.get("state") == "launched" and day_of(t)[:7] in acc[p["name"]]:
+                acc[p["name"]][day_of(t)[:7]]["tasks"] += 1
+    shared = any(x is not None for x in (*transcripts, *aggregates))
+    out = []
+    for p in projects:
+        some = shared or p.get("usage") is not None or p.get("plog") is not None
+        out.append(dict(name=p["name"], rows=[dict(month=m, state="before_start") if p.get("start") and m < p["start"] else
+                                               dict(acc[p["name"]][m], month=m, state="data" if some else "no_data") for m in months]))
+    if any(acc[UNASSIGNED][m]["total"] for m in months):
+        out.append(dict(name=UNASSIGNED, rows=[dict(acc[UNASSIGNED][m], month=m, state="data") for m in months]))
+    return dict(months=months, projects=out)
 
 
 def usage_report(usage_text, plog_text, goodbye_tokens, quota_text=None):
@@ -1543,6 +1711,145 @@ def usage_report(usage_text, plog_text, goodbye_tokens, quota_text=None):
                                                               for o in spans.values())))
     rep["tasks"] = None if plog_text is None else tasks
     return rep
+
+
+# -- Quota estimates: the percentage of a window without readings, from its token counts (owner, 2026-11-25, PC-111) --
+WEEK_SECONDS = 7 * 86400
+QUOTA_KINDS = (("seven_day", "weekly", WEEK_SECONDS, True), ("five_hour", "5-hour", WINDOW_SECONDS, False))  # key, name, length, extrapolated
+
+
+def _utc(t, fmt="%Y-%m-%d %H:%M"):
+    return dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime(fmt)
+
+
+def vendor_windows(ends, span, lo, hi, extrapolate=True):
+    """The vendor's windows of length `span` from the known window ends (reset times, sorted, merged), oldest first: (start, end, basis), basis
+    None for a window whose end is a known reset, else the known reset its boundaries are extrapolated from by whole steps of `span`. With
+    `extrapolate` the windows cover lo..hi: before the first known reset back from it; between two, back from the later one (a shorter rest
+    is one window, a rest under an hour widens the first); after the last, forward from it. A known window never reaches back over the previous known end."""
+    out, prev = [], None
+    if extrapolate and ends:
+        e = ends[0] - span
+        while e > lo:
+            out.insert(0, (e - span, e, ends[0]))
+            e -= span
+    for r in ends:
+        if extrapolate and prev is not None:
+            seg, e = [], r - span
+            while e - span >= prev:
+                seg.insert(0, (e - span, e, r))
+                e -= span
+            if seg and e - prev < 3600:  # a wobble of the reset time, not a shift: the first window absorbs it
+                seg[0] = (prev, seg[0][1], r)
+            elif e > prev:
+                seg.insert(0, (prev, e, r))
+            out += seg
+        out.append((r - span if prev is None else max(r - span, prev), r, None))
+        prev = r
+    while extrapolate and prev is not None and prev <= hi:
+        out.append((prev, prev + span, ends[-1]))
+        prev += span
+    return out
+
+
+def estimate_percent(tokens, calibration):
+    """The quota percentage `tokens` stand for under a calibration of quota_estimates() (one decimal), None without one."""
+    return round(tokens / calibration["factor"], 1) if calibration else None
+
+
+def _quota_kind(key, name, span, extrapolate, reads, events, plan, weak, lo, hi):
+    """The rows and the calibration of one window kind (see quota_estimates)."""
+    ends = []
+    for t, rec in reads:
+        r = _num(rec[key].get("resets_at")) if isinstance(rec.get(key), dict) else None
+        if r is not None:
+            ends.append(r)
+    merged = []
+    for r in sorted(ends):  # the same window's reset time wobbles by seconds to minutes
+        if not merged or r - merged[-1] > 600:
+            merged.append(r)
+    new = lambda s, e, kind, basis: dict(start=s, end=e, kind=kind, basis=basis, tokens=0, cal_tokens=0, readings=0, peak=None, peak_t=None)
+    vend = [new(s, e, "vendor" if b is None else "extrapolated", b) for s, e, b in vendor_windows(merged, span, lo, hi, extrapolate)]
+    starts, fixed = [w["start"] for w in vend], {}
+
+    def window(t):
+        i = bisect.bisect_right(starts, t) - 1
+        if i >= 0 and t < vend[i]["end"]:
+            return vend[i]
+        b = t - t % span
+        return fixed.setdefault(b, new(b, b + span, "fixed", None))
+    for t, rec in reads:  # the readings first: the peak's time decides which tokens calibrate
+        p = _pct(rec.get(key), "used_percentage")
+        if p is not None:
+            w = window(t)
+            w["readings"] += 1
+            if w["peak"] is None or p >= w["peak"]:
+                w["peak"], w["peak_t"] = p, t
+    for t, n in events:
+        w = window(t)
+        w["tokens"] += n
+        if w["peak_t"] is not None and t <= w["peak_t"]:
+            w["cal_tokens"] += n
+    wins = sorted([w for w in vend if w["end"] > lo] + list(fixed.values()), key=lambda w: (w["start"], w["end"]))
+    base = [w for w in wins if w["start"] >= plan and w["peak"] and w["cal_tokens"] > 0]
+    cal = None
+    if base:
+        cal = dict(factor=sum(w["cal_tokens"] for w in base) / sum(w["peak"] for w in base), readings=sum(w["readings"] for w in base),
+                   windows=len(base), first=_utc(min(w["start"] for w in base), "%Y-%m-%d"), last=_utc(max(w["end"] for w in base), "%Y-%m-%d"))
+        cal["weak"] = cal["readings"] < weak
+    nf = lambda x: f"{round(x):,}"
+    rows = []
+    for w in wins:
+        if not (w["tokens"] or w["readings"] or (extrapolate and w["kind"] != "fixed")):
+            continue
+        row = dict(start=_iso(w["start"]), end=_iso(w["end"]), kind=w["kind"], tokens=w["tokens"], readings=w["readings"], percent=None, weak=False)
+        if w["peak"] is not None:
+            row.update(state="measured", percent=w["peak"], note=f"Measured: the highest of {w['readings']} readings in this window.")
+        elif w["start"] < plan:
+            row.update(state="other plan", note=f"No readings, other plan: before the plan period that starts on {_utc(plan, '%Y-%m-%d')} the quota "
+                                                 "was different and the calibration does not carry over.")
+        elif cal is None:
+            row.update(state="none", note=f"No calibration yet: no {name} window of the plan period has a reading and token counts.")
+        else:
+            row.update(state="estimate", percent=estimate_percent(w["tokens"], cal), weak=cal["weak"],
+                       note=f"Estimate: {nf(w['tokens'])} tokens at {nf(cal['factor'])} tokens per percent, calibrated on {cal['readings']} readings in "
+                            f"{cal['windows']} {name} windows with readings, {cal['first']} to {cal['last']} (UTC)."
+                            + (f" Weak: fewer than {weak} readings." if cal["weak"] else ""))
+        if w["kind"] == "extrapolated":
+            row["note"] += (f" No reset is known for this window: its boundaries are extrapolated by whole {span // 86400}-day steps from the known "
+                            f"reset of {_utc(w['basis'])} UTC.")
+        elif w["kind"] == "fixed":
+            row["note"] += f" No vendor window is known here: a fixed {name} block counted from the epoch (UTC)."
+        rows.append(row)
+    return dict(calibration=cal, rows=rows)
+
+
+def quota_estimates(quota_text, usage_text=None, transcript_text=None, settings=None):
+    """The quota percentage per vendor window, measured or estimated (owner, 2026-11-25, PC-111), for the weekly and the 5-hour windows alike.
+    quota_text: quota-history.jsonl; usage_text / transcript_text: the token counts of the Workers (proxy) and of the interactive sessions;
+    settings: quota_plan_start and quota_weak_readings (QUOTA_SETTING_DEFAULTS). -> dict(plan_start, weak_readings, weekly, five_hour) or None
+    when there is neither a reading nor a token count; each kind: dict(calibration, rows oldest first, the last HISTORY_DAYS days).
+    Windows: the vendor's, from the readings' reset times (the weekly ones extrapolated by whole 7-day steps where no reset is known, kind
+    "extrapolated"; a 5-hour period outside every known window is a fixed block counted from the epoch, kind "fixed"). A window's tokens are
+    the sum of the four counts of every request and message in it. Calibration: tokens per percent = the tokens up to the highest reading of
+    each window of the plan period with a reading above zero and token counts, summed, over those readings summed; `readings` counts them all.
+    A row: measured (its highest reading; always wins), estimate (tokens / factor, `weak` below quota_weak_readings readings), none (no
+    calibration yet: no number) or other plan (the window starts before the plan period: never estimated); `note` is the tooltip."""
+    s = validate_quota_settings(settings or {}, strict=False)
+    plan = dt.datetime.fromisoformat(s["quota_plan_start"]).replace(tzinfo=dt.timezone.utc).timestamp()
+    reads = [(t, rec) for rec in _json_lines(quota_text) or [] if (t := _epoch(rec.get("ts"))) is not None]
+    events = [(t, _counts(rec)["total"]) for text in (usage_text, transcript_text) for rec in _json_lines(text) or [] if (t := _epoch(rec.get("ts"))) is not None]
+    times = [t for t, _ in reads] + [t for t, _ in events]
+    if not times:
+        return None
+    hi = max(times)
+    lo = max(min(times), hi - HISTORY_DAYS * 86400)
+    reads = sorted((r for r in reads if r[0] >= lo), key=lambda r: r[0])
+    events = [e for e in events if e[0] >= lo]
+    out = dict(plan_start=s["quota_plan_start"], weak_readings=s["quota_weak_readings"])
+    for key, name, span, extrapolate in QUOTA_KINDS:
+        out[key] = _quota_kind(key, name, span, extrapolate, reads, events, plan, s["quota_weak_readings"], lo, hi)
+    return out
 
 
 # ---------- gaps in the project metadata (checker: tools/metadata_gaps.py, contract: docs/contracts/metadata-gaps.md) ----------
@@ -1927,3 +2234,31 @@ def compliance_summary(text):
         return None
     n = re.search(r"(?m)^(\d+) violation\(s\):", text)
     return dict(checked=m.group(1), release=m.group(2), violations=int(n.group(1)) if n else 0)
+
+# ---------- compliance report (written by the compliance check, PC-108; read by Settings > Policies) ----------
+COMPLIANCE_REPORT = "docs/compliance/compliance-report.md"  # one current report per project, inside its clone, overwritten by each run
+
+
+def parse_compliance(text):
+    """The compliance report (docs/contracts/compliance-report.md) -> dict(checked, violations=[{file, line, passage, rule, reason}]).
+    `checked` is the `Checked:` line (None when absent). Only the `## Violations` section is read; "none" there means no violation."""
+    m = re.search(r"^Checked:\s*(.+?)\s*$", text, re.M)
+    sec = re.search(r"^## Violations[^\n]*\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+    out = []
+    for block in re.split(r"^### ", sec.group(1) if sec else "", flags=re.M)[1:]:
+        head, *body = block.split("\n")
+        file, _, line = head.strip().rpartition(":") if re.search(r":\d+$", head.strip()) else (head.strip(), "", "")
+        field = lambda k: next((b.split(":", 1)[1].strip() for b in body if re.match(rf"-\s*{k}\s*:", b, re.I)), "")
+        out.append(dict(file=file, line=int(line) if line else None, passage=" ".join(b.lstrip("> ").rstrip() for b in body if b.startswith(">")).strip(),
+                        rule=field("Rule"), reason=field("Reason")))
+    return dict(checked=m.group(1) if m else None, violations=out)
+
+
+def compliance_run_state(status, alive):
+    """The run status file's record (or None) and whether its process still lives -> the state the page shows:
+    idle (never started here), running, done, failed (exit code not 0), interrupted (recorded as running, but the process is gone)."""
+    if not status:
+        return "idle"
+    if status.get("state") == "running":
+        return "running" if alive else "interrupted"
+    return "done" if status.get("exit") == 0 else "failed"

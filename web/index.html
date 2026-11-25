@@ -136,6 +136,9 @@ tr.blocked{background:var(--danger-tint)}tr.blocked td:first-child{box-shadow:in
 /* Churn bands reuse the priority palette (red, amber, blue are told apart without relying on hue) and always carry a symbol and a word. */
 .band{display:inline-block;border-radius:6px;padding:1px 8px;font-size:12px;font-weight:600;white-space:nowrap}
 .band-hot{background:var(--p1);color:var(--p1-ink)}.band-mid{background:var(--p2);color:var(--p2-ink)}.band-cold{background:var(--p3);color:var(--p3-ink)}
+.pbar{position:relative;display:inline-block;vertical-align:middle;flex:none;width:200px;height:12px;border-radius:1px;background:var(--line);overflow:hidden}
+.pbar i{position:absolute;left:0;top:0;bottom:0;background:var(--accent)}.pbar s{position:absolute;top:0;bottom:0;width:1px;margin-left:-1px;background:var(--muted);opacity:.7}
+.pscale{position:relative;display:inline-block;width:200px;height:1em;font-size:11px;font-weight:400;color:var(--muted)}.pscale span{position:absolute;transform:translateX(-50%)}.pscale span:first-child{transform:none}.pscale span:last-child{transform:translateX(-100%)}
 .qbar{height:6px;border-radius:3px;background:var(--q-none)}.qbar.qb-ok{background:var(--q-ok)}.qbar.qb-warn{background:var(--q-warn)}.qbar.qb-bad{background:var(--q-bad)}
 .qw{font-size:12px;font-weight:600}.qleg{display:flex;flex-wrap:wrap;gap:14px;font-size:13px}.qleg i{display:inline-block;width:18px;height:6px;border-radius:3px;margin-right:6px;vertical-align:middle}
 .qth{display:grid;grid-template-columns:minmax(120px,1fr) 80px 90px 90px;gap:8px;align-items:center}.qth input{min-height:36px;width:100%}
@@ -224,6 +227,7 @@ let PROJ=null,PROJS=[],OFF=null;  /* OFF: set when this is an offline copy from 
 const NOMETA=()=>({footprint:{status:'missing'},churn:{status:'missing'},ambiguity:{status:'missing'}});
 let QL=null;  /* /api/queue: the local part of the Task Queue (Dispatcher state file, processing log, settings); never needs GitHub */
 let Q={questions:[],counts:{},projects:[]};  /* open questions of every project: /api/questions, not tied to the selected project */
+let COMP={steering:false,projects:[]},compTimer=0;  /* /api/compliance: every project's compliance report and check run (local files), polled while a run is on */
 let USE=null,SET=null,CSET=null,D=null,CODE={wired:false,modules:{}},FEED=[],ACT=[],MODULES=[],RULES={configured:false},META=NOMETA();
 const SVGC={};
 const MODDOC={};  /* module page content (/api/moduledoc) by project:id */
@@ -239,6 +243,8 @@ function stageBar(r){const n=STAGES.reduce((a,s)=>a+r[s],0);if(!n)return '';
   return STAGES.slice(0,6).map(s=>r[s]?'<i style="width:'+(r[s]/n*100)+'%;background:'+col[s]+'"></i>':'').join('');}
 /* The size every module list is ordered by (logic.order_modules on the server: biggest first, ties by name, unsized after, Unassigned last). */
 const lines=m=>m.lines.toLocaleString('en-US')+' lines';
+/* the size a module was ordered by, in a sub-module's meta line (PC-89, PC-90): its code lines, or nothing when it has none */
+const sizeSum=m=>m.lines==null?'<span class="muted">size: no data</span> ':'<span class="muted">'+lines(m)+'</span> ';
 const sizeNote=m=>m.lines!=null?' · '+lines(m):'';
 /* Two chip rows: the top-level modules, then (indented) the sub-modules of the selected one. ex = only tasks at the module level itself. */
 function modFilter(cur,act,first,allOf,unsorted,extra){
@@ -257,6 +263,13 @@ async function api(path,opt){const r=await fetch(pq(path),opt);let j={};try{j=aw
 async function loadPrs(fresh){  /* never blocks or fails anything else: its own request, its own state */
   try{PRS=await api('/api/rulesprs'+(fresh?'?fresh=1':''));}catch(e){PRS={configured:true,available:false,pending:[],error:e.message};}
 }
+async function loadCompliance(){
+  try{COMP=await fetch('/api/compliance').then(async r=>{const j=await r.json();if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j;});}
+  catch(e){COMP=Object.assign({},COMP,{error:String(e.message||e)});}
+  clearTimeout(compTimer);
+  if(COMP.projects.some(p=>p.run.state==='running'))compTimer=setTimeout(async()=>{await loadCompliance();if(UI.route==='settings'&&UI.setSec==='policies'||UI.route==='cockpit')render();},3000);
+}
+const compMine=()=>COMP.projects.find(p=>p.name===(PROJ||(D&&D.source.name)))||COMP.projects[0];
 async function loadQuestions(fresh){  /* fresh: only the owner's Refresh click on the Open questions pane */
   try{Q=await fetch('/api/questions'+(fresh?'?fresh=1':'')).then(async r=>{const j=await r.json();if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j;});}
   catch(e){Q=Object.assign({},Q,{projects:[{name:'all',error:String(e.message||e)}]});}
@@ -272,6 +285,7 @@ async function reload(pane){
         never waiting for the GitHub requests below */
   try{
     const [c,mt,se,cs,us,ql]=await Promise.all([soft(api('/api/code'),{wired:false,modules:{},diagrams:[]},'code'),api('/api/cardmeta').catch(e=>null),api('/api/settings').catch(e=>null),api('/api/cardsettings').catch(e=>null),api('/api/usage').catch(e=>null),api('/api/queue').catch(e=>null)]);
+    await loadCompliance();
     if(mine!==PROJ)return;
     SET=se;CSET=cs;USE=us;QL=ql;CODE=c;META=mt||NOMETA();if(!D)MODULES=c.mods||[];  /* the Code tab's modules come from the local module map, not from GitHub */
     if(!CODE.modules[UI.codeMod]&&!MODULES.some(m=>m.id===UI.codeMod&&m.parent)){const k=MODULES.find(m=>!m.virtual);UI.codeMod=CODE.modules[k&&k.id]?k.id:'unassigned';}
@@ -408,7 +422,7 @@ function subBlock(m){
   const rows=m.children.map(id=>MODULES.find(x=>x.id===id)).map(q=>{const n=STAGES.reduce((a,s)=>a+q.rollup[s],0);
     return '<div class="subrow"><button class="linkbtn" data-act="mod" data-m="'+q.id+'"><b>'+esc(q.short)+'</b>'+(q.desc?'<span class="muted" style="font-size:12px;display:block">'+esc(q.desc)+'</span>':'')+'</button><span class="muted">'+n+'</span><span class="bar" aria-hidden="true">'+stageBar(q.rollup)+'</span>'
      +'<div style="grid-column:1/-1">'+dlForm(q,D.modDeadline[q.id]||'',true)
-     +'<details class="meta" style="border:0;padding:0"><summary>'+churnSum(q.id)+' <span class="muted">more</span></summary>'+metaBlock(q.id)+'</details></div></div>';}).join('');
+     +'<details class="meta" style="border:0;padding:0"><summary>'+sizeSum(q)+churnSum(q.id)+' <span class="muted">more</span></summary>'+metaBlock(q.id)+'</details></div></div>';}).join('');
   const un=STAGES.reduce((a,s)=>a+m.counts[s],0);
   return '<div style="display:flex;flex-direction:column;gap:2px"><span class="label">Sub-modules</span>'+rows+'<span class="muted" style="font-size:12px">'
    +(un?'<button class="linkbtn" style="color:var(--accent)" data-act="mod" data-m="'+m.id+'" data-x="1">'+un+' tasks only at module level</button>':'No tasks only at module level')+'. Deadlines inherit: task, sub-module, module.</span></div>';}
@@ -419,7 +433,7 @@ function vCockpit(){
   const blocked=D.tasks.filter(t=>isBlocked(D,t)).length;
   let h='<div class="page"><div class="card strip"><span class="label" style="color:var(--accent)">Needs you</span>'
    +'<span><b>'+emb+'</b> embryos waiting for release</span><span><b>'+open.length+'</b> change proposals</span>'
-   +'<span><b>'+od+'</b> overdue</span>'+(RULES.configured?'<span><b>'+(unreviewed().length+pendingPrs().length)+'</b> policy changes to review</span>':'')+'<span><button class="linkbtn" data-act="go" data-r="questions"><b>'+Q.questions.length+'</b> open questions</button></span><span><b>'+blocked+'</b> blocked</span><span class="'+(D.unauthorised?'warnline':'muted')+'"><b>'+D.unauthorised+'</b> unauthorised changes</span>'
+   +'<span><b>'+od+'</b> overdue</span>'+(RULES.configured?'<span><b>'+(unreviewed().length+pendingPrs().length)+'</b> policy changes to review</span>':'')+(compCount(compMine())?'<span class="warnline"><button class="linkbtn" data-act="go" data-r="rules"><b>'+compCount(compMine())+'</b> policy violations</button></span>':'')+'<span><button class="linkbtn" data-act="go" data-r="questions"><b>'+Q.questions.length+'</b> open questions</button></span><span><b>'+blocked+'</b> blocked</span><span class="'+(D.unauthorised?'warnline':'muted')+'"><b>'+D.unauthorised+'</b> unauthorised changes</span>'
    +'<button class="btn primary" data-act="go" data-r="backlog" style="margin-left:auto">Open task queue</button></div>';
   if(RULES.configured)h+='<div class="card" style="border-color:var(--warn-ink)"><div class="row spread"><h2>Policies changed</h2><button class="btn small" data-act="go" data-r="rules">Review policy changes</button></div><div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">'
    +(ruleChanges().slice(0,3).map(r=>'<div class="row" style="gap:10px"><span class="mono muted" style="width:86px">'+r.date+'</span><span class="chip rc">policy change</span><span><b class="mono">'+esc(r.files.map(f=>f.path).slice(0,2).join(', '))+'</b> '+esc(r.subject)+'</span>'+(isUn(r)?'<span class="chip blocks">to review</span>':'<span class="muted" style="font-size:12px">reviewed</span>')+'</div>').join('')||'<span class="muted">No rule changes in the last 90 days.</span>')
@@ -530,17 +544,32 @@ function compLine(c){
   return '<p class="'+(c.violations?'warnline':'muted')+'" style="font-size:12px;margin:6px 0 0">Compliance check '+esc(c.checked)+' against constitution '+esc(c.release)+': '
    +(c.violations?c.violations+' violation'+(c.violations===1?'':'s')+' (report compliance-report.md in the data folder).':'compliant.')+'</p>';
 }
+
+/* safe-block:start (PC-114) */
+/* A time as "YYYY-MM-DD HH:MM" (UTC): an ISO string as given, a number as epoch seconds; anything unreadable gives "?", never an exception. */
+function t0(x){
+  if(typeof x==='number'){const d=new Date(x*1000);x=isNaN(d)?'':d.toISOString();}
+  return typeof x==='string'&&x?esc(x.replace('T',' ').slice(0,16)):'?';
+}
+/* One block (card) of a view: its HTML, or, when drawing it throws, an error card in its place (logged to the console), so one bad value
+   cannot leave a whole tab undrawn. A whole tab passes page=true: its error card is put in a page frame. */
+function block(name,fn,page){
+  try{return fn();}
+  catch(e){console.error('Cockpit: block "'+name+'" could not be drawn:',e);
+    const c='<div class="card" role="alert" data-block-error="'+esc(name)+'"><b class="warnline">This block could not be drawn: '+esc(String(e&&e.message||e))+'</b> <span class="muted">('+esc(name)+')</span></div>';
+    return page?'<div class="page">'+c+'</div>':c;}
+}
+/* safe-block:end */
 function vQueueLocal(){
   const nf=t=>D&&D.tasks.find(x=>x.key===t),L=QL;
   if(!L)return '<div class="card"><h2>Being processed now</h2><span class="muted">The Dispatcher files could not be read.</span></div>';
-  const t0=x=>typeof x==='string'&&x?esc(x.replace('T',' ').slice(0,16)):'?';
   return '<div class="card"><h2>Being processed now</h2>'+(L.workers.length?L.workers.map(w=>{const t=nf(w.task);return '<div class="row" style="gap:10px;margin-top:8px"><b class="mono">'+esc(w.worker)+'</b><b class="mono">'+esc(w.task||'?')+'</b>'+(t?'<button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button>':'')+'<span class="muted">launched '+t0(w.launched)+(w.started?'':' · starting')+'</span></div>';}).join(''):'<p class="muted" style="margin:8px 0 0">No Worker is running now.</p>')
    +'<p class="muted" style="font-size:12px;margin:10px 0 0">From the Dispatcher: '+(L.settings.values.enabled?'on':'off')+', '+L.settings.values.workers+' Worker'+(L.settings.values.workers===1?'':'s')+' at most, every '+L.settings.values.interval_minutes+' min (settings in the Settings tab).</p>'
    +bkLine(L.backup)
    +(L.log.length?'<details style="margin-top:8px"><summary class="muted">Processing log, newest '+L.log.length+'</summary><div class="mono" style="font-size:12px;margin-top:6px">'+L.log.map(r=>t0(r.time)+' '+esc(r.heartbeat?r.heartbeat:[r.task,r.state,r.reason,r.worker].filter(Boolean).join(' '))).join('<br>')+'</div></details>':'')+'</div>';
 }
 function vBacklog(){
-  if(!D)return '<div class="page">'+vQueueLocal()+'<p class="muted">The task list needs GitHub and is not available yet.</p></div>';
+  if(!D)return '<div class="page">'+block('Being processed now',vQueueLocal)+'<p class="muted">The task list needs GitHub and is not available yet.</p></div>';
   const rq=ranked(D),nx=rq[0];
   const f=UI.filter;let ts=D.tasks.slice();
   if(UI.mod!=='all')ts=ts.filter(t=>UI.ex?t.module===UI.mod:inMod(t.module,UI.mod));
@@ -548,14 +577,14 @@ function vBacklog(){
   ts.sort((a,b)=>sortKey(a)-sortKey(b)||((a.prio||9)-(b.prio||9))||((eff(D,a).d||'9').localeCompare(eff(D,b).d||'9'))||a.key.localeCompare(b.key,undefined,{numeric:true}));
   const fl=['all','embryo','released','wip','unmerged','failed','merged','cancelled','blocked'];
   const mp=modPage();
-  let h='<div class="page">'+(mp?modFilter(UI.mod,'modf','all modules','all of {}',true)+vModPage(UI.mod)+'<h2>Tasks</h2>':'')+''+vQueueLocal()+'<div class="card">'+'<p style="margin:12px 0 0">'+(nx?'Next up: <button class="linkbtn" data-act="open" data-k="'+nx.key+'"><b>'+esc(nx.key)+'</b> '+esc(nx.title)+'</button> <span class="muted">'+(nx.prio?'P'+nx.prio:'no priority')+' · '+(eff(D,nx).d?'due '+eff(D,nx).d:'no deadline')+' · unblocks '+blocksCount(D,nx)+' · '+nx.cls+'</span> '+(SIM()?'<button class="btn small" data-act="take" data-k="'+nx.key+'">Simulate: Orchestrator takes it</button>':''):'<span class="muted">Nothing released and unblocked.</span>')+'</p>'
-   +'<p class="muted" style="font-size:12px;margin:6px 0 0">Ranking (column #): your priority, then deadline, then tasks that unblock the most, then must before nice.</p></div>'
+  let h='<div class="page">'+(mp?block('Module filter',()=>modFilter(UI.mod,'modf','all modules','all of {}',true))+block('Module page',()=>vModPage(UI.mod))+'<h2>Tasks</h2>':'')+block('Being processed now',vQueueLocal)+block('Next up',()=>'<div class="card">'+'<p style="margin:12px 0 0">'+(nx?'Next up: <button class="linkbtn" data-act="open" data-k="'+nx.key+'"><b>'+esc(nx.key)+'</b> '+esc(nx.title)+'</button> <span class="muted">'+(nx.prio?'P'+nx.prio:'no priority')+' · '+(eff(D,nx).d?'due '+eff(D,nx).d:'no deadline')+' · unblocks '+blocksCount(D,nx)+' · '+nx.cls+'</span> '+(SIM()?'<button class="btn small" data-act="take" data-k="'+nx.key+'">Simulate: Orchestrator takes it</button>':''):'<span class="muted">Nothing released and unblocked.</span>')+'</p>'
+   +'<p class="muted" style="font-size:12px;margin:6px 0 0">Ranking (column #): your priority, then deadline, then tasks that unblock the most, then must before nice.</p></div>')
    +'<div class="row spread"><div><h1>Task Queue</h1><span class="muted">'+ts.length+' of '+D.tasks.length+' tasks</span></div>'+(ST()?'<button class="btn primary" data-act="new">New task</button>':'')+'</div>';
   h+='<div class="filters" role="group" aria-label="Stage filter">'+fl.map(x=>'<button class="f" data-act="filter" data-v="'+x+'" aria-pressed="'+(f===x)+'">'+(STAGE_LABEL[x]||x)+'</button>').join('')+'</div>';
   if(!mp)h+=modFilter(UI.mod,'modf','all modules','all of {}',true);
   h+='<div class="row muted" style="font-size:13px;gap:8px">Priority <span class="chip p1">P1</span><span class="chip p2">P2</span><span class="chip p3">P3</span><span class="chip p0">none yet</span> &nbsp; Blockers <span class="chip blk">blocked by</span><span class="chip blocks">blocks n</span> &nbsp; <span class="inh">↳ italic = inherited deadline</span></div>';
   h+='<div class="tblbox"><table><thead><tr><th title="Rank in the Orchestrator queue">#</th><th>ID</th><th>Title</th><th>Module</th><th>Priority</th><th>Class</th><th>Deadline</th><th>Blockers</th><th>Stage</th>'+(ST()?'<th class="act-col">Submit</th><th class="act-col">Cancel</th>':'')+'</tr></thead><tbody>';
-  ts.forEach(t=>{h+='<tr class="'+(isBlocked(D,t)?'blocked':'')+'"><td class="muted">'+(rq.indexOf(t)>=0?rq.indexOf(t)+1:'')+'</td><td class="mono">'+esc(t.key)+'</td><td><button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button> '+findingChip(t)+'</td><td>'+modCell(t.module)+'</td><td>'+prioChip(t)+'</td><td class="muted">'+t.cls+'</td><td>'+dlHtml(t)+'</td><td>'+blockHtml(t)+'</td><td>'+stageHtml(t)+'</td>'+(ST()?'<td class="act-col">'+(t.stage==='embryo'?armBtn('submit',t):'<span class="muted">—</span>')+'</td><td class="act-col">'+(isOpen(t)?armBtn('cancel',t):'<span class="muted">—</span>')+'</td>':'')+'</tr>';});
+  ts.forEach(t=>{h+='<tr class="'+(isBlocked(D,t)?'blocked':'')+'"><td class="muted">'+(rq.indexOf(t)>=0?rq.indexOf(t)+1:'')+'</td><td class="mono">'+esc(t.key)+'</td><td><button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button> '+findingChip(t)+editedChip(t)+'</td><td>'+modCell(t.module)+'</td><td>'+prioChip(t)+'</td><td class="muted">'+t.cls+'</td><td>'+dlHtml(t)+'</td><td>'+blockHtml(t)+'</td><td>'+stageHtml(t)+'</td>'+(ST()?'<td class="act-col">'+(t.stage==='embryo'?armBtn('submit',t):'<span class="muted">—</span>')+'</td><td class="act-col">'+(isOpen(t)?armBtn('cancel',t):'<span class="muted">—</span>')+'</td>':'')+'</tr>';});
   if(!ts.length)h+='<tr><td colspan="'+(ST()?11:9)+'" class="muted">Nothing matches this filter.</td></tr>';
   return h+'</tbody></table></div><p class="muted" style="font-size:13px;margin:0">'+(ST()?'Submit releases an embryo as P2 without a deadline (use the task view for another priority or a deadline). Both buttons ask once more before they act. ':'')+'Only you set or move a deadline. A task without one inherits its parent’s, then its sub-module’s or module’s.</p></div>';
 }
@@ -616,10 +645,15 @@ function cardSettingsForm(){
   return '<form class="card" data-form="cardsettings" style="display:flex;flex-direction:column;gap:12px"><h2>Module cards</h2><div class="field"><label for="s_churn_colour">Colour churn by</label>'
    +'<select id="s_churn_colour" name="churn_colour"'+(ro?' disabled':'')+'>'+o('size','size (changed lines / current lines)')+o('absolute','absolute churn (lines added + removed)')+'</select>'
    +'<span class="muted" style="font-size:12px">Sets the colour of the churn chips on the overview and the module cards.</span></div>'
-   +qThForm(ro)+(ro?'':'<div><button class="btn primary">Save</button></div>')+'</form>';}
+   +qThForm(ro)
+   +'<h3>Quota estimates</h3><div class="field"><label for="s_quota_plan_start">Plan period starts on</label><input id="s_quota_plan_start" name="quota_plan_start" type="date" value="'+esc(String(CSET.values.quota_plan_start||''))+'"'+(ro?' disabled':'')+'>'
+   +'<span class="muted" style="font-size:12px">The first day of the current plan (UTC): quota percentages are estimated only for windows from this day on; earlier ones show “no readings, other plan”.</span></div>'
+   +'<div class="field"><label for="s_quota_weak_readings">Readings for a firm estimate</label><input id="s_quota_weak_readings" name="quota_weak_readings" type="number" step="1" min="1" value="'+esc(String(CSET.values.quota_weak_readings||''))+'"'+(ro?' disabled':'')+'>'
+   +'<span class="muted" style="font-size:12px">An estimate resting on fewer readings is marked weak.</span></div>'
+   +(ro?'':'<div><button class="btn primary">Save</button></div>')+'</form>';}
 function vSettings(){
   const sec=UI.setSec,head='<div class="page"><div><h1>Settings</h1></div><div class="filters" role="group" aria-label="Section">'+[['dispatcher','Dispatcher settings'],['cards','Module cards'],['policies','Policies']].map(x=>'<button class="f" data-act="setsec" data-v="'+x[0]+'" aria-pressed="'+(sec===x[0])+'">'+x[1]+'</button>').join('')+'</div>';
-  if(sec==='policies')return head+vRules()+'</div>';
+  if(sec==='policies')return head+vCompliance()+vRules()+'</div>';
   const dh='<span class="muted">How the Dispatcher behaves. It reads the file at each firing.</span>';
   const cards=CSET?cardSettingsForm():'<div class="card"><span class="muted">Module card settings could not be loaded.</span></div>';
   if(sec==='cards')return head+cards+'</div>';
@@ -637,21 +671,27 @@ const NOUSE='no usage in the last 90 days';  // the per-day and per-window table
 /* Every period table of the Token Usage page: the most recent period at the top, a period without data has no row (owner, 2026-11-24).
    rows: as the server lists them, oldest first; has(r): whether the row has data. */
 function recentRows(rows,has){return (rows||[]).filter(has||(()=>true)).reverse();}
+/* One bar for every percentage bar of the Token Usage page (PC-112): a fixed 200 px track (not sized by the table layout), square ends, ticks at 25, 50, 75 and 100 %;
+   the fill width is a pure, non-decreasing function of the value, 0 for no value, capped at the full track above 100, with no minimum width. */
+const PTICKS=[25,50,75,100];
+function pctWidth(v){v=Number(v);return v>0?Math.min(100,v):0;}
+function pctBar(v,label){return '<span class="pbar" role="img" aria-label="'+esc(label)+'"><i style="width:'+pctWidth(v)+'%"></i>'+PTICKS.map(t=>'<s data-tick="'+t+'" style="left:'+t+'%"></s>').join('')+'</span>';}
+function pctScale(){return '<span class="pscale" aria-hidden="true">'+[0].concat(PTICKS).map(t=>'<span style="left:'+t+'%">'+t+(t===100?' %':'')+'</span>').join('')+'</span>';}
 function usageTable(title,rows,empty){
   const nf=x=>x.toLocaleString('en-US');
   if(!rows)return '<div class="card"><h2>'+title+'</h2><span class="muted">no data</span></div>';
   const mx=Math.max(1,...rows.map(r=>r.total));
-  return '<div class="card"><h2>'+title+'</h2><div class="tblbox narrow"><table><thead><tr><th>'+title.split(' ').pop()+'</th>'+USEF.map(f=>'<th>'+f[1]+'</th>').join('')+'<th></th></tr></thead><tbody>'
-   +rows.map(r=>'<tr><td class="mono">'+esc(r.key)+'</td>'+USEF.map(f=>'<td class="mono">'+nf(r[f[0]])+'</td>').join('')+'<td style="width:120px"><div class="bar" aria-hidden="true"><i style="width:'+(100*r.total/mx)+'%;background:var(--accent)"></i></div></td></tr>').join('')
+  return '<div class="card"><h2>'+title+'</h2><span class="muted">Bar: share of the largest row listed (0 to 100 %), ticks at 25, 50, 75 and 100 %.</span><div class="tblbox narrow"><table><thead><tr><th>'+title.split(' ').pop()+'</th>'+USEF.map(f=>'<th>'+f[1]+'</th>').join('')+'<th>'+pctScale()+'</th></tr></thead><tbody>'
+   +rows.map(r=>'<tr><td class="mono">'+esc(r.key)+'</td>'+USEF.map(f=>'<td class="mono">'+nf(r[f[0]])+'</td>').join('')+'<td>'+pctBar(100*r.total/mx,Math.round(100*r.total/mx)+' % of the largest row')+'</td></tr>').join('')
    +(rows.length?'':'<tr><td class="muted" colspan="7">'+(empty||'no data')+'</td></tr>')+'</tbody></table></div></div>';
 }
 function quotaCard(q){
   const T='Vendor quota used';
   if(!q)return '<div class="card"><h2>'+T+'</h2><span class="muted">no data</span></div>';
-  const pc=x=>x==null?'':x+' %',bar=x=>'<div class="bar" aria-hidden="true"><i style="width:'+Math.min(100,x||0)+'%;background:var(--accent)"></i></div>';
+  const pc=x=>x==null?'':x+' %',bar=(x,w)=>x==null?'':pctBar(x,w+' quota: '+x+' % used');
   const rs=recentRows(q.days,d=>d.five_hour!=null||d.seven_day!=null);
-  return '<div class="card"><h2>'+T+' per day (highest reading)</h2><div class="tblbox narrow"><table><thead><tr><th>Day</th><th>5-hour</th><th></th><th>Weekly</th><th></th></tr></thead><tbody>'
-   +rs.map(d=>'<tr><td class="mono">'+esc(d.key)+'</td><td class="mono">'+pc(d.five_hour)+'</td><td style="width:120px">'+bar(d.five_hour)+'</td><td class="mono">'+pc(d.seven_day)+'</td><td style="width:120px">'+bar(d.seven_day)+'</td></tr>').join('')
+  return '<div class="card"><h2>'+T+' per day (highest reading)</h2><span class="muted">Bars: share of the quota used (0 to 100 %), the highest reading of the day; ticks at 25, 50, 75 and 100 %.</span><div class="tblbox narrow"><table><thead><tr><th>Day</th><th>5-hour</th><th>'+pctScale()+'</th><th>Weekly</th><th>'+pctScale()+'</th></tr></thead><tbody>'
+   +rs.map(d=>'<tr><td class="mono">'+esc(d.key)+'</td><td class="mono">'+pc(d.five_hour)+'</td><td>'+bar(d.five_hour,'5-hour')+'</td><td class="mono">'+pc(d.seven_day)+'</td><td>'+bar(d.seven_day,'Weekly')+'</td></tr>').join('')
    +(rs.length?'':'<tr><td class="muted" colspan="5">no quota readings in the last 90 days</td></tr>')+'</tbody></table></div></div>';
 }
 function latestCard(q,today){
@@ -668,20 +708,41 @@ function latestCard(q,today){
   return card('Today’s readings','One row per hour of today (UTC) that has recorded readings, newest first; an hour without readings has no row. '+rule,rows.filter(isToday),'no readings today')
    +card('Earlier readings','The earlier days of this week per day, the earlier weeks of this month per week, the two months before per month (all UTC). '+rule,rows.filter(r=>!isToday(r)),'no data');
 }
+function estimateCard(E){
+  /* The quota per vendor window (PC-111): a measured value wins; else an estimate from the window's tokens, italic and marked "est.", its basis in the tooltip */
+  const T='Quota per vendor window';
+  if(!E)return '<div class="card"><h2>'+T+'</h2><span class="muted">no data</span></div>';
+  const nf=x=>Math.round(x).toLocaleString('en-US'),hm=s=>esc(String(s).replace('T',' ').slice(0,16));
+  const cell=r=>r.state==='measured'?'<td class="mono" title="'+esc(r.note)+'">'+r.percent+' %</td>'
+    :r.state==='estimate'?'<td class="mono est" title="'+esc(r.note)+'"><i>'+r.percent+' % est.</i>'+(r.weak?' <span class="muted">weak</span>':'')+'</td>'
+    :'<td class="muted" title="'+esc(r.note)+'">'+(r.state==='none'?'no calibration yet':'no readings, other plan')+'</td>';
+  const cal=(c,n)=>c?'Calibration: '+nf(c.factor)+' tokens per percent, from '+c.readings+' readings in '+c.windows+' '+n+' windows, '+esc(c.first)+' to '+esc(c.last)+(c.weak?'; weak: fewer than '+E.weak_readings+' readings':'')+'.':'No calibration yet: no window of the plan period has a reading.';
+  const tbl=(k,n)=>{const K=E[k]||{rows:[]},rs=recentRows(K.rows);return '<h3>'+n[0].toUpperCase()+n.slice(1)+' windows</h3><span class="muted">'+cal(K.calibration,n)+'</span><div class="tblbox narrow"><table><thead><tr><th>Window (UTC)</th><th>Kind</th><th>Tokens</th><th>Readings</th><th>Quota used</th></tr></thead><tbody>'
+    +rs.map(r=>'<tr><td class="mono">'+hm(r.start)+' – '+hm(r.end)+'</td><td>'+esc(r.kind)+'</td><td class="mono">'+nf(r.tokens)+'</td><td class="mono">'+r.readings+'</td>'+cell(r)+'</tr>').join('')
+    +(rs.length?'':'<tr><td class="muted" colspan="5">no data</td></tr>')+'</tbody></table></div>';};
+  return '<div class="card"><h2>'+T+'</h2><span class="muted">Tokens of the Workers and the interactive sessions per vendor window, newest first, with the quota used: the highest reading where there is one, else an estimate (<i>italic, “est.”</i>) from the tokens and the tokens one percent stood for in the windows with readings of the plan period since '+esc(E.plan_start)+' (Settings › Module cards). Hover a value for its basis.</span>'
+   +tbl('seven_day','weekly')+tbl('five_hour','5-hour')+'</div>';
+}
 function sessionCards(T){
-  const nf=x=>x.toLocaleString('en-US'),pc=x=>x==null?'':x+' %';
+  const nf=x=>x.toLocaleString('en-US'),pc=x=>x==null?'':x+' %',none='<td class="muted">no readings</td>';
+  /* day, week and month rows: 5-hour = mean of the peaks of the vendor windows ending in the period, weekly = the period's highest reading (PC-110) */
+  const peaks=r=>r.level==='hour'?'<td class="mono">'+pc(r.five_hour)+'</td><td class="mono">'+pc(r.seven_day)+'</td>'
+    :(r.five_hour_windows?'<td class="mono" title="avg of '+r.five_hour_windows+' window'+(r.five_hour_windows>1?'s':'')+', highest '+pc(r.five_hour_high)+'">'+pc(r.five_hour)+'</td>':none)
+     +(r.seven_day==null?none:'<td class="mono">'+pc(r.seven_day)+'</td>');
   const cols=USEF.map(f=>'<th>'+f[1]+'</th>').join(''),cells=r=>'<td class="mono">'+nf(r.messages)+'</td>'+USEF.map(f=>'<td class="mono">'+nf(r[f[0]])+'</td>').join('');
-  const card=(title,note,head,rows,row,n)=>'<div class="card"><h2>'+title+'</h2><span class="muted">'+note+'</span><div class="tblbox narrow"><table><thead><tr>'+head+'<th>Messages</th>'+cols+(n?'<th>5-hour peak</th><th>Weekly peak</th>':'')+'</tr></thead><tbody>'
+  const card=(title,note,head,rows,row,n)=>'<div class="card"><h2>'+title+'</h2><span class="muted">'+note+'</span><div class="tblbox narrow"><table><thead><tr>'+head+'<th>Messages</th>'+cols+(n?'<th>5-hour peak (avg)</th><th>Weekly peak</th>':'')+'</tr></thead><tbody>'
     +rows.map(row).join('')+(rows.length?'':'<tr><td class="muted" colspan="9">no data</td></tr>')+'</tbody></table></div></div>';
   if(!T)return '<div class="card"><h2>Interactive sessions</h2><span class="muted">no data</span></div>';
-  const LV=['hour','day','week','month'],hist=recentRows(T.periods,r=>r.messages>0||r.total>0);
+  const LV=['hour','day','week','month'],hist=recentRows(T.periods,r=>r.messages>0||r.total>0),old=recentRows(T.headless||[],r=>r.messages>0);
   if(hist.length&&!hist.some(r=>r.level==='hour'))hist.unshift({level:'hour',none:true});
   const legend='<span class="lvlegend" aria-label="Aggregation levels">'+LV.map(l=>'<span class="lvkey lv-'+l+'"><i aria-hidden="true"></i>'+l+'</span>').join('')+'</span>';
-  return card('Interactive sessions history','Token counts of the interactive Claude Code sessions per period (UTC), with the highest quota percentage of the same period; hours without messages are not listed. Days before the transcripts exist come from the tool’s statistics cache as a daily aggregate without a split: counted in the sum only, marked “daily aggregate, no split”.'+legend,'<th>Period (UTC)</th><th>Per</th>',hist,
-      r=>r.none?'<tr class="lv-hour"><td class="muted" colspan="10">no sessions today</td></tr>'
-        :'<tr class="lv-'+r.level+'"><td class="mono">'+esc(r.label)+(r.aggregate?' <span class="muted" title="'+nf(r.aggregate)+' tokens of the tool’s statistics cache, counted in the sum only">incl. daily aggregate, no split</span>':'')+'</td><td>'+r.level+'</td>'+cells(r)+'<td class="mono">'+pc(r.five_hour)+'</td><td class="mono">'+pc(r.seven_day)+'</td></tr>',true)
-   +card('Interactive sessions per source','Last 90 days.','<th>Source</th>',T.sources,r=>'<tr><td class="mono">'+esc(r.key)+'</td>'+cells(r)+'</tr>')
-   +card('Sessions with the most tokens','Last 90 days, at most 20.','<th>Session</th><th>Source</th>',T.sessions,r=>'<tr><td class="mono">'+esc(r.key)+'</td><td class="mono">'+esc(r.source)+'</td>'+cells(r)+'</tr>');
+  const graded=r=>r.none?'<tr class="lv-hour"><td class="muted" colspan="10">no sessions today</td></tr>'
+        :'<tr class="lv-'+r.level+'"><td class="mono">'+esc(r.label)+(r.aggregate?' <span class="muted" title="'+nf(r.aggregate)+' tokens of the tool’s statistics cache, counted in the sum only">incl. daily aggregate, no split</span>':'')+'</td><td>'+r.level+'</td>'+cells(r)+peaks(r)+'</tr>';
+  /* records of kind headless (the Workers of the old design) only in their own card, shown when there are some; the per-source card only with more than one interactive source (PC-77) */
+  return card('Interactive sessions history','Token counts of the interactive Claude Code sessions per period (UTC), with the quota: on a day, week or month row “5-hour peak (avg)” is the mean, over the vendor 5-hour windows ending in that period, of each window’s highest reading (the tooltip gives the number of windows), and “Weekly peak” the highest weekly reading of the period; an hour row shows its own highest reading. Quota readings exist only since 2026-11-24: earlier periods show “no readings”, nothing is estimated or back-filled. Hours without messages are not listed. Days before the transcripts exist come from the tool’s statistics cache as a daily aggregate without a split: counted in the sum only, marked “daily aggregate, no split”.'+legend,'<th>Period (UTC)</th><th>Per</th>',hist,graded,true)
+   +(old.length?card('Headless Worker sessions (before the proxy)','Token counts of the headless Worker sessions of the earlier design, from their transcripts, per period (UTC), with the quota (as in the history card above); periods without messages are not listed.'+legend,'<th>Period (UTC)</th><th>Per</th>',old,graded,true):'')
+   +(T.sources.length>1?card('Interactive sessions per source','Last 90 days.','<th>Source</th>',T.sources,r=>'<tr><td class="mono">'+esc(r.key)+'</td>'+cells(r)+'</tr>'):'')
+   +card('Interactive sessions with the most tokens','Last 90 days, at most 20.','<th>Session</th><th>Source</th>',T.sessions,r=>'<tr><td class="mono">'+esc(r.key)+'</td><td class="mono">'+esc(r.source)+'</td>'+cells(r)+'</tr>');
 }
 function fitCard(F){
   /* "How these numbers fit": the coverage of each source, the main matches and mismatches, the reasons (tools/token_reconcile.py, computed by the server) */
@@ -698,15 +759,20 @@ function fitCard(F){
    +(po.length?'<h3>Open: possible, not seen in these files</h3><ul>'+po.map(r=>'<li>'+esc(r.label)+'</li>').join('')+'</ul>':'')+'</div>';
 }
 function projectsCard(){
-  const nf=x=>x.toLocaleString('en-US'),P=USE.projects||[];
-  const cell=(r,f)=>'<td class="mono">'+(r.total===undefined?'':nf(r[f]))+'</td>';
-  return '<div class="card"><h2>All projects (last 90 days)</h2><div class="tblbox narrow"><table><thead><tr><th>Project</th>'+USEF.map(f=>'<th>'+f[1]+'</th>').join('')+'<th>Tasks</th><th>Last day with use</th></tr></thead><tbody>'
-   +P.map(r=>r.total===undefined?'<tr><td>'+esc(r.name)+'</td><td class="muted" colspan="7">no data</td></tr>'
-     :'<tr><td>'+esc(r.name)+'</td>'+USEF.map(f=>cell(r,f[0])).join('')+'<td class="mono">'+r.tasks+'</td><td class="mono">'+esc(r.last_day||'')+'</td></tr>').join('')
-   +'</tbody></table></div></div>';
+  /* "Per project, by month" (owner, 2026-11-25, PC-113): a row per project and month, the current month and the two before (UTC) */
+  const nf=x=>x.toLocaleString('en-US'),M=USE.monthly,MN=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const T='Per project, by month',mon=m=>MN[+m.slice(5,7)-1]+' '+m.slice(0,4);
+  if(!M)return '<div class="card"><h2>'+T+'</h2><span class="muted">no data</span></div>';
+  const cols=USEF.map(f=>'<th>'+f[1]+'</th>').join('')+'<th>Interactive</th><th>Unattended</th><th>Tasks</th><th>Last day with use</th>';
+  const row=(p,r,i)=>'<tr><td>'+(i?'':esc(p.name))+'</td><td class="mono">'+esc(mon(r.month))+(r.aggregate?' <span class="muted" title="'+nf(r.aggregate)+' tokens of the tool’s statistics cache, counted in the sum only">incl. daily aggregate, no split</span>':'')+'</td>'
+    +(r.state==='before_start'?'<td class="muted" colspan="9">before the project started</td>':r.state==='no_data'?'<td class="muted" colspan="9">no data</td>'
+      :USEF.map(f=>'<td class="mono">'+nf(r[f[0]])+'</td>').join('')+'<td class="mono">'+nf(r.interactive)+'</td><td class="mono">'+nf(r.unattended)+'</td><td class="mono">'+r.tasks+'</td><td class="mono">'+esc(r.last_day||'')+'</td>')+'</tr>';
+  return '<div class="card"><h2>'+T+'</h2><span class="muted">'+M.months.map(mon).join(', ')+' (UTC). Interactive: the session transcripts, assigned to a project by their folder; unattended: the Workers’ proxy and headless runs. Months before the transcripts come from the statistics cache as a daily aggregate without a split, counted in the sum only. Sessions no project claims are listed as “unassigned”.</span>'
+   +'<div class="tblbox narrow"><table><thead><tr><th>Project</th><th>Month</th>'+cols+'</tr></thead><tbody>'
+   +M.projects.map(p=>p.rows.map((r,i)=>row(p,r,i)).join('')).join('')+'</tbody></table></div></div>';
 }
 /* The order of the Token Usage cards, top to bottom (owner, 2026-11-24, PC-81): the one place to change it; a card with nothing to show is left out without a gap */
-const USAGE_ORDER=['windows','heatmap','readings','sessions','days','quota','projects','fit','tasks'];  // the one list that fixes the order of the Token Usage cards
+const USAGE_ORDER=['windows','heatmap','readings','estimates','sessions','days','quota','projects','fit','tasks'];  // the one list that fixes the order of the Token Usage cards
 function vUsage(){
   const head='<div class="page"><div><h1>Token Usage</h1><span class="muted">Tokens the Workers used, counted by the proxy, for the last 90 days. 5-hour windows are the vendor’s own windows where quota readings exist, otherwise fixed blocks counted from the epoch (UTC); the label says which. The vendor’s quota percentages come from its readings, not from the proxy.</span></div>';
   if(!USE)return head+'<div class="card"><span class="muted">no data</span></div></div>';
@@ -715,13 +781,40 @@ function vUsage(){
   const dv={},fh={},ag=(USE.sessions&&USE.sessions.aggregate_days)||{};(USE.days||[]).forEach(r=>{dv[r.key]=r.total;});Object.keys(ag).forEach(d=>{dv[d]=(dv[d]||0)+ag[d];});((USE.quota&&USE.quota.days)||[]).forEach(r=>{if(r.five_hour!=null)fh[r.key]=r.five_hour;});
   const hm='<div class="card"><h2>Tokens per day</h2>'+heatmap(dv,(d,n)=>nf(n)+' tokens on '+d+(ag[d]!=null?'\nincl. '+nf(ag[d])+' daily aggregate, no split':'')+(fh[d]!=null?'\nhighest 5-hour reading '+fh[d]+' %':''),'Sum of the four token counts per day (UTC), as in the per-day table below; the proxy file has usage on '+((USE.days||[]).length)+' of the last 90 days. Days before the interactive transcripts add the statistics cache’s daily total (daily aggregate, no split).')+'</div>';
   const C={windows:()=>usageTable('Usage per 5-hour window',USE.windows&&USE.windows.map(r=>Object.assign({},r,{key:r.key+' ('+r.kind+')'})),NOUSE),heatmap:()=>hm,
-   readings:()=>latestCard(USE.quota),sessions:()=>sessionCards(USE.sessions),days:()=>usageTable('Usage per day',USE.days,NOUSE),quota:()=>quotaCard(USE.quota),
+   readings:()=>latestCard(USE.quota),estimates:()=>estimateCard(USE.estimates),sessions:()=>sessionCards(USE.sessions),days:()=>usageTable('Usage per day',USE.days,NOUSE),quota:()=>quotaCard(USE.quota),
    projects:()=>projectsCard(),fit:()=>fitCard(USE.reconcile),
    tasks:()=>'<div class="card"><h2>Per task</h2><div class="tblbox narrow"><table><thead><tr><th>Task</th><th>Worker</th><th>Launched (UTC)</th><th>Proxy sum</th><th>Good-bye note</th><th>Difference</th></tr></thead><tbody>'
    +(tk?recentRows(tk).map(t=>'<tr><td class="mono">'+esc(t.task)+'</td><td class="mono">'+esc(t.worker||'')+'</td><td class="mono">'+esc(t.start)+'</td><td class="mono">'+nf(t.proxy)+(t.overlap?' <span class="muted" title="Another task ran at the same time; the sum may include its requests">overlap</span>':'')+'</td><td class="mono">'+nf(t.note)+'</td><td class="mono">'+nf(t.diff)+'</td></tr>').join(''):'')
    +(tk&&tk.length?'':'<tr><td class="muted" colspan="6">no data</td></tr>')+'</tbody></table></div><p class="muted" style="font-size:13px;margin:8px 0 0">The proxy sum counts the requests of the task’s Worker between the task’s launch and its last log entry. Older tasks, launched before the log named the Worker, count all Workers’ requests in that span (marked overlap when another task ran then).</p></div>'};
   return head+USAGE_ORDER.map(k=>C[k]()).filter(Boolean).join('')+'</div>';
 }
+/* compliance:start */
+const compCount=p=>p&&p.report?p.report.violations.length:0;
+/* Compliance (Settings > Policies): one card per project (violation count, last report link and date, run state, the Run button), then every
+   open violation of every project, highlighted until a later report no longer has it. The page only shows; a fix is the owner's own act. */
+function compRun(r){
+  return r.state==='running'?'<span class="warnline">Check running since '+hm(r.started)+'\u2026</span>'
+   :r.state==='failed'?'<span class="warnline">Last run failed (exit '+r.exit+') at '+hm(r.ended)+'.</span>'
+   :r.state==='interrupted'?'<span class="warnline">Last run was interrupted (the Cockpit restarted or the process vanished).</span>'
+   :r.state==='done'?'<span class="muted" style="font-size:13px">Last run finished at '+hm(r.ended)+'.</span>':'';}
+function vCompliance(){
+  const P=COMP.projects,all=P.flatMap(p=>(p.report?p.report.violations:[]).map(v=>Object.assign({project:p.name},v)));
+  let h='<div><h2>Compliance</h2><span class="muted">Violations the compliance check found in the projects\' local policy files. This page only shows them; fixing a file is yours to do.</span></div>';
+  if(COMP.error)h+='<div class="card" style="border-color:var(--danger)"><b class="warnline">Compliance data unavailable.</b> <span class="muted">'+esc(COMP.error)+'</span></div>';
+  h+='<div class="grid">'+P.map(p=>{const n=compCount(p),r=p.run,on=UI.armed==='compliance:'+p.name,b='data-act="arm" data-a="compliance" data-k="'+esc(p.name)+'"';
+    return '<div class="card" data-comp="'+esc(p.name)+'" style="display:flex;flex-direction:column;gap:8px'+(n?';border-color:var(--danger)':'')+'"><div class="row spread"><h2>'+esc(p.name)+'</h2><span class="'+(n?'warnline':'muted')+'"><b>'+n+'</b> violations</span></div>'
+     +'<span>Last report: '+(p.report?'<a href="/compliance-report?project='+encodeURIComponent(p.name)+'" target="_blank" rel="noopener" class="mono">'+esc(p.path)+'</a> <span class="muted">'+esc(p.report.checked)+'</span>':'<span class="muted">never run</span>')+'</span>'
+     +(p.error?'<span class="warnline">'+esc(p.error)+'</span>':'')+compRun(r)
+     +(!p.configured?'<span class="muted" style="font-size:12px">Run not configured: give the project a "compliance" command and a "git" clone.</span>'
+      :!COMP.steering?'':on?'<div class="row" style="gap:8px"><span>Run the compliance check on <b>'+esc(p.name)+'</b> now? It replaces the last report.</span><button class="btn small armed" '+b+'>Confirm</button></div>'
+      :'<button class="btn small" '+b+' style="align-self:flex-start"'+(r.state==='running'?' disabled':'')+'>Run compliance check</button>')
+     +'</div>';}).join('')+'</div>';
+  if(all.length)h+='<div class="grid" style="grid-template-columns:1fr">'+all.map(v=>'<div class="card" data-violation style="border-color:var(--danger)"><div class="row" style="gap:8px"><span class="chip blocks">violation</span><span class="chip">'+esc(v.project)+'</span><b class="mono">'+esc(v.file)+(v.line?':'+v.line:'')+'</b></div>'
+    +'<blockquote style="margin:8px 0;padding-left:10px;border-left:3px solid var(--danger)">'+esc(v.passage)+'</blockquote>'
+    +'<dl class="facts"><dt>Rule</dt><dd>'+esc(v.rule)+'</dd><dt>Reason</dt><dd>'+esc(v.reason)+'</dd></dl></div>').join('')+'</div>';
+  else if(P.some(p=>p.report))h+='<p class="muted">No open violations.</p>';
+  return h;}
+/* compliance:end */
 function vRules(){
   const head='<div><h2>Policies</h2><span class="muted">Files that steer the agents and the project. They have long reach, so every change is tracked here and waits for your review.</span></div>';
   if(!RULES.configured)return head+'<div class="card tile nw"><span class="label">Policies</span><span class="v muted" style="font-size:18px">not configured</span><span class="muted" style="font-size:13px">add a "rules" key to the --modules JSON'+(RULES.error?' ('+esc(RULES.error)+')':'')+'</span></div>';
@@ -877,7 +970,7 @@ function drawerTask(t){
   const kids=D.tasks.filter(x=>x.parent===t.key);const blocks=D.tasks.filter(x=>isOpen(x)&&x.blockedBy.includes(t.key));
   const others=D.tasks.filter(x=>x.key!==t.key&&!t.blockedBy.includes(x.key));
   let h='<div class="row spread"><a class="mono" target="_blank" rel="noopener" href="'+esc(t.url)+'">'+esc(t.key)+'</a><button class="btn small" data-act="close">Close</button></div>'
-   +'<h1 style="font-size:19px;line-height:1.3">'+esc(t.title)+'</h1><div class="chips"><span class="chip" style="background:var(--accent-tint)">'+esc(modShort(t.module))+'</span><span class="chip">'+esc(t.type)+'</span><span class="chip">'+t.cls+'</span><span class="chip">'+STAGE_LABEL[t.stage]+'</span>'+prioChip(t)+findingChip(t)+'</div>';
+   +'<h1 style="font-size:19px;line-height:1.3">'+esc(t.title)+'</h1><div class="chips"><span class="chip" style="background:var(--accent-tint)">'+esc(modShort(t.module))+'</span><span class="chip">'+esc(t.type)+'</span><span class="chip">'+t.cls+'</span><span class="chip">'+STAGE_LABEL[t.stage]+'</span>'+prioChip(t)+findingChip(t)+editedChip(t)+'</div>';
   h+='<dl class="facts"><dt>Deadline</dt><dd>'+dlHtml(t)+'</dd><dt>Blocked by</dt><dd>'+(u.length?u.map(b=>'<span class="chip blk">'+esc(b.key)+'</span>').join(' '):'<span class="muted">none</span>')+'</dd><dt>Blocks</dt><dd>'+(blocks.length?blocks.map(b=>'<span class="chip blocks">'+esc(b.key)+'</span>').join(' '):'<span class="muted">none</span>')+'</dd>'
    +''+(t.filed_by?'<dt>Filed by</dt><dd class="mono">'+esc(t.filed_by)+'</dd>':'')+'<dt>Assignee</dt><dd>'+(t.assignee?esc(t.assignee):'<span class="muted">not assigned</span>')+'</dd><dt>Token estimate</dt><dd>'+(t.est?tok(t.est)+(t.used?' · used '+tok(t.used):''):'<span class="muted">not estimated yet</span>')+'</dd><dt>Parent</dt><dd>'+(t.parent?esc(t.parent):'module')+'</dd>'
    +(t.hint?'<dt>Architect’s hint</dt><dd>'+esc(t.hint)+' <span class="muted">(not your priority)</span></dd>':'')+(t.status?'<dt>Project status</dt><dd>'+esc(t.status)+'</dd>':'')+'</dl>';
@@ -886,7 +979,8 @@ function drawerTask(t){
   h+=(t.desc?'<p style="margin:0;white-space:pre-wrap;overflow-wrap:anywhere">'+esc(t.desc)+'</p>':'')+(t.evidence.length?'<div style="display:flex;flex-direction:column;gap:3px">'+t.evidence.map(x=>'<a target="_blank" rel="noopener" href="'+esc(x.url)+'">'+esc(x.text)+'</a>').join('')+'</div>':'');
   props.forEach(p=>{h+='<div class="proposal"><b>The Orchestrator proposes a change</b><span>'+(p.field==='deadline'?'Move the deadline to <b>'+esc(p.value)+'</b>.':'Set the priority to <b>P'+esc(p.value)+'</b>.')+' '+esc(p.reason)+'</span>'
     +(ST()?'<div class="row"><button class="btn primary small" data-act="accept" data-n="'+t.number+'" data-id="'+esc(p.id)+'">Accept</button><button class="btn small" data-act="dismiss" data-n="'+t.number+'" data-id="'+esc(p.id)+'">Dismiss</button></div><span style="font-size:12px">Accepting applies it as you. Only you can change priority or a deadline.</span>':'')+'</div>';});
-  if(ST()){
+  if(ST())h+=UI.drawer.edit?editForm(t):'<div class="row"><button class="btn small" data-act="edit" data-k="'+t.key+'">Edit text</button></div>';
+  if(ST()&&!UI.drawer.edit){
   if(t.stage==='embryo'){
     h+='<form class="card" data-form="release" data-k="'+t.key+'" style="display:flex;flex-direction:column;gap:12px"><h2>Release this task</h2><div class="field"><span>Priority</span>'+seg('rp',2)+'<span class="muted" style="font-size:12px">1 is first. The Orchestrator ranks by priority, then deadline.</span></div>'
      +'<div class="field"><label for="rd">Deadline (optional)</label><input id="rd" type="date" name="d"><span class="muted" style="font-size:12px">Complete by the end of this day. Leave empty to inherit from the parent or module.</span></div><button class="btn primary">Release</button></form>';
@@ -906,6 +1000,20 @@ function drawerTask(t){
   const ev=D.events.filter(x=>x.key===t.key);
   h+='<div class="card"><h2>History</h2><div style="display:flex;flex-direction:column;gap:5px;margin-top:8px;font-size:13px">'+(ev.length?ev.map(x=>'<span><span class="mono muted">'+x.t.slice(5)+'</span> <b>'+esc(x.actor)+'</b> '+esc(x.text)+'</span>').join(''):'<span class="muted">No events yet.</span>')+'</div></div>';
   return h;
+}
+/* "edited <time>" (GitHub's lastEditedAt; GitHub keeps the history) and a stale authority analysis, on the row and in the task view. */
+const editedChip=t=>(t.edited?' <span class="muted" style="font-size:12px" title="'+esc(t.edited)+'">edited '+ageTxt((Date.now()-Date.parse(t.edited))/36e5)+'</span>':'')+(t.analysis==='stale'?' <span class="chip" title="The text changed since the authority analysis; it is analysed again before release">analysis stale</span>':'');
+/* The text editor: title and body go to the issue; the provenance block and the filed-by marker are shown read-only and kept by the server. */
+function editForm(t){
+  const d=UI.drawer.draft||{title:t.title,body:t.text||''},on=UI.armed==='edit:'+t.key;
+  return '<form class="card" data-form="edit" data-k="'+t.key+'" style="display:flex;flex-direction:column;gap:12px"><h2>Edit the text</h2>'
+   +(t.stage==='wip'?'<div class="proposal" style="background:var(--danger-tint);color:var(--danger)"><b>A Worker is working on this task.</b> It works from the text it got at launch; this edit does not reach that run and applies to the next attempt.</div>':'')
+   +(t.closed?'<div class="proposal">This task is closed. The edit is saved, but nothing reopens it.</div>':'')
+   +'<div class="field"><label for="et">Title</label><input id="et" type="text" name="title" required value="'+esc(d.title)+'"></div>'
+   +'<div class="field"><label for="eb">Text</label><textarea id="eb" name="body" rows="14">'+esc(d.body)+'</textarea></div>'
+   +((t.kept||[]).length?'<div class="field"><span>Kept as it is (re-attached on save)</span><pre class="muted" style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;margin:0">'+esc(t.kept.join('\n\n'))+'</pre></div>':'')
+   +'<span class="muted" style="font-size:12px">Labels keep their own controls. A saved edit makes the task’s authority analysis stale; it is analysed again before it can be released. GitHub keeps the edit history.</span>'
+   +'<div class="row"><button class="btn primary '+(on?'armed':'')+'" aria-label="'+(on?'Confirm: save the text':'Save the text')+'">'+(on?'Confirm?':'Save')+'</button><button type="button" class="btn" data-act="noedit" data-k="'+t.key+'">Cancel</button></div></form>';
 }
 function drawerNew(p){
   p=p||{};
@@ -942,8 +1050,9 @@ function render(){
   else if(GHR&&UI.err)h+='<div class="page" style="padding-bottom:0"><div class="card" style="border-color:var(--danger)"><span class="warnline">Some parts could not be loaded:</span> <span class="muted">'+esc(UI.err)+'</span></div></div>';
   if(!D&&!LOCAL){if(!UI.err)h+='<div class="page"><span class="muted">Loading…</span></div>';}
   else{
-  h+=R==='cockpit'?vCockpit():R==='backlog'?vBacklog():R==='questions'?vQuestions():R==='timeline'?vTimeline():R==='settings'?vSettings():R==='usage'?vUsage():vCode();
-  if(UI.drawer){const t=UI.drawer.key&&byKey(D,UI.drawer.key);h+='<div class="drawer-bg" data-act="close"></div><div class="drawer" role="dialog" aria-modal="true" aria-label="Task">'+(UI.drawer.mode==='new'&&ST()?drawerNew(UI.drawer.prefill):(t?drawerTask(t):''))+'</div>';}
+  const V={cockpit:vCockpit,backlog:vBacklog,questions:vQuestions,timeline:vTimeline,settings:vSettings,usage:vUsage}[R]||vCode;
+  h+=block(R,V,true);  /* a tab that throws still draws (PC-114) */
+  if(UI.drawer){const t=UI.drawer.key&&byKey(D,UI.drawer.key);h+='<div class="drawer-bg" data-act="close"></div><div class="drawer" role="dialog" aria-modal="true" aria-label="Task">'+(UI.drawer.mode==='new'&&ST()?drawerNew(UI.drawer.prefill):(t?block('Task',()=>drawerTask(t)):''))+'</div>';}
   }
   if(UI.toast)h+='<div class="toast" role="status">'+esc(UI.toast)+'</div>';
   document.getElementById('app').innerHTML=h;
@@ -953,7 +1062,7 @@ let toastTimer=null,armTimer=null;
 function say(m,ms){UI.toast=m;clearTimeout(toastTimer);toastTimer=setTimeout(()=>{UI.toast='';render();},ms||2200);render();}
 const num=k=>{const t=byKey(D,k);return t&&t.number;};
 function act(a,ds){
-  const t=ds.k&&byKey(D,ds.k);
+  const t=ds.k&&D&&byKey(D,ds.k);
   if(a!=='arm'&&UI.armed){UI.armed=null;clearTimeout(armTimer);}  /* any other click disarms */
   switch(a){
    case 'qtdefaults':{const d=(CSET.defaults||{}).quality_thresholds||{},f=document.querySelector('[data-form=cardsettings]');
@@ -976,6 +1085,8 @@ function act(a,ds){
    case 'revall':ruleChanges().forEach(r=>revSet(r.sha,true));render();break;
    case 'open':UI.drawer={mode:'task',key:ds.k};render();break;
    case 'close':UI.drawer=null;render();break;
+   case 'edit':UI.drawer={mode:'task',key:ds.k,edit:true};render();break;
+   case 'noedit':UI.drawer={mode:'task',key:ds.k};render();break;
    case 'refresh':reload(ds.pane||UI.route);break;
    case 'new':UI.drawer={mode:'new'};render();break;
    case 'subtask':UI.drawer={mode:'new',prefill:{parent:t.number,module:t.module,title:'',type:'feature'}};render();break;
@@ -985,23 +1096,29 @@ function act(a,ds){
    case 'arm':{const id=ds.a+':'+ds.k;
      if(UI.armed!==id){UI.armed=id;clearTimeout(armTimer);armTimer=setTimeout(()=>{UI.armed=null;render();},6000);render();break;}
      UI.armed=null;clearTimeout(armTimer);
-     post(ds.a==='submit'?{action:'release',n:t.number,p:'P2',d:''}:{action:'cancel',n:t.number});break;}
+     post(ds.a==='compliance'?{action:'compliance',project:ds.k}:ds.a==='submit'?{action:'release',n:t.number,p:'P2',d:''}:{action:'cancel',n:t.number});break;}
    case 'unblock':post({action:'unblock',n:t.number,b:num(ds.b)});break;
    case 'accept':case 'dismiss':post({action:a,n:+ds.n,id:ds.id});break;
   }
 }
 document.addEventListener('click',function(e){const b=e.target.closest('[data-act]');if(!b)return;if(b.classList.contains('drawer-bg')&&e.target!==b)return;act(b.dataset.act,b.dataset);});
+document.addEventListener('input',function(e){const f=e.target.closest('[data-form=edit]');if(f&&UI.drawer)UI.drawer.draft={title:f.elements.title.value,body:f.elements.body.value};});
 document.addEventListener('change',function(e){if(e.target.id==='psel')pickProject(e.target.value);});
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&UI.drawer){UI.drawer=null;render();}});
 document.addEventListener('submit',async function(e){
   const f=e.target.closest('[data-form]');if(!f)return;e.preventDefault();
   const fd=new FormData(f);const k=f.dataset.k;const t=k&&byKey(D,k);const kind=f.dataset.form;
-  if(kind==='release')post({action:'release',n:t.number,p:fd.get('p'),d:fd.get('d')||''});
+  if(kind==='edit'){
+    UI.drawer.draft={title:fd.get('title'),body:fd.get('body')};
+    if(UI.armed!=='edit:'+k){UI.armed='edit:'+k;clearTimeout(armTimer);armTimer=setTimeout(()=>{UI.armed=null;render();},6000);render();return;}
+    UI.armed=null;clearTimeout(armTimer);
+    if(await post({action:'edit',n:t.number,title:fd.get('title'),body:fd.get('body')}))UI.drawer={mode:'task',key:k};render();}
+  else if(kind==='release')post({action:'release',n:t.number,p:fd.get('p'),d:fd.get('d')||''});
   else if(kind==='change')post({action:'change',n:t.number,p:fd.get('p')||'',d:fd.get('d')||''});
   else if(kind==='block')fd.get('b')&&post({action:'block',n:t.number,b:num(fd.get('b'))});
   else if(kind==='settings'){const b={action:'settings',enabled:f.elements.enabled.checked};
     SETROWS.slice(1).forEach(r=>{b[r[0]]=fd.get(r[0]);});post(b);}
-  else if(kind==='cardsettings')post({action:'cardsettings',churn_colour:fd.get('churn_colour'),quality_thresholds:qThRead(fd)});
+  else if(kind==='cardsettings')post({action:'cardsettings',churn_colour:fd.get('churn_colour'),quality_thresholds:qThRead(fd),quota_plan_start:fd.get('quota_plan_start'),quota_weak_readings:fd.get('quota_weak_readings')});
   else if(kind==='moddl')post({action:'moddl',module:f.dataset.m,d:fd.get('d')||''});
   else if(kind==='new'){const title=fd.get('title');
     if(await post({action:'new',title:title,desc:fd.get('desc'),module:fd.get('module'),type:fd.get('type'),cls:fd.get('cls'),parent:fd.get('parent')||''})){

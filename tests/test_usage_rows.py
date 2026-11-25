@@ -39,11 +39,9 @@ def test_five_hour_windows_list_only_windows_with_usage_newest_first():
     assert [(w["key"], w["total"]) for w in r["windows"]] == [("2026-03-02 09:00", 12), ("2026-02-28 22:00", 4)]   # fixed epoch blocks
 
 
-def test_only_the_last_90_days_are_listed_and_the_summary_keeps_the_last_day():
+def test_only_the_last_90_days_are_listed():
     r = rep(u("2025-11-01T00:00:00Z", 9), u("2026-03-01T00:00:00Z", 1))
     assert [d["key"] for d in r["days"]] == ["2026-03-01"]
-    r["tasks"] = None
-    assert L.usage_summary(r)["last_day"] == "2026-03-01" and L.usage_summary(r)["total"] == 4
 
 
 def test_bar_is_scaled_to_the_highest_row_listed():

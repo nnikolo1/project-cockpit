@@ -32,8 +32,8 @@ HERE = pathlib.Path(__file__).parent
 TYPES = ["feature", "bug", "decision", "research", "doc", "devops", "test"]
 # Global switches (steer, simulate) live in CFG. A project is a dict of PROJECT_KEYS plus its name; PROJECTS maps name -> project.
 # Without any registered project (tests, embedding) CFG itself doubles as the one project.
-CFG = dict(repo=None, manager=None, steer=False, simulate=False, project=None, git=None, modules=None, phases=None, code=None, code_collect=None)
-PROJECT_KEYS = ("repo", "manager", "project", "git", "modules", "phases", "code", "code_collect")
+CFG = dict(repo=None, manager=None, steer=False, simulate=False, project=None, git=None, modules=None, phases=None, code=None, code_collect=None, compliance=None)
+PROJECT_KEYS = ("repo", "manager", "project", "git", "modules", "phases", "code", "code_collect", "compliance")
 PROJECTS, DEFAULT = {}, None
 
 
@@ -59,7 +59,8 @@ def pk(p, what):
 def project_from_flags(a):
     """The implicit project of the single-project flags, named after the repo."""
     return dict(name=a["repo"].split("/")[-1], repo=a["repo"], manager=a.get("manager") or a["repo"].split("/")[0],
-                **{k: a.get(k) for k in PROJECT_KEYS[2:-1]}, code_collect=L.collect_command(a.get("code_collect")))
+                **{k: a.get(k) for k in PROJECT_KEYS[2:-2]}, code_collect=L.collect_command(a.get("code_collect")),
+                compliance=L.collect_command(a.get("compliance"), "compliance"))
 
 
 def projects_from_file(data):
@@ -79,8 +80,17 @@ def projects_from_file(data):
             p["meta"] = os.path.expanduser(e["meta"])  # optional: absent means the default folder, see meta_dir()
         if e.get("stats_cache"):
             p["stats_cache"] = os.path.expanduser(e["stats_cache"])  # optional: the tool's statistics cache, for "How these numbers fit"
+        if e.get("start_month") is not None:  # optional: the month the project started; Token Usage shows nothing of it before (PC-113)
+            if not (isinstance(e["start_month"], str) and re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", e["start_month"])):
+                raise ValueError(f"--projects: project {name!r}: start_month must be YYYY-MM (got {e['start_month']!r})")
+            p["start_month"] = e["start_month"]
+        if e.get("transcript_sources") is not None:  # optional: the project's transcript folders (source labels); default: the folder rule
+            if not (isinstance(e["transcript_sources"], list) and all(isinstance(x, str) and x for x in e["transcript_sources"])):
+                raise ValueError(f"--projects: project {name!r}: transcript_sources must be a list of folder names")
+            p["transcript_sources"] = list(e["transcript_sources"])
         try:
             p["code_collect"] = L.collect_command(e.get("code_collect"))  # the snapshot's collector command, run by the daily refresh
+            p["compliance"] = L.collect_command(e.get("compliance"), "compliance")  # the compliance check, the same command as the terminal and the daily job
         except ValueError as ex:
             raise ValueError(f"--projects: project {name!r}: {ex}") from None
         out.append(p)
@@ -179,7 +189,7 @@ TIMELINE = """timelineItems(last:100,itemTypes:[LABELED_EVENT,UNLABELED_EVENT,AS
   ... on LabeledEvent{createdAt actor{login} label{name}} ... on UnlabeledEvent{createdAt actor{login} label{name}}
   ... on AssignedEvent{createdAt actor{login} assignee{... on User{login}}} ... on ClosedEvent{createdAt actor{login}}}}"""
 GQL = """query($o:String!,$r:String!,$after:String,$n:Int!){repository(owner:$o,name:$r){issues(first:$n,after:$after,orderBy:{field:CREATED_AT,direction:ASC}){
- pageInfo{hasNextPage endCursor} nodes{number databaseId title url body state stateReason createdAt updatedAt closedAt author{login}
+ pageInfo{hasNextPage endCursor} nodes{number databaseId title url body state stateReason createdAt updatedAt lastEditedAt closedAt author{login}
  labels(first:50){nodes{name}} assignees(first:5){nodes{login}} parent{number} blockedBy(first:50){nodes{number}}
  comments(last:10){nodes{body createdAt author{login}}}
  """ + TIMELINE + "}}}}"
@@ -506,6 +516,26 @@ def _prio_due(t, prio, due, set_due):
     return add, remove
 
 
+WIP_NOTE = "; a Worker is working from the old text, the edit applies to the next attempt"
+STALE_NOTE = "<!-- analysis: stale -->\nThe task text was edited in the Cockpit; its authority analysis is stale until the task is analysed again."
+
+
+def _edit_text(form, t, repo):
+    """Title and body of the issue from the editor. The provenance block and the filed-by marker are taken from the issue, never from the
+    form (read-only there), and re-attached; labels are untouched. A saved edit records the authority analysis as stale (a comment)."""
+    title, text = (form.get("title") or "").strip(), L.split_text(form.get("body"))[0]
+    if not title:
+        raise ValueError("a title is required")
+    if title == t["title"] and text == t["text"]:
+        return [], f"{t['key']}: nothing changed"
+    n = str(t["number"])
+    full = title if t["key"].startswith("#") else f"[{t['key']}] {title}"
+    ops = [["api", "-X", "PATCH", f"repos/{repo}/issues/{n}", "-f", f"title={full}", "-f", f"body={L.join_text(text, t['kept'])}"],
+           ["issue", "comment", n, "-R", repo, "--body", STALE_NOTE]]
+    note = WIP_NOTE if t["stage"] == "wip" else "; the task is closed" if t.get("closed") else ""
+    return ops, f"{t['key']} text saved{note}; its authority analysis is now stale"
+
+
 def plan_action(form, S, repo, simulate=False):
     ops, msg = _plan(form, S, repo, simulate)
     # new due:<date> labels must exist before they can be added
@@ -542,9 +572,13 @@ def _plan(form, S, repo, simulate):
         return [["variable", "set", "MODULE_DEADLINES", "--body", json.dumps(new, sort_keys=True), "-R", repo]], f"module deadline of {m} {'set to ' + d if d else 'cleared'}"
     t = _task(S, form.get("n"))
     n = str(t["number"])
+    if a == "edit":
+        return _edit_text(form, t, repo)
     if a == "release":
         if t["stage"] != "embryo":
             raise ValueError(f"{t['key']} is {t['stage']}; only embryos can be released")
+        if t.get("analysis") == "stale":
+            raise ValueError(f"{t['key']} was edited; its authority analysis is stale and must be redone before release")
         p, d = _prio(form.get("p")), form.get("d") or ""
         add, remove = _prio_due(t, p, d and _date(d), bool(d))
         return _edit(repo, t, ["released"] + add, remove), f"{t['key']} released as {p}" + (f", deadline {d}" if d else "")
@@ -688,13 +722,26 @@ def usage_served(p):
     return cached(pk(p, "usage"), lambda: get_usage(p), 15, swr=True)
 
 
-def get_usage(p, data_dir=None, projects=None):
-    """The selected project's report plus `summary` (its 90-day row) and `projects` (one row per project the Cockpit serves; no counts = no data)."""
+def get_usage(p, data_dir=None, projects=None, today=None):
+    """The selected project's report plus `estimates` (the quota per vendor window, measured or estimated) and `monthly`: every project the Cockpit serves per month (L.monthly_by_project), from each one's
+    proxy file and processing log and from the transcript and statistics-cache files of all their data folders."""
     rep = _usage_one(p, data_dir)
     d = (data_dir or DATA_DIR) / (p.get("name") or p["repo"].split("/")[-1])
     rep["sessions"] = L.transcript_report(_read_text(d / TRANSCRIPT_FILE), rep["quota"], _read_text(d / AGGREGATE_FILE))
-    rep["summary"] = L.usage_summary(rep)
-    rep["projects"] = [dict(name=n, **(L.usage_summary(_usage_one(q, data_dir)) or {})) for n, q in (projects or PROJECTS or {p.get("name", ""): p}).items()]
+    try:  # the plan start and the weak threshold live with the card settings (Settings > Module cards > Quota estimates)
+        qs = json.loads(_read_text(d / "cockpit-settings.json") or "{}")
+    except ValueError:
+        qs = {}
+    rep["estimates"] = L.quota_estimates(_read_text(d / QUOTA_FILE), _read_text(d / USAGE_FILE), _read_text(d / TRANSCRIPT_FILE),
+                                         qs if isinstance(qs, dict) else {})
+    ps = list((projects or PROJECTS or {p.get("name", ""): p}).values())
+    folders = [(data_dir or DATA_DIR) / (q.get("name") or q["repo"].split("/")[-1]) for q in ps]
+    rep["monthly"] = L.monthly_by_project(
+        [dict(name=q.get("name") or q["repo"].split("/")[-1], dir=pathlib.Path(q["git"]).name if q.get("git") else q.get("name") or q["repo"].split("/")[-1],
+              sources=q.get("transcript_sources"), start=q.get("start_month"), usage=_read_text(f / USAGE_FILE), plog=_read_text(f / PLOG_FILE))
+         for q, f in zip(ps, folders)],
+        [_read_text(f / TRANSCRIPT_FILE) for f in folders], [_read_text(f / AGGREGATE_FILE) for f in folders],
+        today or dt.datetime.now(dt.timezone.utc).date())
     rep["reconcile"] = _reconcile_card(d, p.get("stats_cache"))
     return rep
 
@@ -744,6 +791,8 @@ def do_act(form, run=run_gh, state=None, p=None):
             return 200, dict(ok=True, msg=save_settings(p, form))
         if form.get("action") == "cardsettings":  # same: a local file, same guard
             return 200, dict(ok=True, msg=save_card_settings(p, form))
+        if form.get("action") == "compliance":  # starts the project's compliance check; same guard (the UI is the owner's alone)
+            return 200, dict(ok=True, msg=start_compliance(p))
         S = state or get_state(p=p)  # the cached state: an action does not bypass the hour (owner F-701)
         ops, msg = plan_action(form, S, p["repo"], CFG["simulate"])
         execute(ops, run)
@@ -759,6 +808,87 @@ def do_act(form, run=run_gh, state=None, p=None):
         return 502, dict(error=f"GitHub: {ex}")
     log.info("action ok on %s: %s -> %s", p.get("name", ""), form.get("action"), msg)
     return 200, dict(ok=True, msg=msg)
+
+
+# ---------- compliance check (Settings > Policies): the report is the check's (PC-108); the Cockpit shows it and starts the check ----------
+_compliance_lock = threading.Lock()
+
+
+def compliance_status_path(p):
+    """The run status of the project's compliance check: <data dir>/<project name>/compliance-run.json (the page polls it)."""
+    return DATA_DIR / (p.get("name") or p["repo"].split("/")[-1]) / "compliance-run.json"
+
+
+def _write_json(f, data):
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data))
+    os.replace(tmp, f)
+
+
+def _alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, TypeError):
+        return False
+
+
+def compliance_of(p):
+    """One project's compliance view: configured, the report (date, violations; None = never run), the run state."""
+    try:
+        status = json.loads(compliance_status_path(p).read_text())
+    except (OSError, ValueError):
+        status = None
+    out = dict(name=p.get("name", ""), configured=bool(p.get("compliance") and p.get("git")), report=None, path=L.COMPLIANCE_REPORT,
+               run=dict(status or {}, state=L.compliance_run_state(status, status and _alive(status.get("pid")))))
+    f = compliance_report_file(p)
+    if f:
+        try:
+            r = L.parse_compliance(f.read_text())
+            out["report"] = dict(r, checked=r["checked"] or dt.datetime.fromtimestamp(f.stat().st_mtime).isoformat(timespec="minutes"))
+        except (OSError, UnicodeDecodeError) as ex:
+            out["error"] = f"report unreadable: {ex}"
+    return out
+
+
+def build_compliance():
+    """The compliance view of every configured project (local files only, no GitHub)."""
+    return dict(steering=CFG["steer"], projects=[compliance_of(p) for p in (PROJECTS or {CFG.get("name", ""): CFG}).values()])
+
+
+def start_compliance(p):
+    """Start the project's compliance check detached, in its clone; one run at a time per project. The status file records the run.
+    ValueError when not configured or already running. The check itself writes the report; the Cockpit writes nothing into the project."""
+    if not (p.get("compliance") and p.get("git")):
+        raise ValueError("compliance check not configured: set the project's `compliance` command and `git` clone")
+    name = p.get("name", "")
+    with _compliance_lock:
+        if compliance_of(p)["run"]["state"] == "running":
+            raise ValueError(f"a compliance check of {name} is already running")
+        f = compliance_status_path(p)
+        f.parent.mkdir(parents=True, exist_ok=True)
+        logf = open(f.with_suffix(".log"), "w")
+        proc = subprocess.Popen(p["compliance"], cwd=pathlib.Path(p["git"]).expanduser(), stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                start_new_session=True, env=dict(os.environ, COMPLIANCE_REPORT=L.COMPLIANCE_REPORT))
+        rec = dict(state="running", pid=proc.pid, started=time.time())
+        _write_json(f, rec)
+
+    def wait():
+        code = proc.wait()
+        logf.close()
+        _write_json(f, dict(rec, state="ended", exit=code, ended=time.time()))
+        log.info("compliance check of %s ended with exit %s", name, code)
+
+    threading.Thread(target=wait, daemon=True).start()
+    log.info("compliance check of %s started (pid %d): %s", name, proc.pid, " ".join(p["compliance"]))
+    return f"compliance check of {name} started"
+
+
+def compliance_report_file(p):
+    """The project's current report file, or None."""
+    f = pathlib.Path(p["git"]).expanduser() / L.COMPLIANCE_REPORT if p.get("git") else None
+    return f if f and f.is_file() else None
 
 
 # ---------- rules ----------
@@ -1208,6 +1338,11 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, get_queue(p))
             if u.path == "/api/usage":
                 return self.send(200, usage_served(p))
+            if u.path == "/api/compliance":
+                return self.send(200, build_compliance())
+            if u.path == "/compliance-report":
+                f = compliance_report_file(p)
+                return self.send(200, f.read_bytes(), "text/plain; charset=utf-8") if f else self.send(404, dict(error="no compliance report yet"))
             if u.path == "/api/rules":
                 return self.send(200, get_rules(p))
             if u.path == "/api/rulesprs":
@@ -1282,7 +1417,7 @@ def resolve(a):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--projects", help="JSON {default, projects:[{name, repo, project?, manager?, modules?, git?, code?, code_collect?, phases?, meta?}]}: serve several projects (replaces the single-project flags)")
+    ap.add_argument("--projects", help="JSON {default, projects:[{name, repo, project?, manager?, modules?, git?, code?, code_collect?, compliance?, phases?, meta?}]}: serve several projects (replaces the single-project flags)")
     ap.add_argument("--repo", help="OWNER/REPO")
     ap.add_argument("--manager", help="the one login whose protected labels count (default: the repo owner)")
     ap.add_argument("--port", type=int, default=8795)
@@ -1292,6 +1427,7 @@ def main():
     ap.add_argument("--modules", help="JSON {modules:[{id,name,docs?}], assign:[{path,module}]}")
     ap.add_argument("--phases", help="extra timeline.json ({module, events:[...]}) merged into the timeline")
     ap.add_argument("--code", help="code snapshot directory: metrics.json and erd|dataflow|deps|js.svg (see README)")
+    ap.add_argument("--compliance", help="the compliance check command (PC-108), run in the --git clone; it writes docs/compliance/compliance-report.md")
     ap.add_argument("--code-collect", help="the code snapshot's collector command, run by tools/code_snapshot_refresh.py when the snapshot is stale")
     ap.add_argument("--token-file", help="keep the access token in this file (created 0600 if missing), so the URL survives restarts")
     ap.add_argument("--cache-dir", help="keep the slow answers on disk here (default: <data dir>/cache) so that a restarted service shows data at once; 'none' = memory only")

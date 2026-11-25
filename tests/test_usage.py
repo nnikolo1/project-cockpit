@@ -101,18 +101,25 @@ def test_get_usage_reads_the_quota_file(tmp_path):
     assert C.get_usage(dict(name="proj", repo="o/r"), data_dir=tmp_path)["quota"]["periods"][0]["seven_day"]["last"] == 36
 
 
-def test_all_projects_table_sums_each_project(tmp_path):
-    for n, ts in (("one", "2026-11-20T01:00:00+00:00"), ("two", "2026-11-22T01:00:00+00:00")):
+def test_per_project_monthly_table_reads_every_data_folder(tmp_path):
+    for n, ts in (("one", "2026-11-20T01:00:00+00:00"), ("two", "2026-10-22T01:00:00+00:00")):
         (tmp_path / n).mkdir()
         (tmp_path / n / "proxy-usage.jsonl").write_text(u(ts, "w1") + "\n" + u(ts, "w2"))
     (tmp_path / "one" / "processing").mkdir()
     (tmp_path / "one" / "processing" / "processing.jsonl").write_text(p("2026-11-20T01:00:00+00:00", "T-1", "launched"))
+    tr = json.dumps(dict(ts="2026-11-21T01:00:00+00:00", source="-home-x-src-two", session="s", agent=None, message="m", input_tokens=7))
+    (tmp_path / "one" / "transcript-usage.jsonl").write_text(tr)
+    (tmp_path / "two" / "transcript-usage.jsonl").write_text(tr)   # the same message in two folders counts once
     projs = {n: dict(name=n, repo="o/" + n) for n in ("one", "two", "none")}
-    r = C.get_usage(projs["one"], data_dir=tmp_path, projects=projs)
-    assert r["summary"]["total"] == 20 and r["summary"]["tasks"] == 1 and r["summary"]["last_day"] == "2026-11-20"
-    rows = {x["name"]: x for x in r["projects"]}
-    assert rows["two"]["total"] == 20 and rows["two"]["tasks"] == 0 and rows["two"]["last_day"] == "2026-11-22"
-    assert rows["none"] == dict(name="none")
+    projs["two"]["git"] = "/home/x/src/two"
+    projs["none"]["start_month"] = "2026-11"
+    r = C.get_usage(projs["one"], data_dir=tmp_path, projects=projs, today=L.dt.date(2026, 11, 25))
+    m = r["monthly"]
+    assert m["months"] == ["2026-11", "2026-10", "2026-09"]
+    rows = {x["name"]: {y["month"]: y for y in x["rows"]} for x in m["projects"]}
+    assert rows["one"]["2026-11"]["unattended"] == 20 and rows["one"]["2026-11"]["tasks"] == 1 and rows["one"]["2026-11"]["interactive"] == 0
+    assert rows["two"]["2026-11"]["interactive"] == 7 and rows["two"]["2026-10"]["unattended"] == 20 and rows["two"]["2026-10"]["last_day"] == "2026-10-22"
+    assert rows["none"]["2026-11"]["total"] == 0 and rows["none"]["2026-10"]["state"] == "before_start"
 
 
 def test_periods_are_graded_hour_day_week_month():
@@ -154,7 +161,7 @@ QUOTA = "\n".join(json.dumps(dict(ts=t, five_hour=dict(used_percentage=a, resets
 
 def test_transcript_missing_file_is_no_data():
     assert L.transcript_report(None) is None
-    assert L.transcript_report("") == dict(periods=[], sources=[], sessions=[], aggregate_days={})
+    assert L.transcript_report("") == dict(periods=[], headless=[], sources=[], sessions=[], aggregate_days={})
 
 
 def test_transcript_periods_follow_the_quota_grading_with_peaks():
