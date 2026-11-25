@@ -31,6 +31,11 @@ def tag(repo_dir, tag, sha, *, run=_run):
     log.info("tagged %s at %s in %s", tag, sha, repo_dir)
 
 
+def push_tag(repo_dir, tag, *, run=_run):
+    """Publish a release tag to the remote (the hosting service needs it for the deployment record and the release)."""
+    _git(repo_dir, "push", "origin", tag, run=run)
+
+
 def archive(repo_dir, tag, dest, *, run=_run):
     """`git archive` of the tag unpacked into `dest` (created when missing); returns `dest`."""
     dest = Path(dest)

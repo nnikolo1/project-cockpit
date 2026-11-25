@@ -42,6 +42,10 @@ def cmd_deploy(a, adapter=None, today=None):
     tag = a.tag or git_adapter.next_tag(a.repo_dir, today or dt.date.today())
     if a.apply and not a.tag:
         git_adapter.tag(a.repo_dir, tag, "HEAD")
+        try:
+            git_adapter.push_tag(a.repo_dir, tag)
+        except Exception as e:  # noqa: BLE001 - a missing remote must not stop a local deploy; the record will say so
+            log.warning("tag %s not pushed: %s", tag, e)
     try:
         return _out(core_deploy.deploy(a.project, tag, envs[a.env], ad, dry_run=not a.apply))
     except Exception as e:  # noqa: BLE001 - a command prints its failure as a Result, never a traceback

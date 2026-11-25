@@ -85,3 +85,9 @@ def test_injected_run_receives_a_git_command():
     seen = []
     git.next_tag("/r", DAY, run=lambda a: seen.append(a) or "")
     assert seen == [["git", "-C", "/r", "tag", "--list", "v2026.11.25-*"]]
+
+
+def test_push_tag_runs_git_push_origin_tag():
+    calls = []
+    git.push_tag("/r", "v2026.11.25-1", run=lambda args: calls.append(list(args)) or "")
+    assert calls == [["git", "-C", "/r", "push", "origin", "v2026.11.25-1"]]
