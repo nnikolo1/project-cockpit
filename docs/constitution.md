@@ -141,3 +141,8 @@ This is a headless AI agent that works on one task, in its own clone, as an unpr
 ## Turns end with a clear status (constitutional amendment, owner, 2026-11-25)
 
 Every turn ends in a way that makes it abundantly clear whether the assistant is about to work on anything: either it states plainly that it is idle and waits for the owner (and for what), or it states what it is doing next and then does it. Every turn also reports the number of sub-agents currently running and any intention to launch one (owner, 2026-11-25, constitutional amendment; applies to all projects at all times).
+
+
+## Labels are the owner's (standing rule, owner, 2026-11-25)
+
+Never apply a label that the owner has not proposed himself: not a new label, not an existing one the owner did not name for that purpose (owner, 2026-11-25, standing rule; applies to all projects at all times). Occasion: the assistant had applied the label `interactive-only` on its own initiative; it was removed and can no longer be set.
