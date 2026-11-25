@@ -49,3 +49,11 @@ def queue(root=QUEUE_ROOT, project=None):
             raise ValueError(f"unusable project name {project!r}")
         out.update(area=d / "area" / project, synopsis=d / "synopsis" / f"{project}.md", memory=d / "memory" / project)
     return out
+
+
+_home = home  # the parameter of deploy_lock shadows the function name
+
+
+def deploy_lock(home=None):
+    """The lock file of the deploy command: <home>/deploy.lock."""
+    return (pathlib.Path(home).expanduser() if home else _home()) / "deploy.lock"
