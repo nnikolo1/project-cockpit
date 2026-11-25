@@ -48,6 +48,34 @@ Write the LaunchAgent (macOS) or the systemd user unit (Linux) of section 5 with
 - **The Workers' image (by hand)**: copy the `claude` binary to the root of a build context that holds this repository's layout, then `container build --dns 1.1.1.1 -t cockpit-worker:latest -f dispatcher/image/Containerfile CONTEXT`. Expected: the build ends with the image tag; `container image list` shows `cockpit-worker`.
 - **The Dispatcher and the quota collector**: `python3 -m dispatcher.launchd render --project widgets --repo acme/widgets --repo-dir ~/src/widgets --token-file TOKENFILE` prints the paths of the two property lists and the two `launchctl bootstrap gui/$(id -u) FILE` commands; run those **by hand**, quota collector first. Expected: `launchctl print gui/$(id -u)/com.project-cockpit.dispatcher.widgets` shows the job; the Settings page shows the Dispatcher's values (it is on by default; switch it off there to install without starting Workers).
 
+### 5a. Migrating to the one Task Queue (PC-67)
+
+Before: one Dispatcher job, one quota job and one data folder per project (`com.project-cockpit.dispatcher.NAME`, `<data dir>/NAME/`). After: one queue for all projects ([specification](specs/dispatcher-and-workers.md) 3a, 3c, 4a, 5; [contract](contracts/queue-interfaces.md)): one Dispatcher job, one state file, one proxy, one container, one Worker pool, one data root. Only the projects the settings list are served; today that is the Project cockpit only. Steps marked **by hand** are done by a person.
+
+**What changes**
+
+- The job: the Label loses its project suffix (`com.project-cockpit.dispatcher`; the quota job likewise) and the arguments of the old job that name one project (`--repo`, `--repo-dir`, `--settings`, `--state`, `--area`, `--socket`, `--usage-file`, `--data-dir`) are replaced by `--data-root` and the list of served projects read from the settings. Open: the exact arguments and how a project's repo and clone are found (the code of PC-67 decides; this note follows it).
+- The settings key: `served_projects`, the list of project keys the queue serves (name proposed here, open until the code is merged). A project not in the list is never touched. Today: `["cockpit"]`. Adding another project is the owner's act, in the settings.
+- The data root: `~/.local/share/project-cockpit/task-queue/` (`--data-root`), laid out as in the contract: `dispatcher-state.json`, `processing/processing.jsonl`, `area/<project>/<task-id>/`, `proxy.sock`, `proxy-usage.jsonl`, `quota-history.jsonl`. The old per-project folder `<data dir>/<project>/` keeps its other files (cardmeta, tokens, backup status).
+
+**Order**
+
+1. **By hand**: switch the Dispatcher off in Settings and wait until no Worker runs (`container exec` list empty, the Task Queue tab shows none). Expected: nothing is WIP.
+2. **By hand**: unload the old jobs: `launchctl bootout gui/$(id -u)/com.project-cockpit.dispatcher.cockpit` and `.../com.project-cockpit.quota.cockpit`. Expected: `launchctl print` of each says it is not found.
+3. Merge the PC-67 code; pull (`git pull --ff-only`), restart the viewer (section 8).
+4. **By hand, the move of the live data**: copy, do not move, the old files into the data root, then check them; keep the old folder until step 8.
+   `mkdir -p ~/.local/share/project-cockpit/task-queue/area`
+   `cp -p OLD/dispatcher-state.json OLD/proxy-usage.jsonl OLD/quota-history.jsonl ROOT/`
+   `cp -Rp OLD/processing ROOT/processing`
+   `cp -Rp OLD/area ROOT/area/cockpit`
+   (OLD is `~/.local/share/project-cockpit/cockpit`, ROOT the data root.) Open: whether old processing-log lines get a `project` field added (the specification 5a wants it on every entry) or stay without it; the reader's tolerance of old lines is the code's to state. The task folders hold the Workers' good-bye notes and bundles: copied with the area, so they must be kept.
+5. Add `served_projects` to the settings (`["cockpit"]`); the Dispatcher switch stays off.
+6. Render and load the new job: the new `render` command prints the property lists and the `launchctl bootstrap` lines (quota job first); run them **by hand**. Rebuild or keep the image: no change needed (open: image recipes per project, PC-71).
+7. Switch the Dispatcher on in Settings. Expected: the heartbeat in `ROOT/processing/processing.jsonl`, entries naming the project `cockpit`; the Task Queue tab shows the old and new history.
+8. After a day of normal runs, **by hand**, delete the copied files from the old folder (not its cardmeta, token or backup files). Log each by-hand step in `docs/manual-interventions-log.md`.
+
+**Roll back**: switch the Dispatcher off in Settings and unload the new job; `git revert` the PC-67 merge and pull; re-render and load the old per-project jobs (`dispatcher.launchd render --project cockpit ...`, section 5). Before step 8 the old folder is still complete up to the move, so the old jobs continue from it; work done by the new job since step 7 is only in the data root, so copy `ROOT/processing/processing.jsonl` lines of that period back by hand if they must be kept. After step 8 a rollback needs the daily backup (`tools/project_backup.py`, Retention in Drive) to restore the deleted files.
+
 ### 6. First collectors run and the first check
 
     python3 tools/code_snapshot_refresh.py --project widgets

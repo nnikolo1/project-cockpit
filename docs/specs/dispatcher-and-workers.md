@@ -23,15 +23,15 @@ Every requirement below is the owner's own statement or was approved by the owne
 - 2a. The states of a task are embryo, released, WIP, unmerged, failed and merged.
 - 2b. An embryo created by the Interactive Session Agent counts as "released" once 10 days have passed since its creation; an embryo created by the Owner counts as released at once. A task filed by a scheduled job (the daily upkeep job) is an unreleased embryo that the Owner releases; it does not go through the mop-up agent. Questions and decisions are never released automatically. A task about the Task Queue itself (its Dispatcher, Workers, image, proxy or specification) carries the label `interactive-only` and is never given to a Worker: it is worked outside the queue, by the Interactive Session Agent, as a high-priority task (owner, 2026-11-24). A task filed by an agent because it found a file that contradicts a standing policy counts as released at once; the agent that found the contradiction does not work on that task. The author of every task is recorded as a label: `author:owner`, `author:interactive` or `author:job` (a scheduled job); a task without an author label counts as the Owner's.
 - 2c. Only the owner or an interactive agent can change the status of a task once it is "merged" or "failed".
-- 2d. Task metadata lives in GitHub, which is its single source of truth. A task is identified as `<repository short name>-<issue number>` (for example `cockpit-44`); its states WIP, unmerged, failed and merged are the labels `wip`, `unmerged`, `failed` and `merged` on its issue (embryo and released as before).
+- 2d. Task metadata lives in GitHub, which is its single source of truth. A task is identified as `<repository short name>-<issue number>` (for example `cockpit-44`); the part before the issue number is the task's project key (`cockpit`), the same string in every place that names a project. One Task Queue serves all projects (owner, 2026-11-24); its states WIP, unmerged, failed and merged are the labels `wip`, `unmerged`, `failed` and `merged` on its issue (embryo and released as before).
 - 2e. The Interactive Session Agent sets a task to "merged" after merging its branch into main.
 - 2f. A Worker may suggest one task per run: it writes the suggestion into its good-bye note (4o) as `suggested_task`. A suggestion is a pre-embryo: the Dispatcher does not file it; the Interactive Session Agent that mops up decides whether to file one or more tasks from it.
 
 **3. Dispatcher**
 
-- 3a. The Dispatcher's function is to assign tasks to Workers. Any "released" tasks can be assigned. The Dispatcher follows the priority and takes into account deadlines and blockers.
+- 3a. The Dispatcher's function is to assign tasks to Workers. Any "released" tasks can be assigned. The Dispatcher follows the priority and takes into account deadlines and blockers. The ranking is one global ranking across all served projects (owner, 2026-11-24): by the existing rule, with the tasks of the Project cockpit first; the tasks of all other projects are equal among themselves. There is no cap per project.
 - 3b. The Dispatcher runs on the host, not in a container.
-- 3c. The Dispatcher is started by the host's scheduler (on macOS: launchd) every 2 minutes; this can be changed via "Settings" in the Cockpit UI. It can also be disabled there. At each firing it starts at most one Worker, so the Workers are started one by one.
+- 3c. There is one Dispatcher job for all projects. It is started by the host's scheduler (on macOS: launchd) every 2 minutes; this can be changed via "Settings" in the Cockpit UI. At each firing it reads from the settings the list of served projects (6a) and serves only those; a project that is not listed is never touched: no task of it is read, ranked or started, and nothing of it is written. Today the list holds the Project cockpit only; other projects are added by the owner in the settings (owner, 2026-11-24). It can also be disabled there. At each firing it starts at most one Worker, so the Workers are started one by one, whatever project the task belongs to.
 - 3d. The Dispatcher puts a git bundle of the current main of the task's repository (the one its issue belongs to) and a task file (the task's title and text) into the Worker's `inbox/` (see 4q).
 - 3e. For each Worker whose process has ended, the Dispatcher fetches the Worker's git bundle, reads its good-bye note, and the task becomes "unmerged" if the bundle holds at least one commit and the note's `outcome` is not "gave_up", otherwise "failed" (reasons: no commit in the bundle, or the Worker gave up; a missing or unreadable bundle counts as no commit). A missing or unusable note fails the task. A Worker that gives up may still deliver partial work: its bundle is fetched in any case, so that the partial work is available on `worker/<task-id>`. The fetched branch is created in the task's repository on the host under the name `worker/<task-id>`; the Dispatcher does not push it or open a pull request.
 - 3f. As of now, no retries of failed jobs are foreseen; this can be changed via "Settings" in the Cockpit UI. A task whose Worker gave up is never retried automatically.
@@ -48,7 +48,7 @@ Every requirement below is the owner's own statement or was approved by the owne
 
 **4. Workers**
 
-- 4a. Up to 6 Workers run at once (owner, 2026-11-24, raised from 3 for production; a further raise to 10 is de-prioritised until the image is rebuilt for it); this can be changed via "Settings" in the Cockpit UI, up to the number of `workerN` users defined in the image.
+- 4a. Up to 6 Workers run at once, in total over all projects: one container and one Worker pool are shared by all projects (owner, 2026-11-24) (owner, 2026-11-24, raised from 3 for production; a further raise to 10 is de-prioritised until the image is rebuilt for it); this can be changed via "Settings" in the Cockpit UI, up to the number of `workerN` users defined in the image.
 - 4b. All Workers run in one container, at any time.
 - 4c. The Workers run in one long-lived container with an init process, no network interface, a fixed memory (4-6 GB) and CPU limit, and one volume for the worker area; the container runtime sits behind one interface in the Dispatcher so that it can be replaced. The current runtime is Apple's native macOS `container` tool, using plain `container run` (not `container machine`) with `--init`, `--network none`, `--memory`, `--cpus`, and no `--ssh`.
 - 4d. The proxy runs as long as there is a released task that is not yet WIP, or a Worker is running (a running Worker needs it). The Dispatcher starts it when that is the case and stops it when it is not; while it runs it keeps the host from sleeping (on macOS: it is wrapped in `caffeinate -i`).
@@ -71,16 +71,25 @@ Every requirement below is the owner's own statement or was approved by the owne
 
 **5. Processing log**
 
-- 5a. Each significant change of state related to Workers and the Dispatcher is recorded in the processing log; each entry names the task and its task folder.
+- 5a. Each significant change of state related to Workers and the Dispatcher is recorded in the processing log; each entry names the task, its project (the project key, 2d) and its task folder.
 - 5b. Every failed task records its reason in the processing log: no start, over 40 minutes, no activity, no note, an unusable note, no commit in the bundle, or the Worker gave up.
-- 5c. The processing log is stored where the processing occurs, on the owner's host (currently a MacBook).
+- 5c. The processing log is stored where the processing occurs, on the owner's host (currently a MacBook). The processing data of all projects lives in one place, one data root (owner, 2026-11-24, constitutional): the one processing log, the Dispatcher's state, the proxy socket and usage file, the quota history and the Workers' area, with a subfolder per project where the interface contract (`docs/contracts/queue-interfaces.md`) says so (the task folders of 4q lie under `area/<project>/`). The root is an argument of the Dispatcher; its default is `~/.local/share/project-cockpit/task-queue`.
 - 5d. The processing log is not part of any git repository.
 - 5e. The processing log is backed up on GDrive once a day. The access details are stored in a configuration file which is not part of the git repository.
 
 **6. Settings**
 
-- 6a. Settings (the Dispatcher's interval and on/off switch, retries, the number of Workers and the three limits of 3i and 3j) are stored in a configuration file in the Cockpit's local data folder, outside git.
+- 6a. Settings (the Dispatcher's interval and on/off switch, the list of served projects (3c), retries, the number of Workers and the three limits of 3i and 3j) are stored in a configuration file in the Cockpit's local data folder, outside git.
 - 6b. The Dispatcher reads the file at each firing.
+
+**7. Open points of the one queue** (not decided; not answered here)
+
+- 7a. Open: whether and how Worker kinds differ (PC-69).
+- 7b. Open: whether a project may have its own image recipe, and so its own container (PC-71); until decided, one image and one container serve all projects.
+- 7c. Open: whether a Worker is bound to one project (PC-72).
+- 7d. Open: a Linux machine as host (PC-73).
+- 7e. Open: the project field of an entry that belongs to no task (the heartbeat, 3g).
+- 7f. Open: where the settings file lives once there is one data root (6a says: the Cockpit's local data folder, outside git).
 
 ## Approach
 
