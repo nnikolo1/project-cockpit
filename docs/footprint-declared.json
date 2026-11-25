@@ -65,6 +65,13 @@
      "personal_data": false,
      "written_by": "githubclient",
      "note": "disk copies of the state, rules, timeline, card data, code view and module-page inputs (JSON, the --cache-dir argument); shown at once after a restart (a copy younger than one hour is not refreshed at all, so a restart costs no GitHub call) and refreshed behind; holds GitHub issue data (titles, bodies, labels), no token; rebuildable"
+    },
+    {
+     "path": "~/.local/share/project-cockpit/actions-seen.json",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "githubclient",
+     "note": "the ids of the last 200 actions sent by the page (PC-131), each started or done with its answer, so that a retried action is applied once, also across a restart; rewritten whole on each action, bounded, safe to delete when no action is in flight"
     }
    ],
    "logging": [

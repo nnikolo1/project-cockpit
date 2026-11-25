@@ -192,6 +192,25 @@ def join_text(text, kept):
     return "\n\n".join([text.strip()] + list(kept)).strip() + "\n"
 
 
+CHECKABLE_ACTIONS = ("release", "cancel", "edit")  # actions whose effect can be read back on the issue (PC-131)
+
+
+def action_applied(form, issue):
+    """Whether the action of `form` is visible on `issue` as GitHub shows it now (`gh issue view --json state,labels,title,body`):
+    True = applied (never apply it again), False = not (fully) applied, None = cannot be told from the issue. A partly applied
+    release, cancel or edit counts as not applied: running it again is harmless (labels and texts are set, not added up)."""
+    labels = {l["name"] if isinstance(l, dict) else l for l in issue.get("labels") or ()}
+    a = form.get("action")
+    if a == "release":
+        return "released" in labels
+    if a == "cancel":
+        return "cancelled" in labels and str(issue.get("state", "")).upper() == "CLOSED"
+    if a == "edit":
+        title, text = (form.get("title") or "").strip(), split_text(form.get("body"))[0]
+        return split_title(issue.get("title") or "", 0)[1].strip() == title and split_text(issue.get("body"))[0] == text
+    return None
+
+
 def analysis_state(comments):
     """The authority analysis of a task as its latest `<!-- analysis: clear|flagged|stale ... -->` comment records it; None = not recorded."""
     marks = [(c.get("t") or "", m.group(1)) for c in comments or () for m in [ANALYSIS.search(c.get("body") or "")] if m]
@@ -609,8 +628,9 @@ def group_commits(commits, assign, repo):
     """Same-day commits of one module -> one feed entry with several commit links (shown as short shas)."""
     g = {}
     for c in commits:
+        d = dt.date.fromisoformat(c["date"][:10]) if isinstance(c["date"], str) else c["date"]  # a disk copy keeps the day as an ISO string
         for lane in sorted(commit_lanes(c["files"], assign)):
-            g.setdefault((c["date"], lane), []).append(c)
+            g.setdefault((d, lane), []).append(c)
     out = []
     for (d, lane), cs in g.items():
         links = [(c["sha"][:7], f"https://github.com/{repo}/commit/{c['sha']}") for c in cs[:5]]

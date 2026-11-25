@@ -288,6 +288,13 @@ def _disk_load(key):
         return None
 
 
+def _jsonable(o):
+    """Dates (the commits' days) are kept on disk as ISO strings; logic.group_commits reads both forms."""
+    if isinstance(o, (dt.date, dt.datetime)):
+        return o.isoformat()
+    raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
+
+
 def _disk_save(key, v):
     f = _disk_path(key)
     if not f or OFFLINE:  # the restored backup is never written to
@@ -295,7 +302,7 @@ def _disk_save(key, v):
     try:
         f.parent.mkdir(parents=True, exist_ok=True)
         tmp = f.with_suffix(".tmp")
-        tmp.write_text(json.dumps(v))
+        tmp.write_text(json.dumps(v, default=_jsonable))
         os.replace(tmp, f)
     except (OSError, TypeError, ValueError) as ex:
         log.warning("cache %s not written to disk: %s", key, ex)
@@ -780,7 +787,92 @@ def save_settings(p, form):
     return "settings saved"
 
 
-def do_act(form, run=run_gh, state=None, p=None):
+# ---------- action ids: the page retries an action after a network failure; a repeat is never applied twice (PC-131) ----------
+ACTS_KEEP, ACT_WAIT_S = 200, 120
+_acts_lock, _acts_running = threading.Lock(), {}  # aid -> Event of an action that runs in this process right now
+
+
+def acts_path():
+    """The last ACTS_KEEP action ids with their state (started, or done with the answer): <data dir>/actions-seen.json. On disk, so that
+    an action interrupted by a restart is recognised when the page sends it again."""
+    return DATA_DIR / "actions-seen.json"
+
+
+def _acts():
+    try:
+        return json.loads(acts_path().read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _acts_put(aid, rec):
+    with _acts_lock:
+        a = _acts()
+        a[aid] = dict(rec, at=time.time())
+        for k in sorted(a, key=lambda k: a[k]["at"])[:-ACTS_KEEP]:
+            del a[k]
+        try:
+            _write_json(acts_path(), a)
+        except OSError as ex:
+            log.warning("action ids not written to disk: %s", ex)
+
+
+def applied_now(form, run, p=None):
+    """True/False: the effect of the action can be read on the issue as it is on GitHub now; None: it cannot be told."""
+    if form.get("action") not in L.CHECKABLE_ACTIONS:
+        return None
+    try:
+        p = p or proj(form.get("project"))
+        issue = json.loads(run(["issue", "view", str(_int(form.get("n"))), "-R", p["repo"], "--json", "state,labels,title,body"]))
+    except (RuntimeError, ValueError, UnknownProject) as ex:
+        log.warning("cannot read back the task of an interrupted %s: %s", form.get("action"), str(ex)[:100])
+        return None
+    return L.action_applied(form, issue)
+
+
+def do_act(form, run=None, state=None, p=None):
+    """-> (http status, body). With an action id (`aid`, sent by the page) the action is applied at most once: a repeat of a finished
+    action gets the first answer (repeat=True); a repeat of one that is still running waits for it; a repeat of one interrupted by a
+    restart first reads the task's current state on GitHub and is only run again when its effect is not there."""
+    run = run or run_gh
+    aid = str(form.get("aid") or "")[:64]
+    if not aid or not CFG["steer"]:
+        return _do_act(form, run, state, p)
+    with _acts_lock:
+        ev = _acts_running.get(aid)
+    if ev:
+        ev.wait(ACT_WAIT_S)
+    rec = _acts().get(aid)
+    if rec and rec.get("state") == "done":
+        log.info("action %s repeated (id %s): answered as the first time, not applied again", form.get("action"), aid)
+        return rec["code"], dict(rec["body"], repeat=True)
+    if rec:
+        if aid in _acts_running:
+            return 409, dict(error="this action is still running; look at the task in a minute")
+        done = applied_now(form, run, p)
+        log.info("action %s (id %s) was interrupted by a restart; its effect on GitHub: %s", form.get("action"), aid, done)
+        if done:
+            body = dict(ok=True, msg=f"{form.get('action')} had already been applied before the Cockpit restarted; not applied again", repeat=True)
+            _acts_put(aid, dict(state="done", code=200, body=body))
+            return 200, body
+        if done is None:
+            return 409, dict(error="this action was interrupted by a restart of the Cockpit and its effect cannot be read back; look at the task before trying again")
+    with _acts_lock:
+        if aid in _acts_running:  # another repeat claimed it in the meantime
+            return 409, dict(error="this action is still running; look at the task in a minute")
+        ev = _acts_running[aid] = threading.Event()
+    try:
+        _acts_put(aid, dict(state="started", action=form.get("action")))
+        code, body = _do_act(form, run, state, p)
+        _acts_put(aid, dict(state="done", code=code, body=body))
+        return code, body
+    finally:
+        with _acts_lock:
+            _acts_running.pop(aid, None)
+        ev.set()
+
+
+def _do_act(form, run, state=None, p=None):
     """-> (http status, body). 403 when the app is read-only; acts on the project named in form["project"] (default project otherwise)."""
     if not CFG["steer"]:
         log.warning("refused action %s: read-only", form.get("action"))
@@ -1053,7 +1145,10 @@ def get_state_served(p, fresh=False):
         S = dict(S, source=dict(S.get("source", {}), steering=False, simulate=False))
     if "modules" in S:
         S = dict(S, modules=ordered(p, S["modules"]))
-    return dict(S, stale=refreshing(pk(p, "state")), staleNote=stale_note(p), refreshAfter=S.get("source", {}).get("fetchedAt", 0) + GH_REFRESH_S)
+    return dict(S, stale=refreshing(pk(p, "state")), staleNote=stale_note(p), refreshAfter=S.get("source", {}).get("fetchedAt", 0) + GH_REFRESH_S, warming=WARM["on"])
+
+
+WARM = dict(on=False, since=0.0)  # on from the moment the server listens until the startup warm-up is done (PC-131): the page shows "warming up, data from <time>"
 
 
 def warm_module_pages(p):
@@ -1430,6 +1525,30 @@ class H(BaseHTTPRequestHandler):
         self.send(*do_act(form))
 
 
+def check_manager(projects, steer):
+    """Warn when gh acts as someone else than a project's Manager (a gh call: run after the server listens)."""
+    for p in projects:
+        if steer and gh_user() and gh_user() != p["manager"]:
+            log.warning("%s: gh is logged in as %s but the Manager is %s: protected labels set now would be flagged unauthorised", p["name"], gh_user(), p["manager"])
+
+
+def serve(host, port, warm_up):
+    """Listen first, then warm up in the background (PC-131): a restarted service answers the page at once from its disk copies, marked
+    `warming` until warm_up() returns, instead of refusing connections for the whole warm-up. -> the server (the caller runs serve_forever)."""
+    WARM.update(on=True, since=time.time())
+    srv = Server((host, port), H)
+
+    def go():
+        try:
+            warm_up()
+        except Exception:
+            log.exception("warm-up failed")
+        finally:
+            WARM["on"] = False
+    threading.Thread(target=go, daemon=True).start()
+    return srv
+
+
 def load_token(path=None):
     """A fresh random token, or the one kept in `path` (created mode 0600 if missing)."""
     if not path:
@@ -1499,18 +1618,16 @@ def main():
     CFG.update(steer=steer, simulate=a.simulate_orchestrator)
     for p in projects:
         log.info("project %s: repo=%s project=%s manager=%s mode=%s", p["name"], p["repo"], p["project"], p["manager"], "STEERING" if steer else "READ-ONLY")
-        if steer and gh_user() and gh_user() != p["manager"]:
-            log.warning("%s: gh is logged in as %s but the Manager is %s: protected labels set now would be flagged unauthorised", p["name"], gh_user(), p["manager"])
     global CACHE_DIR
     if not a.offline:
         CACHE_DIR = None if a.cache_dir == "none" else pathlib.Path(a.cache_dir or DATA_DIR / "cache").expanduser()
     H.token = load_token(a.token_file)
-    threading.Thread(target=warm, daemon=True).start()
     host = "0.0.0.0" if a.lan else "127.0.0.1"
     if a.lan:
         log.warning("--lan: plain HTTP, the token travels unencrypted; trusted network only")
+    srv = serve(host, a.port, lambda: (check_manager(projects, steer), warm()))
     log.info("open http://%s:%d/?t=%s  (acting as the gh user; manager=%s)", host, a.port, "<token file>" if a.token_file else H.token, ", ".join(f"{p['name']}={p['manager']}" for p in projects))
-    Server((host, a.port), H).serve_forever()
+    srv.serve_forever()
 
 
 if __name__ == "__main__":

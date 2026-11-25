@@ -115,6 +115,8 @@ tr.blocked{background:var(--danger-tint)}tr.blocked td:first-child{box-shadow:in
 .tile .v{font-size:24px;font-weight:600;font-variant-numeric:tabular-nums}
 .tile.nw{border-style:dashed}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:8px;z-index:30;font-size:13px}
+.toast-refused{background:var(--danger-tint);color:var(--danger);border:2px solid var(--danger)}.toast-net{background:var(--warn);color:var(--warn-ink);border:2px dashed var(--warn-ink)}
+.foot{padding-top:0;font-size:13px}.problems{font-size:13px;margin:6px 0 0;padding-left:20px}
 .dg{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;overflow:auto;max-height:78vh}
 .dg svg{display:block;margin:0 auto}.dg.fit svg{width:100%;height:auto;min-width:0}
 .wf{display:block;width:100%;min-width:720px;height:auto}
@@ -281,7 +283,7 @@ function modFilter(cur,act,first,allOf,unsorted,extra){
      +(unsorted&&STAGES.some(s=>tm.counts[s])?b(top,'(unsorted)',ex,true):'')+'</div>';}
   return h;}
 const pq=p=>PROJ?p+(p.includes('?')?'&':'?')+'project='+encodeURIComponent(PROJ):p;
-async function api(path,opt){const r=await fetch(pq(path),opt);let j={};try{j=await r.json();}catch(e){}if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j;}
+async function api(path,opt){let r;try{r=await fetch(pq(path),opt);}catch(e){throw new Error('the Cockpit could not be reached (it may be restarting)');}let j={};try{j=await r.json();}catch(e){}if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j;}
 async function loadPrs(fresh){  /* never blocks or fails anything else: its own request, its own state */
   try{PRS=await api('/api/rulesprs'+(fresh?'?fresh=1':''));}catch(e){PRS={configured:true,available:false,pending:[],error:e.message};}
 }
@@ -325,7 +327,7 @@ async function reload(pane){
     if(!CODE.modules[UI.codeMod]&&!MODULES.some(m=>m.id===UI.codeMod&&m.parent)){const k=MODULES.find(m=>!m.virtual);UI.codeMod=CODE.modules[k&&k.id]?k.id:'unassigned';}
   }catch(e){if(mine!==PROJ)return;UI.err=String(e.message||e);}
   render();  /* the questions of the other projects may take longer: they fill in when they arrive */
-  clearTimeout(staleTimer);if(D&&D.stale&&mine===PROJ)staleTimer=setTimeout(()=>reload(false),4000);  /* a newer copy is being fetched: ask again shortly */
+  clearTimeout(staleTimer);if(D&&(D.stale||D.warming)&&mine===PROJ)staleTimer=setTimeout(()=>reload(false),4000);  /* a newer copy is being fetched, or the restarted Cockpit warms up: ask again shortly */
   await qp;await pp;
   if(mine===PROJ)render();
 }
@@ -345,11 +347,43 @@ async function boot(){
   }catch(e){}
   reload(false);
 }
-async function post(body){
-  try{const j=await api('/api/act',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({project:PROJ},body))});
-    await reload(false);say(j.msg+'. The page shows GitHub data as of the last refresh; press Refresh on the pane to see the change.',7000);return true;}
-  catch(e){say('Refused: '+e.message,6000);return false;}
+/* PC-131 actions begin: a network failure (the browser's "Failed to fetch": the Cockpit was not reached, e.g. while it restarts) is told
+   apart from a refusal (the server answered no, with its reason). A network failure is retried automatically (NET_TRIES tries, NET_WAIT_S apart),
+   then a final message offers Retry. Every try carries the same action id (aid): the server applies an action once, however often it arrives,
+   and reads the task back before repeating one a restart interrupted; so a retried Submit is never applied twice. */
+const NET_TRIES=3,NET_WAIT_S=5,PROBLEMS_KEEP=20;
+class Refusal extends Error{}
+let PROBLEMS=[];try{PROBLEMS=JSON.parse(localStorage.getItem('cockpit-problems')||'[]');}catch(e){}
+function problem(action,msg){  /* the recent-problems list (footer): the last PROBLEMS_KEEP failed actions, newest first, kept across page loads */
+  PROBLEMS=[{t:new Date().toISOString(),action:action,msg:msg}].concat(PROBLEMS).slice(0,PROBLEMS_KEEP);
+  try{localStorage.setItem('cockpit-problems',JSON.stringify(PROBLEMS));}catch(e){}}
+const newAid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,10);
+const sleep=s=>new Promise(r=>setTimeout(r,s*1000));
+async function sendAct(body){  /* one try -> the answer; throws Refusal (an HTTP answer that is not ok) or the fetch's own TypeError (not reached) */
+  const r=await fetch(pq('/api/act'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  let j={};try{j=await r.json();}catch(e){}
+  if(!r.ok)throw new Refusal(j.error||('HTTP '+r.status));
+  return j;}
+const NET_MSG=(i)=>'The Cockpit could not be reached (it may be restarting). Nothing was changed. Retrying in '+NET_WAIT_S+' s (try '+(i+1)+' of '+NET_TRIES+').';
+const NET_FINAL='The Cockpit could not be reached after '+NET_TRIES+' tries (it may be restarting or stopped). The action did not reach it, or it was cut off by a restart; Retry sends it again and the Cockpit never applies it twice.';
+const REACHED=' (it had reached the Cockpit before the connection broke and was applied once, not again)';
+async function post(body){  /* body without aid: a new action; with aid (the Retry button): the same action again */
+  body=Object.assign({project:PROJ,aid:newAid()},body);
+  for(let i=1;;i++){
+    let j;
+    try{j=await sendAct(body);}
+    catch(e){
+      if(e instanceof Refusal){problem(body.action,'Refused: '+e.message);say('Refused: '+e.message,8000,'refused');return false;}
+      if(i>=NET_TRIES){problem(body.action,NET_FINAL);say(NET_FINAL,0,'net',body);return false;}
+      say(NET_MSG(i),(NET_WAIT_S+1)*1000,'net');await sleep(NET_WAIT_S);continue;}
+    await reload(false);say(j.msg+(j.repeat?REACHED:'')+'. The page shows GitHub data as of the last refresh; press Refresh on the pane to see the change.',7000);return true;}
 }
+function footer(){  /* the recent-problems list, so that a message that has disappeared can be read again */
+  let h='<div class="page foot"><button class="btn small" data-act="problems" aria-expanded="'+!!UI.problems+'">Recent problems ('+PROBLEMS.length+')</button>';
+  if(UI.problems)h+=PROBLEMS.length?'<ol class="problems">'+PROBLEMS.map(p=>'<li><span class="mono">'+esc(new Date(p.t).toLocaleString())+'</span> <b>'+esc(p.action||'')+'</b>: '+esc(p.msg)+'</li>').join('')+'</ol>'
+    :'<p class="muted" style="font-size:13px">No failed action in this browser.</p>';
+  return h+'</div>';}
+/* PC-131 actions end */
 
 /* Review state of rule changes lives in this browser only: localStorage `cockpit-reviewed:<repo>` = {since, <sha>: true|false}. */
 let REV=null;
@@ -1075,6 +1109,7 @@ function render(){
   h+=paneBar(R);
   const LOCAL=R==='settings'||R==='usage'||R==='questions'||R==='backlog'||R==='code';  /* tabs with a local part: shown without the GitHub state */
   const GHR=PANE_STATE.includes(R);  /* only these tabs show GitHub-state banners */
+  if(GHR&&D&&D.warming)h+='<div class="page" style="padding-bottom:0"><div class="card" role="status"><b>warming up, data from '+esc(D.source.fetched)+'</b> <span class="muted">The Cockpit has just restarted and is filling its caches; this is its copy on disk. Fresh data follows by itself; actions work meanwhile.</span></div></div>';
   if(GHR&&D&&D.staleNote){const n=D.staleNote;h+='<div class="page" style="padding-bottom:0"><div class="card" style="border-color:var(--warn,var(--danger))"><b class="warnline">GitHub data is old.</b> <span class="muted">Showing the copy from '+esc(D.source.fetched)+' ('+ageMin(n.age_s)+' old). '+(n.rate_limited?'GitHub rate limit reached; ':'GitHub could not be read ('+esc(n.error)+'); ')+(n.until?'next try at '+esc(new Date(n.until*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}))+'. ':'next try within a minute. ')+'</span> <button class="btn small" data-act="refresh">Retry</button></div></div>';}
   if(GHR&&UI.err&&!D)h+='<div class="page" style="padding-bottom:0"><div class="card" style="border-color:var(--danger)"><b class="warnline">Could not load from GitHub, and no earlier copy exists.</b> <span class="muted">'+esc(UI.err)+'</span> <button class="btn small" data-act="refresh">Retry</button></div></div>';
   else if(GHR&&UI.err)h+='<div class="page" style="padding-bottom:0"><div class="card" style="border-color:var(--danger)"><span class="warnline">Some parts could not be loaded:</span> <span class="muted">'+esc(UI.err)+'</span></div></div>';
@@ -1084,12 +1119,15 @@ function render(){
   h+=block(R,V,true);  /* a tab that throws still draws (PC-114) */
   if(UI.drawer){const t=UI.drawer.key&&byKey(D,UI.drawer.key);h+='<div class="drawer-bg" data-act="close"></div><div class="drawer" role="dialog" aria-modal="true" aria-label="Task">'+(UI.drawer.mode==='new'&&ST()?drawerNew(UI.drawer.prefill):(t?block('Task',()=>drawerTask(t)):''))+'</div>';}
   }
-  if(UI.toast)h+='<div class="toast" role="status">'+esc(UI.toast)+'</div>';
+  h+=footer();
+  if(UI.toast)h+='<div class="toast'+(UI.toastKind?' toast-'+UI.toastKind:'')+'" role="'+(UI.toastKind?'alert':'status')+'">'+(UI.toastKind==='net'?'<b>Not reached:</b> ':'')+esc(UI.toast)
+    +(UI.toastRetry?' <button class="btn small" data-act="retryact">Retry</button>':'')+(UI.toastKind==='refused'||UI.toastRetry?' <button class="btn small" data-act="toastx" aria-label="Close">×</button>':'')+'</div>';
   document.getElementById('app').innerHTML=h;
   hydrate();
 }
 let toastTimer=null,armTimer=null;
-function say(m,ms){UI.toast=m;clearTimeout(toastTimer);toastTimer=setTimeout(()=>{UI.toast='';render();},ms||2200);render();}
+/* kind: '' (news), 'refused' (the server said no) or 'net' (the Cockpit was not reached); ms 0 = stays until closed; retry = the action Retry sends again */
+function say(m,ms,kind,retry){Object.assign(UI,{toast:m,toastKind:kind||'',toastRetry:retry||null});clearTimeout(toastTimer);if(ms!==0)toastTimer=setTimeout(()=>{UI.toast='';render();},ms||2200);render();}
 const num=k=>{const t=byKey(D,k);return t&&t.number;};
 function act(a,ds){
   const t=ds.k&&D&&byKey(D,ds.k);
@@ -1127,6 +1165,9 @@ function act(a,ds){
      if(UI.armed!==id){UI.armed=id;clearTimeout(armTimer);armTimer=setTimeout(()=>{UI.armed=null;render();},6000);render();break;}
      UI.armed=null;clearTimeout(armTimer);
      post(ds.a==='compliance'?{action:'compliance',project:ds.k}:ds.a==='submit'?{action:'release',n:t.number,p:'P2',d:''}:{action:'cancel',n:t.number});break;}
+   case 'retryact':{const b=UI.toastRetry;UI.toast='';UI.toastRetry=null;render();post(b);break;}
+   case 'toastx':UI.toast='';UI.toastRetry=null;clearTimeout(toastTimer);render();break;
+   case 'problems':UI.problems=!UI.problems;render();break;
    case 'unblock':post({action:'unblock',n:t.number,b:num(ds.b)});break;
    case 'accept':case 'dismiss':post({action:a,n:+ds.n,id:ds.id});break;
   }

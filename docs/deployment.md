@@ -270,6 +270,7 @@ Add `--lan` and `--port N` only for phone access; the first LAN connection may r
 - **Rotate the token**: delete the token file and restart; every browser logs in again with the new URL. Read it only when needed: `cat TOKENFILE` (macOS: `pbcopy < TOKENFILE`).
 - **Rotate the GitHub credential**: `gh auth refresh` or `gh auth login` again as the same account; no restart is needed, the next `gh` call uses it.
 - **Upgrade**: `git -C ~/src/project-cockpit pull --ff-only`, then restart (table above). Nothing to migrate.
+- **What a restart costs** (PC-131): the viewer listens within a second or two of starting, before its warm-up; until the warm-up is done it answers from its disk copies (the page says "warming up, data from <time>") and actions work. The page retries an action that could not reach the viewer (three tries, 5 s apart, then a Retry button) and marks it with an action id, so the viewer applies it once (`<data dir>/actions-seen.json`); failed actions stay readable under "Recent problems" at the foot of the page. A restart is still a short outage, a deploy event: switching a new release in on its port (PC-84) removes it.
 - **Check after a start**: `T=$(cat TOKENFILE)`; `curl -si "http://127.0.0.1:8795/?t=$T"` should answer `303` with `Set-Cookie: t=...`; then `curl -s -b "t=$T" http://127.0.0.1:8795/api/state | head -c 300` should show JSON with `"steering": true` (or false when read-only). Without the cookie `/api/state` answers 403. A POST to `/api/act` on a read-only instance answers 403.
 
 ### One instance for several projects
