@@ -189,11 +189,12 @@ TL_BATCH = 10  # issues per on-demand timeline query
 TIMELINE = """timelineItems(last:100,itemTypes:[LABELED_EVENT,UNLABELED_EVENT,ASSIGNED_EVENT,CLOSED_EVENT]){nodes{__typename
   ... on LabeledEvent{createdAt actor{login} label{name}} ... on UnlabeledEvent{createdAt actor{login} label{name}}
   ... on AssignedEvent{createdAt actor{login} assignee{... on User{login}}} ... on ClosedEvent{createdAt actor{login}}}}"""
-GQL = """query($o:String!,$r:String!,$after:String,$n:Int!){repository(owner:$o,name:$r){issues(first:$n,after:$after,orderBy:{field:CREATED_AT,direction:ASC}){
- pageInfo{hasNextPage endCursor} nodes{number databaseId title url body state stateReason createdAt updatedAt lastEditedAt closedAt author{login}
+NODE = """number databaseId title url body state stateReason createdAt updatedAt lastEditedAt closedAt author{login}
  labels(first:50){nodes{name}} assignees(first:5){nodes{login}} parent{number} blockedBy(first:50){nodes{number}}
  comments(last:10){nodes{body createdAt author{login}}}
- """ + TIMELINE + "}}}}"
+ """ + TIMELINE  # the fields of one issue: the full load and the re-read of single issues (PC-135) read the same
+GQL = """query($o:String!,$r:String!,$after:String,$n:Int!){repository(owner:$o,name:$r){issues(first:$n,after:$after,orderBy:{field:CREATED_AT,direction:ASC}){
+ pageInfo{hasNextPage endCursor} nodes{""" + NODE + "}}}}"
 
 
 def fetch_issues(p):
@@ -210,6 +211,22 @@ def fetch_issues(p):
         if not page["pageInfo"]["hasNextPage"]:
             return issues, repair_events(p, issues, events)
         after = page["pageInfo"]["endCursor"]
+
+
+def fetch_issue_nodes(p, numbers):
+    """PC-135: a fresh reading of the given issues only, TL_BATCH per GraphQL call (one call for an action's one or two issues)
+    -> (raw issues, events). An issue GitHub no longer returns is left out."""
+    owner, name = p["repo"].split("/")
+    issues, events = [], []
+    for k in range(0, len(numbers), TL_BATCH):
+        chunk = numbers[k:k + TL_BATCH]
+        body = " ".join(f"i{n}:issue(number:{n}){{{NODE}}}" for n in chunk)
+        data = json.loads(run_gh(["api", "graphql", "-f", f"query=query($o:String!,$r:String!){{repository(owner:$o,name:$r){{{body}}}}}", "-f", f"o={owner}", "-f", f"r={name}"]))["data"]["repository"]
+        for n in chunk:
+            if data.get(f"i{n}"):
+                issues.append(L.norm_issue(data[f"i{n}"]))
+                events += L.norm_events(data[f"i{n}"])
+    return issues, events
 
 
 def fetch_timelines(p, numbers):
@@ -431,6 +448,15 @@ def build_state(p):
     with ThreadPoolExecutor(4) as ex:
         fi, fp, fd = ex.submit(fetch_issues, p), ex.submit(fetch_project, p), ex.submit(fetch_module_deadlines, p)
         (issues, events), project, deadlines = fi.result(), fp.result(), fd.result()
+    S = state_from_raw(p, dict(issues=issues, events=events, project=project), deadlines)
+    log.info("state: %d tasks, %d events, %d open proposals in %.1fs", len(S["tasks"]), len(events), len(S["proposals"]), time.time() - t0)
+    return S
+
+
+def state_from_raw(p, raw, deadlines, source=None):
+    """The task state derived from the raw copy (no GitHub call). The raw copy is kept in the state (`raw`, never served to the page), so an
+    action's known effect and a re-read of single issues can be laid on it and the state derived again (PC-135). `source`: keep this one."""
+    issues, events, project = raw["issues"], raw["events"], {int(k): v for k, v in raw["project"].items()}  # JSON keys are strings on disk
     cfgm = load_modules(p)
     tasks, mods = L.derive(issues, events, project, p["manager"], (cfgm or {}).get("modules", []), grow=not cfgm)
     for t in tasks:
@@ -438,12 +464,11 @@ def build_state(p):
     keys = {i["number"]: L.split_title(i["title"], i["number"])[0] for i in issues}
     nums = {t["number"]: t for t in tasks}
     proposals = [dict(p, n=i["number"], key=keys[i["number"]]) for i in issues for p in L.parse_proposals(i["comments"])]
-    log.info("state: %d tasks, %d events, %d open proposals in %.1fs", len(tasks), len(events), len(proposals), time.time() - t0)
     return dict(
         today=dt.date.today().isoformat(), tasks=tasks, questions=L.parse_questions(issues, p.get("name", "")), modules=mods, modDeadline=deadlines, proposals=proposals,
-        events=L.task_events(events, keys, p["manager"])[:400], unauthorised=sum(len(t["flags"]) for t in nums.values()),
-        source=dict(name=p.get("name", ""), repo=p["repo"], steering=CFG["steer"], simulate=CFG["simulate"] and CFG["steer"], project=p["project"],
-                    manager=p["manager"], user=gh_user(), fetched=time.strftime("%H:%M:%S"), fetchedAt=time.time()))
+        events=L.task_events(events, keys, p["manager"])[:400], unauthorised=sum(len(t["flags"]) for t in nums.values()), raw=raw,
+        source=source or dict(name=p.get("name", ""), repo=p["repo"], steering=CFG["steer"], simulate=CFG["simulate"] and CFG["steer"], project=p["project"],
+                              manager=p["manager"], user=gh_user(), fetched=time.strftime("%H:%M:%S"), fetchedAt=time.time()))
 
 
 def build_questions(fresh=False, now=None):
@@ -652,20 +677,24 @@ def _plan(form, S, repo, simulate):
 
 
 def execute(ops, run=run_gh):
-    """Run the planned gh calls in order; '{id}' is filled from the previous call's JSON; `label create` may fail (exists)."""
-    last = {}
+    """Run the planned gh calls in order; '{id}' is filled from the previous call's JSON; `label create` may fail (exists).
+    -> each call's JSON answer ({} when none), for the known effect of the action (PC-135)."""
+    last, outs = {}, []
     for op in ops:
         op = [x.replace("{id}", str(last.get("id", ""))) for x in op]
         try:
             out = run(op)
         except RuntimeError:
             if op[0] == "label":
+                outs.append({})
                 continue
             raise
         try:
-            last = json.loads(out) if out.strip().startswith("{") else {}
+            last = json.loads(out) if (out or "").strip().startswith("{") else {}
         except ValueError:
             last = {}
+        outs.append(last)
+    return outs
 
 
 def settings_path(p):
@@ -806,6 +835,107 @@ def save_settings(p, form):
     return "settings saved"
 
 
+# ---------- after an action (PC-135): the known effect at once, then a re-read of only the touched issues ----------
+REREAD_DELAY_S = 3   # the actions of a burst within this many seconds are re-read together: one call per TL_BATCH issues, not one per action
+_reread, _reread_lock = {}, threading.Lock()   # state key -> issue numbers waiting for their re-read
+
+
+def _key_lock(k):
+    with _lock:
+        return _locks.setdefault(k, threading.Lock())
+
+
+def _store(k, t, S):
+    """Replace the cached state, keeping the time of its full load (a patch never resets the hour)."""
+    _cache[k] = (t, S)
+    _disk_save(k, S)
+
+
+APPLY_WAIT_S = 1.0     # an action's answer waits at most this long for a full load that holds the state (a warm-up, a Refresh): actions never wait for it (PC-131)
+_deferred = set()      # state keys with a known effect still waiting for a full load to finish
+
+
+def after_action(p, ops, outs, now=None, schedule=True, wait=APPLY_WAIT_S):
+    """Lay the known effect of the gh calls that succeeded on the cached state (logic.apply_ops, no GitHub call) and queue a re-read of the
+    touched issues. -> their numbers, or None when the cache holds no raw copy (an older copy: it counts as expired, the next look reloads it)
+    or a full load holds the state longer than `wait` (the effect is then laid on it in the background once the load is stored)."""
+    k, now = pk(p, "state"), now or time.time()
+    lock = _key_lock(k)   # never between a full load's fetch and its store
+    if not lock.acquire(timeout=-1 if wait is None else wait):
+        log.info("%s: a full load holds the state; the effect of the action is applied when it is stored", p.get("name", ""))
+        _deferred.add(k)
+
+        def later():
+            try:
+                after_action(p, ops, outs, now, schedule, wait=None)
+            except Exception:
+                log.exception("the deferred known effect of an action could not be applied")
+            finally:
+                _deferred.discard(k)
+        threading.Thread(target=later, daemon=True).start()
+        return None
+    try:
+        t, S = _cache.get(k, (0, None))
+        if S is None and (S := _disk_load(k)) is not None:
+            t = _disk_time(k, DISK_FRESH_S)
+        if S is None:
+            return None
+        if "raw" not in S:
+            _cache[k] = (0, S)
+            return None
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
+        raw, dl, nums = L.apply_ops(S["raw"], S["modDeadline"], ops, outs, S["source"].get("user") or p["manager"], stamp)
+        _store(k, t, state_from_raw(p, raw, dl, dict(S["source"], patchedAt=now, rereadNote=None)))
+    finally:
+        lock.release()
+    if nums:
+        with _reread_lock:
+            first = k not in _reread
+            _reread.setdefault(k, set()).update(nums)
+        if first and schedule:
+            threading.Timer(REREAD_DELAY_S, _reread_safe, (p,)).start()
+    log.info("%s: action applied to the cached state; issue(s) %s re-read from GitHub in %d s", p.get("name", ""), nums, REREAD_DELAY_S)
+    return nums
+
+
+def _reread_safe(p):
+    try:
+        reread(p)
+    except Exception:
+        log.exception("re-read after an action failed")
+
+
+def reread(p, fetch=None):
+    """Read the issues touched by the last actions afresh (one light call per TL_BATCH issues, counted in the hourly cap) and put them in the cached
+    state. When GitHub cannot be asked (rate-limit pause, cap, error) the applied change stays and `source.rereadNote` says so."""
+    k = pk(p, "state")
+    with _reread_lock:
+        nums = sorted(_reread.pop(k, ()))
+    if not nums:
+        return
+    try:
+        with _gh_queue:
+            issues, events = (fetch or (lambda ns: fetch_issue_nodes(p, ns)))(nums)
+        note = None
+    except Exception as ex:
+        issues, note = None, f"GitHub could not be asked about {', '.join(f'#{n}' for n in nums)} ({str(ex)[:150]}); the change is shown as applied here"
+        log.warning("%s: re-read after an action failed: %s", p.get("name", ""), str(ex)[:150])
+    with _key_lock(k):
+        t, S = _cache.get(k, (0, None))
+        if not S or "raw" not in S:
+            return
+        if issues is None:
+            S = dict(S, source=dict(S["source"], rereadNote=note))
+        else:
+            with _reread_lock:   # an issue acted on again meanwhile keeps its newer applied change until its own re-read
+                again = _reread.get(k, set())
+            keep = [i for i in issues if i["number"] not in again]
+            S = state_from_raw(p, L.replace_issues(S["raw"], keep, [e for e in events if e["number"] not in again]), S["modDeadline"],
+                               dict(S["source"], rereadAt=time.time(), rereadNote=None))
+            log.info("%s: issue(s) %s re-read from GitHub after an action", p.get("name", ""), [i["number"] for i in keep])
+        _store(k, t, S)
+
+
 # ---------- action ids: the page retries an action after a network failure; a repeat is never applied twice (PC-131) ----------
 ACTS_KEEP, ACT_WAIT_S = 200, 120
 _acts_lock, _acts_running = threading.Lock(), {}  # aid -> Event of an action that runs in this process right now
@@ -883,7 +1013,7 @@ def do_act(form, run=None, state=None, p=None):
     try:
         _acts_put(aid, dict(state="started", action=form.get("action")))
         code, body = _logged_act(form, run, state, p)
-        _acts_put(aid, dict(state="done", code=code, body=body))
+        _acts_put(aid, dict(state="done", code=code, body={k: v for k, v in body.items() if k != "state"}))  # the page's copy of the state (PC-135) is not kept for repeats
         return code, body
     finally:
         with _acts_lock:
@@ -929,7 +1059,7 @@ def _do_act(form, run, state, ctx):
         S = state or get_state(p=p)  # the cached state: an action does not bypass the hour (owner F-701)
         ctx["task"] = next((t["key"] for t in S["tasks"] if str(t["number"]) == str(form.get("n", "")).lstrip("#")), None)
         ops, msg = plan_action(form, S, p["repo"], CFG["simulate"])
-        execute(ops, run)
+        outs = execute(ops, run)
     except UnknownProject as ex:
         return 404, dict(error=ex.args[0])
     except PermissionError as ex:
@@ -941,7 +1071,15 @@ def _do_act(form, run, state, ctx):
         log.error("action %s failed: %s", form.get("action"), ex)
         return 502, dict(error=f"GitHub: {ex}")
     log.info("action ok on %s: %s -> %s", p.get("name", ""), form.get("action"), msg)
-    return 200, dict(ok=True, msg=msg)
+    try:
+        nums = after_action(p, ops, outs) if ops else []
+    except Exception:  # the action itself succeeded: its answer must not fail; the next look reloads the state
+        log.exception("the known effect of %s could not be applied to the cached state", form.get("action"))
+        if pk(p, "state") in _cache:
+            _expire(pk(p, "state"))
+        nums = None
+    # the page's copy at once (PC-135): the served state with the known effect, when the cache holds one (no GitHub call)
+    return 200, dict(ok=True, msg=msg, issues=nums or [], **({"state": get_state_served(p)} if nums is not None and ops and state is None else {}))
 
 
 # ---------- action log (PC-132): <data dir>/<project>/actions.jsonl, appended, mode 0600, rotated by size keeping five files ----------
@@ -1211,13 +1349,19 @@ def build_timeline(S, p=None, fresh=False):
 def get_timeline(p, fresh=False):
     """The timeline built from the state that is served right now (a refreshed state gets a rebuilt timeline at once, never one from older data)."""
     S = get_state(p=p)
-    k, at = pk(p, "timeline"), S["source"]["fetchedAt"]
+    k, at = pk(p, "timeline"), state_version(S)
     build = lambda: dict(build_timeline(S, p, fresh), stateAt=at)
     if fresh:
         _expire(k)
         log.info("owner Refresh of the timeline of %s", p.get("name", ""))
     tl = cached(k, build, 30, swr=not fresh, persist=True, disk_fresh=DISK_FRESH_S)
     return tl if tl.get("stateAt") == at else cached(k, build, -1, persist=True)
+
+
+def state_version(S):
+    """When the state last changed: its full load, an action's applied effect or a re-read of single issues (PC-135)."""
+    src = S.get("source", {})
+    return max(src.get("fetchedAt") or 0, src.get("patchedAt") or 0, src.get("rereadAt") or 0)
 
 
 def stale_note(p, now=None):
@@ -1319,11 +1463,12 @@ def _served(p, S):
         S = dict(S, source=dict(S.get("source", {}), steering=False, simulate=False))
     if "modules" in S:
         S = dict(S, modules=ordered(p, S["modules"]))
+    S = {k: v for k, v in S.items() if k != "raw"}   # the raw copy stays on the server (PC-135)
     at = S.get("source", {}).get("fetchedAt")
     new_work = L.may_start_new(time.time() - at if at else None)
     if not new_work and "tasks" in S:  # owner: no new task is started from state older than an hour; work in progress may continue
         S = dict(S, tasks=[dict(t, pick=False) for t in S["tasks"]])
-    return dict(S, stale=refreshing(pk(p, "state")), staleNote=stale_note(p), refreshAfter=(at or 0) + GH_REFRESH_S,
+    return dict(S, stale=refreshing(pk(p, "state")) or pk(p, "state") in _reread or pk(p, "state") in _deferred, staleNote=stale_note(p), refreshAfter=(at or 0) + GH_REFRESH_S,
                 steerBlock=steer_block(p) if CFG["steer"] else None, newWork=new_work, warming=WARM["on"])
 
 

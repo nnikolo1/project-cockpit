@@ -178,6 +178,7 @@ tr.lv-hour td{background:var(--lv-hour-tint)}tr.lv-hour td:first-child{border-le
   .feed .e{grid-template-columns:1fr;gap:4px}
   .proto{margin-left:0}
 }
+@media (prefers-reduced-motion:no-preference){.flash{animation:flash 2s ease-out}@keyframes flash{from{background:var(--accent-tint)}to{background:none}}}
 @media (prefers-reduced-motion:no-preference){.drawer{animation:in .15s ease-out}@keyframes in{from{transform:translateX(24px);opacity:0}to{transform:none;opacity:1}}}
 </style>
 </style>
@@ -346,12 +347,12 @@ async function reload(pane){
     const [s,f,r]=await Promise.all([soft(api('/api/state'+(fresh?'?fresh=1':'')),null,'state'),soft(api('/api/timeline'+(ft?'?fresh=1':'')),{entries:[],activity:[]},'timeline'),api('/api/rules').catch(e=>({configured:false,error:e.message}))]);
     if(mine!==PROJ)return;  /* the user switched project while this was loading: drop the answer */
     if(fresh)for(const k in MODDOC)delete MODDOC[k];
-    if(s){D=s;TODAY=D.today;MODULES=D.modules;FEED=f.entries;ACT=f.activity||[];}  /* a failed state keeps the copy the page already has */
+    if(s){setState(s);FEED=f.entries;ACT=f.activity||[];}  /* a failed state keeps the copy the page already has */
     RULES=r;UI.err=errs.join('; ');
     if(!CODE.modules[UI.codeMod]&&!MODULES.some(m=>m.id===UI.codeMod&&m.parent)){const k=MODULES.find(m=>!m.virtual);UI.codeMod=CODE.modules[k&&k.id]?k.id:'unassigned';}
   }catch(e){if(mine!==PROJ)return;UI.err=String(e.message||e);}
   render();  /* the questions of the other projects may take longer: they fill in when they arrive */
-  clearTimeout(staleTimer);if(D&&(D.stale||D.warming)&&mine===PROJ)staleTimer=setTimeout(()=>reload(false),4000);  /* a newer copy is being fetched, or the restarted Cockpit warms up: ask again shortly */
+  clearTimeout(staleTimer);if(D&&(D.stale||D.warming)&&mine===PROJ)staleTimer=setTimeout(poll,4000);  /* a newer copy is being fetched, or the restarted Cockpit warms up: ask again shortly */
   await qp;await pp;
   if(mine===PROJ)render();
 }
@@ -396,6 +397,29 @@ const QPOLL=queuePoller({visible:()=>document.visibilityState==='visible',active
   fetch:async()=>{const mine=PROJ,c=QPEND||D,r=await api('/api/queuepoll?since='+(c?c.source.fetchedAt:0));r._proj=mine;return r;},
   apply:qApply,fail:()=>patch('pbar',paneBar(UI.route))});
 document.addEventListener('visibilitychange',()=>QPOLL.wake());
+function setState(s){D=s;TODAY=D.today;MODULES=D.modules;}
+/* an open form is never redrawn under the owner's hands: a field of a form has the focus, or the task editor is open */
+const busy=()=>{const a=document.activeElement;return !!(UI.drawer&&UI.drawer.edit)||!!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&a.closest('form'));};
+async function poll(){  /* the server is fetching a newer copy (a full load, or the re-read after an action): take it when it is there */
+  if(busy()){staleTimer=setTimeout(poll,4000);return;}
+  const mine=PROJ;
+  try{const s=await api('/api/state');if(mine!==PROJ)return;setState(s);}catch(e){}
+  if(!busy())render();
+  clearTimeout(staleTimer);if(D&&(D.stale||D.warming)&&mine===PROJ)staleTimer=setTimeout(poll,4000);
+}
+/* PC-135: after a state change the page takes the server's copy with the known effect at once, refreshes the tab where it happened from the
+   server's current copy, and marks the other tabs stale: each refreshes when it is opened next (from the server's cache, no GitHub call). */
+const TABS=['cockpit','backlog','questions','timeline','settings','usage','code'];
+let STALE=new Set(),FLASH={keys:[],until:0};
+async function refreshTab(R){
+  const mine=PROJ,ok=f=>x=>{if(mine===PROJ)f(x);};
+  const part={questions:()=>loadQuestions(false),timeline:()=>api('/api/timeline').then(ok(f=>{FEED=f.entries;ACT=f.activity||[];})),
+    backlog:()=>api('/api/queue').then(ok(x=>{QL=x;})),cockpit:()=>loadCompliance(),usage:()=>api('/api/usage').then(ok(x=>{USE=x;})),
+    settings:()=>Promise.all([api('/api/settings').then(ok(x=>{SET=x;})),api('/api/cardsettings').then(ok(x=>{CSET=x;})),loadCompliance(),loadPrs(false)])}[R];
+  try{await Promise.all([api('/api/state').then(ok(setState)),part?part():null]);}catch(e){if(mine===PROJ)UI.err=String(e.message||e);}
+  STALE.delete(R);
+  clearTimeout(staleTimer);if(D&&(D.stale||D.warming)&&mine===PROJ)staleTimer=setTimeout(poll,4000);
+}
 async function pickProject(name){
   if(name===PROJ)return;
   PROJ=name;try{localStorage.setItem('cockpit-project',name);}catch(e){}
@@ -433,7 +457,7 @@ const NET_FINAL='The Cockpit could not be reached after '+NET_TRIES+' tries (it 
 const REACHED=' (it had reached the Cockpit before the connection broke and was applied once, not again)';
 async function post(body){  /* body without aid: a new action; with aid (the Retry button): the same action again */
   body=Object.assign({project:PROJ,aid:newAid(),page:PAGE_ID},body);
-  const t0=performance.now(),tk=body.n&&D&&D.tasks.find(x=>x.number===+body.n);
+  const R=UI.route,mine=PROJ,t0=performance.now(),tk=body.n&&D&&D.tasks.find(x=>x.number===+body.n);
   for(let i=1;;i++){
     let j;
     try{j=await sendAct(body);}
@@ -442,7 +466,13 @@ async function post(body){  /* body without aid: a new action; with aid (the Ret
       note('network',body.action,tk?tk.key:body.n,'try '+i+' of '+NET_TRIES+': '+(e&&e.message||e),performance.now()-t0);
       if(i>=NET_TRIES){problem(body.action,NET_FINAL);say(NET_FINAL,0,'net',body);return false;}
       say(NET_MSG(i),(NET_WAIT_S+1)*1000,'net');await sleep(NET_WAIT_S);continue;}
-    await reload(false);say(j.msg+(j.repeat?REACHED:'')+'. The page shows GitHub data as of the last refresh; press Refresh on the pane to see the change.',7000);return true;}
+    if(mine!==PROJ)return true;  /* PC-135: the known effect first, the tab where it happened from the server's current copy, the other tabs marked stale */
+    if(j.state)setState(j.state);
+    FLASH={keys:(j.issues||[]).map(n=>(D&&D.tasks.find(t=>t.number===n)||{}).key).filter(Boolean),until:Date.now()+2500};
+    TABS.forEach(r=>{if(r!==R)STALE.add(r);});
+    say(j.msg+(j.repeat?REACHED:'')+'.'+((j.issues||[]).length?' Confirming with GitHub…':''),5000);
+    await refreshTab(R);
+    render();return true;}
 }
 function footer(){  /* the recent-problems list, so that a message that has disappeared can be read again */
   let h='<div class="page foot"><button class="btn small" data-act="problems" aria-expanded="'+!!UI.problems+'">Recent problems ('+PROBLEMS.length+')</button>';
@@ -592,13 +622,15 @@ function vCockpit(){
 function paneBar(R){
   /* every pane that shows GitHub-sourced data says how old it is and has its own Refresh (the only thing that bypasses the hourly refresh) */
   let at=null,after=null;
+  let mine='';
   if(R==='backlog'&&(QP||QPOLL.error))return queueBar();
-  if(PANE_STATE.includes(R)&&D){at=D.source.fetchedAt;after=D.refreshAfter;}
+  if(PANE_STATE.includes(R)&&D){at=D.source.fetchedAt;after=D.refreshAfter;const s=D.source;  /* PC-135: an action's change on top of the copy */
+    if(s.patchedAt)mine=' · your change applied '+tm(s.patchedAt)+(s.rereadNote?', not confirmed by GitHub':s.rereadAt>=s.patchedAt?', confirmed by GitHub '+tm(s.rereadAt):', confirming with GitHub…');}
   else if(R==='questions'){const a=Q.projects.filter(p=>p.age_s!=null).map(p=>Date.now()/1000-p.age_s);if(a.length){at=Math.min(...a);after=at+3600;}}
   else if(R==='settings'&&UI.setSec==='policies'&&PRS.at){at=PRS.at;after=at+3600;}
   else if(!(R==='cockpit'||R==='backlog'||R==='timeline'||R==='questions'||R==='settings'))return '';
   else if(R==='settings'&&UI.setSec!=='policies')return '';
-  return '<div class="page" id="pbar" style="padding-bottom:0"><div class="row" style="gap:10px"><span class="muted" style="font-size:13px" title="GitHub data is refreshed lazily, at most once an hour; Refresh fetches this pane\'s data now">'+(at?'data from '+tm(at)+(after?', next refresh after '+tm(after):''):'no data yet')+'</span>'+(R==='backlog'?'<span class="muted" style="font-size:13px" data-zone>'+zoneNote()+'</span>':'')+'<button class="btn small" data-act="refresh" data-pane="'+R+'">Refresh</button></div></div>';
+  return '<div class="page" id="pbar" style="padding-bottom:0"><div class="row" style="gap:10px"><span class="muted" style="font-size:13px" title="GitHub data is refreshed lazily, at most once an hour; Refresh fetches this pane\'s data now">'+(at?'data from '+tm(at)+(after?', next refresh after '+tm(after):'')+mine:'no data yet')+'</span>'+(R==='backlog'?'<span class="muted" style="font-size:13px" data-zone>'+zoneNote()+'</span>':'')+'<button class="btn small" data-act="refresh" data-pane="'+R+'">Refresh</button></div></div>';
 }
 /* The age banner (owner, offline behaviour): the last good state with its age, the case (rate limit with its retry time, rejected token,
    unreachable), that no new task starts from it when it is over an hour old, and why the steering actions are off. */
@@ -1089,6 +1121,7 @@ function vDiagram(k){
    +'<div class="dg'+(fit?' fit':'')+'" id="dgbox" data-k="'+k+'">'+(SVGC[k]||'<span class="muted">Loading…</span>')+'</div><p class="muted" style="font-size:13px;margin:0">Snapshot '+esc(CODE.commit)+', '+esc((CODE.generated_at||'').slice(0,10))+'. Regenerate the snapshot to refresh.</p>';
 }
 async function hydrate(){
+  if(Date.now()<FLASH.until)FLASH.keys.forEach(k=>document.querySelectorAll('[data-act="open"][data-k="'+k+'"]').forEach(b=>{const r=b.closest('tr,.row');if(r)r.classList.add('flash');}));  /* the acted-on row */
   if(UI.route==='backlog'&&modPage())loadModDoc(UI.mod);
   const b=document.getElementById('dgbox');if(!b||SVGC[b.dataset.k])return;
   const k=b.dataset.k;
@@ -1233,6 +1266,7 @@ function render(){
   if(UI.route==='how'){UI.route='code';UI.codeTab='flowchart';}
   if(UI.route==='rules'){UI.route='settings';UI.setSec='policies';}  /* old route */
   const R=UI.route;
+  if(STALE.has(R)){STALE.delete(R);refreshTab(R).then(()=>{if(UI.route===R&&!busy())render();});}  /* a tab marked stale by an action elsewhere */
   const nav=[['cockpit','Cockpit'],['backlog','Task Queue'],['questions','Open questions'],['timeline','Timeline'],['settings','Settings'],['usage','Token Usage'],['code','Code']];
   let h='<div class="top"><span class="brand">Project cockpit</span><nav class="nav" aria-label="Main">'+nav.map(n=>'<button data-act="go" data-r="'+n[0]+'"'+(R===n[0]?' aria-current="page"':'')+'>'+n[1]+(n[0]==='questions'?' <span class="chip" aria-label="'+Q.questions.length+' open">'+Q.questions.length+'</span>':n[0]==='backlog'&&runCount()?' <span class="chip" aria-label="'+runCount()+' running">'+runCount()+'</span>':'')+'</button>').join('')+'</nav>';
   if(PROJS.length>1)h=h.replace('</span><nav','</span><select class="psel" id="psel" aria-label="Project">'+PROJS.map(p=>'<option value="'+esc(p.name)+'"'+(p.name===PROJ?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select><nav');
@@ -1247,6 +1281,7 @@ function render(){
   const GHR=PANE_STATE.includes(R);  /* only these tabs show GitHub-state banners */
   if(GHR&&D&&(D.staleNote||D.newWork===false))h+=ageBanner(D);
   if(GHR&&D&&D.warming)h+='<div class="page" style="padding-bottom:0"><div class="card" role="status"><b>warming up, data from '+tm(D.source.fetchedAt)+'</b> <span class="muted">The Cockpit has just restarted and is filling its caches; this is its copy on disk. Fresh data follows by itself; actions work meanwhile.</span></div></div>';
+  if(GHR&&D&&D.source.rereadNote)h+='<div class="page" style="padding-bottom:0"><div class="card" role="status" style="border-color:var(--warn,var(--danger))"><b class="warnline">Your change is shown as applied.</b> <span class="muted">'+esc(D.source.rereadNote)+'.</span></div></div>';
   if(GHR&&UI.err&&!D)h+='<div class="page" style="padding-bottom:0"><div class="card" style="border-color:var(--danger)"><b class="warnline">Could not load from GitHub, and no earlier copy exists.</b> <span class="muted">'+esc(UI.err)+'</span> <button class="btn small" data-act="refresh">Retry</button></div></div>';
   else if(GHR&&UI.err)h+='<div class="page" style="padding-bottom:0"><div class="card" style="border-color:var(--danger)"><span class="warnline">Some parts could not be loaded:</span> <span class="muted">'+esc(UI.err)+'</span></div></div>';
   if(!D&&!LOCAL){if(!UI.err)h+='<div class="page"><span class="muted">Loading…</span></div>';}

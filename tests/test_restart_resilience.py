@@ -149,6 +149,14 @@ def test_a_lost_answer_and_the_retry_apply_submit_once(server, monkeypatch):
     assert len(gh.edits()) == 1  # not applied twice
 
 
+def test_the_pages_copy_of_the_state_is_not_kept_in_the_action_id_file(env, monkeypatch):
+    """Merge of PC-131 and PC-135: an answer carries the served state for the page; the file of the last 200 action ids keeps the rest only."""
+    monkeypatch.setattr(C, "_do_act", lambda form, run, state, p: (200, dict(ok=True, msg="done", issues=[1], state=dict(tasks=[1] * 1000))))
+    C.do_act(dict(action="release", n=1, aid="big-1"))
+    kept = C._acts()["big-1"]["body"]
+    assert kept == dict(ok=True, msg="done", issues=[1])
+
+
 def test_a_repeat_while_the_first_still_runs_waits_for_it_and_applies_once(env, monkeypatch):
     gate, n = threading.Event(), []
 
@@ -244,7 +252,7 @@ def block():
 def run_page(tail):
     esc = re.search(r"^function esc\(s\).*$", PAGE, re.M).group(0)
     stubs = ("var PAGE_ID='pg',NOTES=[],D=null;function note(){NOTES.push([].slice.call(arguments))}var store={},localStorage={getItem:k=>store[k]||null,setItem:(k,v)=>{store[k]=v}};var UI={},PROJ='x',SAYS=[],RELOADS=0;"
-             "const pq=p=>p;async function reload(){RELOADS++}function say(m,ms,kind,retry){SAYS.push({m:m,ms:ms,kind:kind||'',retry:!!retry})}"
+             "const pq=p=>p;async function reload(){RELOADS++}var TABS=[],STALE=new Set(),FLASH={keys:[],until:0};function setState(s){D=s}async function refreshTab(){RELOADS++}function render(){}function say(m,ms,kind,retry){SAYS.push({m:m,ms:ms,kind:kind||'',retry:!!retry})}"
              "global.setTimeout=(f)=>{f();return 0};")
     r = subprocess.run(["node", "-e", esc + stubs + block() + tail], capture_output=True, text=True, timeout=30)
     assert r.returncode == 0, r.stderr
