@@ -1480,14 +1480,96 @@ def _add_messages(into, c):
         into[k] += c[k]
 
 
-def usage_summary(rep):
-    """One project's row for the All projects table: the 90 days' counts, their sum, the number of tasks, the last day with use. None for no data."""
-    if not rep or rep["days"] is None:
-        return None
-    row = {}
-    for k in (*USAGE_FIELDS, "total"):
-        row[k] = sum(d[k] for d in rep["days"])
-    return dict(row, tasks=len(rep["tasks"] or []), last_day=max((d["key"] for d in rep["days"]), default=None))
+MONTHS_SHOWN = 3                          # owner, 2026-11-25 (PC-113): the current month and the two before it
+UNATTENDED_KINDS = ("headless", "unattended")  # a transcript record whose `kind` (PC-77) is one of these is unattended, not interactive
+UNASSIGNED = "unassigned"                  # the row group of transcript sources and aggregate days no project claims
+
+
+def _months(today):
+    y, m = today.year, today.month
+    out = []
+    for _ in range(MONTHS_SHOWN):
+        out.append(f"{y:04d}-{m:02d}")
+        y, m = (y, m - 1) if m > 1 else (y - 1, 12)
+    return out
+
+
+def source_project(label, projects):
+    """The project a transcript source (its label, the transcript folder's name) belongs to, or UNASSIGNED. projects: [dict(name, dir,
+    sources)]. An explicit `sources` list wins; otherwise the default folder rule: the label is the project's directory name or the tool's
+    encoded path of it (ends with "-DIR") or of a worktree inside it ("-DIR--..."); the longest matching directory wins."""
+    for p in projects:
+        if label in (p.get("sources") or ()):
+            return p["name"]
+    hits = [p for p in projects if p.get("dir") and (label == p["dir"] or label.endswith("-" + p["dir"]) or f"-{p['dir']}--" in label
+                                                    or label.startswith(p["dir"] + "--"))]
+    return max(hits, key=lambda p: len(p["dir"]))["name"] if hits else UNASSIGNED
+
+
+def monthly_by_project(projects, transcripts, aggregates, today):
+    """The Token Usage card "Per project, by month". projects: [dict(name, dir, sources, start (YYYY-MM or None), usage (proxy file text or
+    None), plog (processing log text or None))]; transcripts, aggregates: the texts of every transcript-usage and stats-cache-usage file
+    (None for a missing one; a message or day seen in several files counts once); today: a date (UTC).
+    -> dict(months, projects=[dict(name, rows)]), a row per month newest first: dict(month, state) with state "before_start" (the project's
+    start month is later), "no_data" (no source exists at all) or "data" with the four counts, `total`, `interactive` (transcripts),
+    `unattended` (proxy and transcript records of an unattended kind), `aggregate` (stats cache, no split: in `total` only), `tasks`
+    (launched that month) and `last_day`. total = interactive + unattended + aggregate. An aggregate day goes to the only project started
+    by its month, else to UNASSIGNED; so do transcript sources no project claims. The UNASSIGNED group is listed only when it has tokens."""
+    months = _months(today)
+    names = [p["name"] for p in projects]
+    blank = lambda: dict({k: 0 for k in (*USAGE_FIELDS, "total", "interactive", "unattended", "aggregate", "tasks")}, last_day=None)
+    acc = {n: {m: blank() for m in months} for n in names + [UNASSIGNED]}
+
+    def put(name, day, c, kind):
+        r = acc[name].get(day[:7])
+        if r is None:
+            return
+        if kind != "aggregate":
+            _add(r, c)
+        else:
+            r["total"] += c["total"]
+        r[kind] += c["total"]
+        if c["total"] and (r["last_day"] is None or day > r["last_day"]):
+            r["last_day"] = day
+    day_of = lambda t: dt.datetime.fromtimestamp(t, dt.timezone.utc).date().isoformat()
+    seen, exact = set(), set()
+    for text in transcripts:
+        for rec in _json_lines(text) or []:
+            t, key = _epoch(rec.get("ts")), (rec.get("session"), rec.get("agent"), rec.get("message"))
+            if t is None or key in seen:
+                continue
+            seen.add(key)
+            exact.add(day_of(t))
+            put(source_project(str(rec.get("source") or "?"), projects), day_of(t), _counts(rec),
+                "unattended" if rec.get("kind") in UNATTENDED_KINDS else "interactive")
+    agg_seen = set()
+    for text in aggregates:
+        for rec in _json_lines(text) or []:
+            d, n = rec.get("day"), rec.get("tokens")
+            if (rec.get("source") != "stats-cache" or not isinstance(n, int) or isinstance(n, bool) or _epoch(f"{d}T00:00:00+00:00") is None
+                    or d in exact or (d, rec.get("model")) in agg_seen):
+                continue
+            agg_seen.add((d, rec.get("model")))
+            live = [p["name"] for p in projects if not p.get("start") or p["start"] <= d[:7]]
+            put(live[0] if len(live) == 1 else UNASSIGNED, d, dict(total=n), "aggregate")
+    for p in projects:
+        for rec in _json_lines(p.get("usage")) or []:
+            t = _epoch(rec.get("ts"))
+            if t is not None:
+                put(p["name"], day_of(t), _counts(rec), "unattended")
+        for rec in _json_lines(p.get("plog")) or []:
+            t = _epoch(rec.get("time"))
+            if t is not None and rec.get("state") == "launched" and day_of(t)[:7] in acc[p["name"]]:
+                acc[p["name"]][day_of(t)[:7]]["tasks"] += 1
+    shared = any(x is not None for x in (*transcripts, *aggregates))
+    out = []
+    for p in projects:
+        some = shared or p.get("usage") is not None or p.get("plog") is not None
+        out.append(dict(name=p["name"], rows=[dict(month=m, state="before_start") if p.get("start") and m < p["start"] else
+                                               dict(acc[p["name"]][m], month=m, state="data" if some else "no_data") for m in months]))
+    if any(acc[UNASSIGNED][m]["total"] for m in months):
+        out.append(dict(name=UNASSIGNED, rows=[dict(acc[UNASSIGNED][m], month=m, state="data") for m in months]))
+    return dict(months=months, projects=out)
 
 
 def usage_report(usage_text, plog_text, goodbye_tokens, quota_text=None):

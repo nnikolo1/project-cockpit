@@ -692,12 +692,17 @@ function fitCard(F){
    +(po.length?'<h3>Open: possible, not seen in these files</h3><ul>'+po.map(r=>'<li>'+esc(r.label)+'</li>').join('')+'</ul>':'')+'</div>';
 }
 function projectsCard(){
-  const nf=x=>x.toLocaleString('en-US'),P=USE.projects||[];
-  const cell=(r,f)=>'<td class="mono">'+(r.total===undefined?'':nf(r[f]))+'</td>';
-  return '<div class="card"><h2>All projects (last 90 days)</h2><div class="tblbox narrow"><table><thead><tr><th>Project</th>'+USEF.map(f=>'<th>'+f[1]+'</th>').join('')+'<th>Tasks</th><th>Last day with use</th></tr></thead><tbody>'
-   +P.map(r=>r.total===undefined?'<tr><td>'+esc(r.name)+'</td><td class="muted" colspan="7">no data</td></tr>'
-     :'<tr><td>'+esc(r.name)+'</td>'+USEF.map(f=>cell(r,f[0])).join('')+'<td class="mono">'+r.tasks+'</td><td class="mono">'+esc(r.last_day||'')+'</td></tr>').join('')
-   +'</tbody></table></div></div>';
+  /* "Per project, by month" (owner, 2026-11-25, PC-113): a row per project and month, the current month and the two before (UTC) */
+  const nf=x=>x.toLocaleString('en-US'),M=USE.monthly,MN=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const T='Per project, by month',mon=m=>MN[+m.slice(5,7)-1]+' '+m.slice(0,4);
+  if(!M)return '<div class="card"><h2>'+T+'</h2><span class="muted">no data</span></div>';
+  const cols=USEF.map(f=>'<th>'+f[1]+'</th>').join('')+'<th>Interactive</th><th>Unattended</th><th>Tasks</th><th>Last day with use</th>';
+  const row=(p,r,i)=>'<tr><td>'+(i?'':esc(p.name))+'</td><td class="mono">'+esc(mon(r.month))+(r.aggregate?' <span class="muted" title="'+nf(r.aggregate)+' tokens of the tool’s statistics cache, counted in the sum only">incl. daily aggregate, no split</span>':'')+'</td>'
+    +(r.state==='before_start'?'<td class="muted" colspan="9">before the project started</td>':r.state==='no_data'?'<td class="muted" colspan="9">no data</td>'
+      :USEF.map(f=>'<td class="mono">'+nf(r[f[0]])+'</td>').join('')+'<td class="mono">'+nf(r.interactive)+'</td><td class="mono">'+nf(r.unattended)+'</td><td class="mono">'+r.tasks+'</td><td class="mono">'+esc(r.last_day||'')+'</td>')+'</tr>';
+  return '<div class="card"><h2>'+T+'</h2><span class="muted">'+M.months.map(mon).join(', ')+' (UTC). Interactive: the session transcripts, assigned to a project by their folder; unattended: the Workers’ proxy and headless runs. Months before the transcripts come from the statistics cache as a daily aggregate without a split, counted in the sum only. Sessions no project claims are listed as “unassigned”.</span>'
+   +'<div class="tblbox narrow"><table><thead><tr><th>Project</th><th>Month</th>'+cols+'</tr></thead><tbody>'
+   +M.projects.map(p=>p.rows.map((r,i)=>row(p,r,i)).join('')).join('')+'</tbody></table></div></div>';
 }
 /* The order of the Token Usage cards, top to bottom (owner, 2026-11-24, PC-81): the one place to change it; a card with nothing to show is left out without a gap */
 const USAGE_ORDER=['windows','heatmap','readings','sessions','days','quota','projects','fit','tasks'];  // the one list that fixes the order of the Token Usage cards
