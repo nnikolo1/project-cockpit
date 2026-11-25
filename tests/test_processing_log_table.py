@@ -180,3 +180,11 @@ def test_page_toggle_expand_and_filter_form():
 def test_page_expanded_row_shows_the_original_line(run_node):
     h = run_node("const R=%s;UI.qlogRows[qlogKey(R[1])]=true;return vQlog(R);" % page_rows())
     assert '<tr class="qfull"><td colspan="6"><pre class="mono">' in h and "no note" in h and 'aria-expanded="true"' in h
+
+
+def test_a_sleep_reported_again_with_the_same_start_is_one_row_with_a_count():
+    sl = lambda m, end, mins: json.dumps(dict(time=at(m), event="sleep", start=100.0, end=end, minutes=mins))   # noqa: E731
+    r = rows(sl(1, 200, 4), sl(3, 300, 6), hb(at(4)), sl(5, 400, 8), json.dumps(dict(time=at(7), event="sleep", start=900.0, end=950, minutes=1)))
+    s = [x for x in r if x["kind"] == "sleep"]
+    assert [(x["count"], x["first"] is not None) for x in s] == [(1, True), (3, True)]
+    assert "8 minutes" in s[1]["detail"] and len(s[1]["lines"]) == 3

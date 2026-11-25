@@ -857,10 +857,10 @@ function vQlog(rows){
   pick.forEach(r=>{
     const d=tmDay(r.time),k=qlogKey(r),open=!!UI.qlogRows[k];
     if(d!==day){day=d;h+='<tr class="qday"><td colspan="6">'+esc(d)+'</td></tr>';}
-    const what=r.kind==='heartbeat'?esc(r.what)+(r.count>1?', '+r.count+' heartbeats, '+tmSec(r.first)+' to '+tmSec(r.time):'')+(r.detail?' · ':''):'';
+    const what=r.kind==='heartbeat'?esc(r.what)+(r.count>1?', '+r.count+' heartbeats, '+tmSec(r.first)+' to '+tmSec(r.time):'')+(r.detail?' · ':''):r.kind==='sleep'&&r.count>1?'reported '+r.count+' times, '+tmSec(r.first)+' to '+tmSec(r.time)+' · ':'';
     h+='<tr class="qrow'+(r.alert?' qalert':'')+'" data-act="qlogrow" data-k="'+esc(k)+'"><td class="mono"><button class="linkbtn" data-act="qlogrow" data-k="'+esc(k)+'" aria-expanded="'+open+'" title="The full record">'+(open?'▾':'▸')+'</button> '+tmSec(r.time)+'</td>'
       +'<td><span class="chip qk-'+esc(r.kind)+'">'+esc(r.kind)+'</span></td><td class="mono">'+esc(r.project||'')+'</td><td class="mono">'+esc(r.task)+'</td><td class="mono">'+esc(r.worker)+'</td><td>'+what+esc(r.detail)+'</td></tr>';
-    if(open)h+='<tr class="qfull"><td colspan="6"><pre class="mono">'+r.lines.map(esc).join('\n')+(r.count>r.lines.length?'\n… and '+(r.count-r.lines.length)+' older heartbeats':'')+'</pre></td></tr>';
+    if(open)h+='<tr class="qfull"><td colspan="6"><pre class="mono">'+r.lines.map(esc).join('\n')+(r.count>r.lines.length?'\n… and '+(r.count-r.lines.length)+' older records':'')+'</pre></td></tr>';
   });
   return h+'</tbody></table></div>';
 }

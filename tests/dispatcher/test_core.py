@@ -828,3 +828,35 @@ def test_container_name_is_an_argument_so_a_test_run_cannot_touch_production(tmp
     assert seen["name"] == "cockpit-workers"
     core.main(common + ["--container-name", "cockpit-workers-test"])
     assert seen["name"] == "cockpit-workers-test"
+
+
+def test_a_hosting_failure_in_finishing_a_worker_does_not_abort_the_firing_or_repeat_the_sleep(tmp_path):
+    """Issue 143: GitHub 500 in set_state(unmerged) escaped manage(), so last_fired stayed put and every firing re-detected the same gap."""
+    w = World(tmp_path, [T("x-1")], interval_minutes=2)
+    w.detect_sleep = True
+    w.fire()
+    w.alive_pids = {4242}
+    w.runtime.outbox["x-1"] = (True, {"outcome": "done"}, None)
+    w.fire()
+    w.alive_pids = set()                           # the Worker has ended; the hosting service fails on every call
+    def boom(tid, state):
+        raise RuntimeError("gh label failed (1): HTTP 500")
+    w.tasks.set_state = boom
+    w.now += 10 * 60
+    w.fire()                                       # the gap is a sleep, recorded once
+    for _ in range(3):
+        w.now += 2 * 60
+        w.fire()
+    assert len(w.plog.sleeps) == 1
+    assert core.load_state(w.state)["workers"]     # the Worker is kept: the finish is retried
+
+
+def test_an_aborted_firing_still_advances_last_fired(tmp_path):
+    w = World(tmp_path, interval_minutes=2)
+    w.fire()
+    d = w.dispatcher()
+    d.manage = lambda st: (_ for _ in ()).throw(RuntimeError("boom"))
+    w.now += 120
+    with pytest.raises(RuntimeError):
+        d.fire()
+    assert core.load_state(w.state)["last_fired"] == w.now

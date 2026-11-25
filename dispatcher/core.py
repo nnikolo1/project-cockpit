@@ -213,7 +213,10 @@ class Dispatcher:
                 self.tasks.set_state(w["task_id"], "wip")
                 self.plog.event(w["task_id"], w["folder"], "wip")
             if not self.runtime.alive(w["pid"]):
-                self._finish(st, user, w, note, reason)
+                try:
+                    self._finish(st, user, w, note, reason)
+                except Exception:  # noqa: BLE001  a hosting-service failure (GitHub 500) retries next firing; it must not abort this one
+                    log.exception("finishing %s (task %s) failed; retried at the next firing", user, w["task_id"])
                 continue
             age = awake_seconds(w["launched"], now, sleeps)
             limit, idle = self.settings["runaway_minutes"], self.settings["idle_minutes"]
@@ -342,7 +345,7 @@ class Dispatcher:
     # -- the firing --
     def fire(self):
         st = load_state(self.state_path)
-        slept = None
+        slept = did = None
         try:
             slept = self._detect_sleep(st, self.probes.now())
             self.manage(st)
@@ -362,9 +365,11 @@ class Dispatcher:
                 except Skip as e:
                     log.warning("firing skipped: %s", e)
                     did = f"skipped: {e}"
-            if did != "skipped: interval":
-                st["last_fired"] = now
         finally:
+            # every path that ran past the interval check counts as a firing, an aborted one included: otherwise the same
+            # gap is detected as a "sleep" again on every later firing (issue 143)
+            if did != "skipped: interval":
+                st["last_fired"] = self.probes.now()
             save_state(self.state_path, st)
         line = self.heartbeat(st, did, slept)
         self.plog.heartbeat(line)

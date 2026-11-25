@@ -2522,7 +2522,8 @@ def _row(rec, raw):
     worker = rec.get("worker") if isinstance(rec.get("worker"), str) else ""
     base["project"] = rec["project"] if isinstance(rec.get("project"), str) else project_key(task)   # an old line has no field: from the id
     if rec.get("event") == "sleep":
-        return dict(base, kind="sleep", detail=f"the host slept or the Dispatcher was down for {rec.get('minutes', '?')} minutes")
+        return dict(base, kind="sleep", sleep_start=rec.get("start"), first=base["time"],
+                    detail=f"the host slept or the Dispatcher was down for {rec.get('minutes', '?')} minutes")
     st = rec.get("state") if isinstance(rec.get("state"), str) else ""
     m = RECONCILED.search(st)
     if st in LOG_KINDS or m:
@@ -2540,7 +2541,7 @@ def log_rows(plog_text, limit=max(LOG_LIMITS)):
     rows of the default view (all but heartbeats, and heartbeats with a skip worth seeing). Up to `limit` rows of each class are kept,
     so that the page can filter and choose among 15, 50 and 200. Each row keeps its original lines (a condensed row its newest
     GROUP_LINES)."""
-    rows, kept, prev = [], {True: 0, False: 0}, None
+    rows, kept, prev, sleeps = [], {True: 0, False: 0}, None, {}
     for raw in reversed((plog_text or "").splitlines()):
         if not raw.strip():
             continue
@@ -2555,6 +2556,15 @@ def log_rows(plog_text, limit=max(LOG_LIMITS)):
             if len(prev["lines"]) < GROUP_LINES:
                 prev["lines"].append(raw)
             continue
+        if r["kind"] == "sleep" and isinstance(r.get("sleep_start"), (int, float)):   # the same gap reported again (issue 143): one row
+            same = sleeps.get(r["sleep_start"])
+            if same is not None:
+                same["count"] += 1
+                same["first"] = r["time"]
+                if len(same["lines"]) < GROUP_LINES:
+                    same["lines"].append(raw)
+                continue
+            sleeps[r["sleep_start"]] = r
         prev = r
         if kept[r["event"]] >= limit:
             if all(v >= limit for v in kept.values()):
