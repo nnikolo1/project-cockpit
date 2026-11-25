@@ -101,3 +101,7 @@ Every action the UI offers is covered by a test (owner, 2026-11-25): each server
 ## Generated data stays out of git (owner, 2026-11-25)
 
 Data that is derived or produced by processing (reports of checks, statistics, snapshots, logs, caches) belongs to the Cockpit's data folder, not to a project's git repository; a repository holds what a person decided and wrote. A generated file is written into a repository only when the owner has decided so for that file.
+
+## Design talk is not a decision (owner, 2026-11-25, standing rule)
+
+When the owner reflects on a design ("I am not sure", "I feel", "I think", thinking aloud), the assistant answers the discussion, gives a reasoned view and options, and logs the exchange in the feedback log as a design discussion; it writes no decision record, no constitution or policy text and no task comment, files no task and changes no task until the owner says it is decided ("decided", "file it", or an explicit instruction); when it is unclear whether a remark is a decision, it asks once (owner, 2026-11-25, standing rule).
