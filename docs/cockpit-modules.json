@@ -72,6 +72,8 @@
   {"path": "README.md", "module": "docs", "basis": "documentation of the project; the owner's docs/ rule extended to the root README"},
   {"path": "LICENSE", "module": "docs", "basis": "licence text is documentation"},
   {"path": "tests/test_actions.py", "module": "githubclient", "basis": "tests the action planning in cockpit.py and logic.py; tests follow the code"},
+  {"path": "tests/test_action_log.py", "module": "githubclient", "basis": "tests the action log in cockpit.py and logic.py and its endpoints (PC-132); tests follow the code"},
+  {"path": "tests/conftest.py", "module": "githubclient", "basis": "the shared test guard that keeps cockpit.py's data folder (the action log) in a temporary folder"},
   {"path": "tests/test_edit_text.py", "module": "githubclient", "basis": "tests the edit-text action planning in cockpit.py and logic.py; tests follow the code"},
   {"path": "tests/test_cache.py", "module": "githubclient", "basis": "tests the cache in cockpit.py"},
   {"path": "tests/test_gh_resilience.py", "module": "githubclient", "basis": "tests the GitHub call gate, lazy hourly refresh, stale copies and the local Task Queue part of cockpit.py"},
