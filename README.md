@@ -29,7 +29,7 @@ The metrics snapshot may carry `alpha/one` entries under `modules`; the parent's
 
 ## Install
 In a nutshell, from "I have a project" to "the Cockpit shows it, the daily job and the Task Queue run for it". Detail, expected output and the by-hand steps: [docs/deployment.md](docs/deployment.md), "Installation workflow".
-1. Prerequisites, by hand: macOS on Apple silicon, Python 3.14, `gh auth login` as the Manager, Apple's `container` tool, the model credential in a 0600 file.
+1. Prerequisites, by hand: macOS on Apple silicon, Python (tested on 3.14; the installer uses the latest version it finds and warns when it is not 3.14), `gh auth login` as the Manager, Apple's `container` tool, the model credential in a 0600 file.
 2. Get it: `git clone https://github.com/nnikolo1/project-cockpit`.
 3. Add a project: `python3 tools/project_sync.py init` (planned: PC-92); until then `kit/setup.sh OWNER/REPO` and an entry in `~/.config/project-cockpit/projects.json`, by hand.
 4. Viewer as a service: `python3 cockpit.py --projects FILE --token-file F` in a LaunchAgent or systemd unit, by hand.

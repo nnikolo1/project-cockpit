@@ -58,7 +58,7 @@ Local policy files are never overwritten automatically (owner, 2026-11-25): viol
 
 ## Supported platform: the owner's installed Python (owner, 2026-11-25)
 
-Only the Python version installed on the owner's machine is supported and tested (owner, 2026-11-25, standing policy): code is developed and tested on that one version only, there is no compatibility matrix across versions or operating systems, and the documents name that version. When the installed version changes, the documents, the install check and the test setup follow it in the same change; the install check reports any other version as unsupported (today Python 3.14).
+Only the Python version installed on the owner's machine is supported and tested (owner, 2026-11-25, standing policy): code is developed and tested on that one version only, there is no compatibility matrix across versions or operating systems, and the documents name that version. When the installed version changes, the documents and the test setup follow it in the same change. The installer does not refuse another version: it finds the latest Python installed on the machine, uses it, and warns that it is not the tested one (today the tested version is Python 3.14) (owner, 2026-11-25).
 
 ## Daily reports (owner, 2026-11-25)
 
