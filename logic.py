@@ -1,4 +1,5 @@
 """Pure logic of the cockpit: no network, no subprocess. Everything here is unit-tested."""
+import bisect
 import datetime as dt
 import json
 import logging
@@ -1163,7 +1164,9 @@ QUALITY_DEFAULTS = {
     "coverage": {"direction": "high", "ok": 80, "warn": 60},
     "tests": {"direction": "high", "ok": 0.5, "warn": 0.2},
 }
-CARD_SETTING_DEFAULTS = {"churn_colour": "size", "quality_thresholds": QUALITY_DEFAULTS}  # churn: what the overview showed before the option moved to Settings
+QUOTA_SETTING_DEFAULTS = {"quota_plan_start": "2026-11-01",  # the first day of the current plan (and so of the same quota; owner, 2026-11-25, PC-111)
+                          "quota_weak_readings": 20}          # an estimate resting on fewer readings is marked weak
+CARD_SETTING_DEFAULTS = {"churn_colour": "size", "quality_thresholds": QUALITY_DEFAULTS, **QUOTA_SETTING_DEFAULTS}  # churn: what the overview showed before the option moved to Settings
 
 
 def _is_num(v):
@@ -1203,7 +1206,30 @@ def validate_card_settings(form, strict=True):
     v = form.get("churn_colour")
     if v not in CARD_CHURN_COLOURS:
         raise ValueError("churn colour must be one of: " + ", ".join(CARD_CHURN_COLOURS))
-    return {"churn_colour": v, "quality_thresholds": validate_thresholds(form.get("quality_thresholds"), strict)}
+    return {"churn_colour": v, "quality_thresholds": validate_thresholds(form.get("quality_thresholds"), strict), **validate_quota_settings(form, strict)}
+
+
+def validate_quota_settings(form, strict=True):
+    """quota_plan_start (YYYY-MM-DD) and quota_weak_readings (a whole number, at least 1) from a form/file; a missing one gets its default.
+    strict: ValueError on an invalid value; otherwise it falls back to its default."""
+    out = dict(QUOTA_SETTING_DEFAULTS)
+    d, n = form.get("quota_plan_start"), form.get("quota_weak_readings")
+    if d not in (None, ""):
+        try:
+            out["quota_plan_start"] = dt.date.fromisoformat(str(d)).isoformat()
+        except ValueError:
+            if strict:
+                raise ValueError("plan start must be a date YYYY-MM-DD") from None
+    if n not in (None, ""):
+        try:
+            k = int(n) if not isinstance(n, bool) and float(n) == int(float(n)) else 0
+        except (TypeError, ValueError):
+            k = 0
+        if k >= 1:
+            out["quota_weak_readings"] = k
+        elif strict:
+            raise ValueError("readings for a firm estimate must be a whole number of at least 1")
+    return out
 
 
 BAND_WORDS = {"ok": "normal", "warn": "borderline", "bad": "out of range", "none": "no figure"}
@@ -1543,6 +1569,145 @@ def usage_report(usage_text, plog_text, goodbye_tokens, quota_text=None):
                                                               for o in spans.values())))
     rep["tasks"] = None if plog_text is None else tasks
     return rep
+
+
+# -- Quota estimates: the percentage of a window without readings, from its token counts (owner, 2026-11-25, PC-111) --
+WEEK_SECONDS = 7 * 86400
+QUOTA_KINDS = (("seven_day", "weekly", WEEK_SECONDS, True), ("five_hour", "5-hour", WINDOW_SECONDS, False))  # key, name, length, extrapolated
+
+
+def _utc(t, fmt="%Y-%m-%d %H:%M"):
+    return dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime(fmt)
+
+
+def vendor_windows(ends, span, lo, hi, extrapolate=True):
+    """The vendor's windows of length `span` from the known window ends (reset times, sorted, merged), oldest first: (start, end, basis), basis
+    None for a window whose end is a known reset, else the known reset its boundaries are extrapolated from by whole steps of `span`. With
+    `extrapolate` the windows cover lo..hi: before the first known reset back from it; between two, back from the later one (a shorter rest
+    is one window, a rest under an hour widens the first); after the last, forward from it. A known window never reaches back over the previous known end."""
+    out, prev = [], None
+    if extrapolate and ends:
+        e = ends[0] - span
+        while e > lo:
+            out.insert(0, (e - span, e, ends[0]))
+            e -= span
+    for r in ends:
+        if extrapolate and prev is not None:
+            seg, e = [], r - span
+            while e - span >= prev:
+                seg.insert(0, (e - span, e, r))
+                e -= span
+            if seg and e - prev < 3600:  # a wobble of the reset time, not a shift: the first window absorbs it
+                seg[0] = (prev, seg[0][1], r)
+            elif e > prev:
+                seg.insert(0, (prev, e, r))
+            out += seg
+        out.append((r - span if prev is None else max(r - span, prev), r, None))
+        prev = r
+    while extrapolate and prev is not None and prev <= hi:
+        out.append((prev, prev + span, ends[-1]))
+        prev += span
+    return out
+
+
+def estimate_percent(tokens, calibration):
+    """The quota percentage `tokens` stand for under a calibration of quota_estimates() (one decimal), None without one."""
+    return round(tokens / calibration["factor"], 1) if calibration else None
+
+
+def _quota_kind(key, name, span, extrapolate, reads, events, plan, weak, lo, hi):
+    """The rows and the calibration of one window kind (see quota_estimates)."""
+    ends = []
+    for t, rec in reads:
+        r = _num(rec[key].get("resets_at")) if isinstance(rec.get(key), dict) else None
+        if r is not None:
+            ends.append(r)
+    merged = []
+    for r in sorted(ends):  # the same window's reset time wobbles by seconds to minutes
+        if not merged or r - merged[-1] > 600:
+            merged.append(r)
+    new = lambda s, e, kind, basis: dict(start=s, end=e, kind=kind, basis=basis, tokens=0, cal_tokens=0, readings=0, peak=None, peak_t=None)
+    vend = [new(s, e, "vendor" if b is None else "extrapolated", b) for s, e, b in vendor_windows(merged, span, lo, hi, extrapolate)]
+    starts, fixed = [w["start"] for w in vend], {}
+
+    def window(t):
+        i = bisect.bisect_right(starts, t) - 1
+        if i >= 0 and t < vend[i]["end"]:
+            return vend[i]
+        b = t - t % span
+        return fixed.setdefault(b, new(b, b + span, "fixed", None))
+    for t, rec in reads:  # the readings first: the peak's time decides which tokens calibrate
+        p = _pct(rec.get(key), "used_percentage")
+        if p is not None:
+            w = window(t)
+            w["readings"] += 1
+            if w["peak"] is None or p >= w["peak"]:
+                w["peak"], w["peak_t"] = p, t
+    for t, n in events:
+        w = window(t)
+        w["tokens"] += n
+        if w["peak_t"] is not None and t <= w["peak_t"]:
+            w["cal_tokens"] += n
+    wins = sorted([w for w in vend if w["end"] > lo] + list(fixed.values()), key=lambda w: (w["start"], w["end"]))
+    base = [w for w in wins if w["start"] >= plan and w["peak"] and w["cal_tokens"] > 0]
+    cal = None
+    if base:
+        cal = dict(factor=sum(w["cal_tokens"] for w in base) / sum(w["peak"] for w in base), readings=sum(w["readings"] for w in base),
+                   windows=len(base), first=_utc(min(w["start"] for w in base), "%Y-%m-%d"), last=_utc(max(w["end"] for w in base), "%Y-%m-%d"))
+        cal["weak"] = cal["readings"] < weak
+    nf = lambda x: f"{round(x):,}"
+    rows = []
+    for w in wins:
+        if not (w["tokens"] or w["readings"] or (extrapolate and w["kind"] != "fixed")):
+            continue
+        row = dict(start=_iso(w["start"]), end=_iso(w["end"]), kind=w["kind"], tokens=w["tokens"], readings=w["readings"], percent=None, weak=False)
+        if w["peak"] is not None:
+            row.update(state="measured", percent=w["peak"], note=f"Measured: the highest of {w['readings']} readings in this window.")
+        elif w["start"] < plan:
+            row.update(state="other plan", note=f"No readings, other plan: before the plan period that starts on {_utc(plan, '%Y-%m-%d')} the quota "
+                                                 "was different and the calibration does not carry over.")
+        elif cal is None:
+            row.update(state="none", note=f"No calibration yet: no {name} window of the plan period has a reading and token counts.")
+        else:
+            row.update(state="estimate", percent=estimate_percent(w["tokens"], cal), weak=cal["weak"],
+                       note=f"Estimate: {nf(w['tokens'])} tokens at {nf(cal['factor'])} tokens per percent, calibrated on {cal['readings']} readings in "
+                            f"{cal['windows']} {name} windows with readings, {cal['first']} to {cal['last']} (UTC)."
+                            + (f" Weak: fewer than {weak} readings." if cal["weak"] else ""))
+        if w["kind"] == "extrapolated":
+            row["note"] += (f" No reset is known for this window: its boundaries are extrapolated by whole {span // 86400}-day steps from the known "
+                            f"reset of {_utc(w['basis'])} UTC.")
+        elif w["kind"] == "fixed":
+            row["note"] += f" No vendor window is known here: a fixed {name} block counted from the epoch (UTC)."
+        rows.append(row)
+    return dict(calibration=cal, rows=rows)
+
+
+def quota_estimates(quota_text, usage_text=None, transcript_text=None, settings=None):
+    """The quota percentage per vendor window, measured or estimated (owner, 2026-11-25, PC-111), for the weekly and the 5-hour windows alike.
+    quota_text: quota-history.jsonl; usage_text / transcript_text: the token counts of the Workers (proxy) and of the interactive sessions;
+    settings: quota_plan_start and quota_weak_readings (QUOTA_SETTING_DEFAULTS). -> dict(plan_start, weak_readings, weekly, five_hour) or None
+    when there is neither a reading nor a token count; each kind: dict(calibration, rows oldest first, the last HISTORY_DAYS days).
+    Windows: the vendor's, from the readings' reset times (the weekly ones extrapolated by whole 7-day steps where no reset is known, kind
+    "extrapolated"; a 5-hour period outside every known window is a fixed block counted from the epoch, kind "fixed"). A window's tokens are
+    the sum of the four counts of every request and message in it. Calibration: tokens per percent = the tokens up to the highest reading of
+    each window of the plan period with a reading above zero and token counts, summed, over those readings summed; `readings` counts them all.
+    A row: measured (its highest reading; always wins), estimate (tokens / factor, `weak` below quota_weak_readings readings), none (no
+    calibration yet: no number) or other plan (the window starts before the plan period: never estimated); `note` is the tooltip."""
+    s = validate_quota_settings(settings or {}, strict=False)
+    plan = dt.datetime.fromisoformat(s["quota_plan_start"]).replace(tzinfo=dt.timezone.utc).timestamp()
+    reads = [(t, rec) for rec in _json_lines(quota_text) or [] if (t := _epoch(rec.get("ts"))) is not None]
+    events = [(t, _counts(rec)["total"]) for text in (usage_text, transcript_text) for rec in _json_lines(text) or [] if (t := _epoch(rec.get("ts"))) is not None]
+    times = [t for t, _ in reads] + [t for t, _ in events]
+    if not times:
+        return None
+    hi = max(times)
+    lo = max(min(times), hi - HISTORY_DAYS * 86400)
+    reads = sorted((r for r in reads if r[0] >= lo), key=lambda r: r[0])
+    events = [e for e in events if e[0] >= lo]
+    out = dict(plan_start=s["quota_plan_start"], weak_readings=s["quota_weak_readings"])
+    for key, name, span, extrapolate in QUOTA_KINDS:
+        out[key] = _quota_kind(key, name, span, extrapolate, reads, events, plan, s["quota_weak_readings"], lo, hi)
+    return out
 
 
 # ---------- gaps in the project metadata (checker: tools/metadata_gaps.py, contract: docs/contracts/metadata-gaps.md) ----------

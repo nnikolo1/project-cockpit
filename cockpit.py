@@ -689,10 +689,16 @@ def usage_served(p):
 
 
 def get_usage(p, data_dir=None, projects=None):
-    """The selected project's report plus `summary` (its 90-day row) and `projects` (one row per project the Cockpit serves; no counts = no data)."""
+    """The selected project's report plus `estimates` (the quota per vendor window, measured or estimated), `summary` (its 90-day row) and `projects` (one row per project the Cockpit serves; no counts = no data)."""
     rep = _usage_one(p, data_dir)
     d = (data_dir or DATA_DIR) / (p.get("name") or p["repo"].split("/")[-1])
     rep["sessions"] = L.transcript_report(_read_text(d / TRANSCRIPT_FILE), rep["quota"], _read_text(d / AGGREGATE_FILE))
+    try:  # the plan start and the weak threshold live with the card settings (Settings > Module cards > Quota estimates)
+        qs = json.loads(_read_text(d / "cockpit-settings.json") or "{}")
+    except ValueError:
+        qs = {}
+    rep["estimates"] = L.quota_estimates(_read_text(d / QUOTA_FILE), _read_text(d / USAGE_FILE), _read_text(d / TRANSCRIPT_FILE),
+                                         qs if isinstance(qs, dict) else {})
     rep["summary"] = L.usage_summary(rep)
     rep["projects"] = [dict(name=n, **(L.usage_summary(_usage_one(q, data_dir)) or {})) for n, q in (projects or PROJECTS or {p.get("name", ""): p}).items()]
     rep["reconcile"] = _reconcile_card(d, p.get("stats_cache"))
