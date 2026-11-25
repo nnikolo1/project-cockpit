@@ -43,7 +43,7 @@
      "kind": "file",
      "personal_data": false,
      "written_by": "tools/transcript_usage.py",
-     "note": "read only, by get_usage for the Token Usage page (a missing file shows as no data) and by tools/token_reconcile.py (the card How these numbers fit); exact token counts of interactive sessions, numbers and ids only"
+     "note": "read only, by get_usage for the Token Usage page (a missing file shows as no data) and by tools/token_reconcile.py (the card How these numbers fit); exact token counts of interactive and (earlier) headless sessions, each record with its kind, numbers and ids only"
     },
     {
      "path": "~/.local/share/project-cockpit/<project>/stats-cache-usage.jsonl",
@@ -140,7 +140,7 @@
      "kind": "file",
      "personal_data": false,
      "written_by": "taskqueue/dispatcher (tools/transcript_usage.py)",
-     "note": "the exact token counts of the owner's interactive sessions, one JSON line per message (time, source label, session id, message id, model, four counts); mode 0600; numbers only, no text or paths; rewritten atomically on each run; in the daily backup (PC-62)"
+     "note": "the exact token counts of the owner's interactive sessions and of the earlier headless Worker sessions, one JSON line per message (time, kind, source label, session id, message id, model, four counts); mode 0600; numbers only, no text or paths; rewritten atomically on each run; in the daily backup (PC-62)"
     },
     {
      "path": "~/.local/share/project-cockpit/<project>/proxy.sock",

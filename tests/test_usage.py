@@ -161,7 +161,7 @@ QUOTA = "\n".join(json.dumps(dict(ts=t, five_hour=dict(used_percentage=a, resets
 
 def test_transcript_missing_file_is_no_data():
     assert L.transcript_report(None) is None
-    assert L.transcript_report("") == dict(periods=[], sources=[], sessions=[], aggregate_days={})
+    assert L.transcript_report("") == dict(periods=[], headless=[], sources=[], sessions=[], aggregate_days={})
 
 
 def test_transcript_periods_follow_the_quota_grading_with_peaks():

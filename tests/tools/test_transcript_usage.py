@@ -59,7 +59,7 @@ def test_no_text_or_path_in_output(tmp_path):
     tu.collect({"L": str(src)}, str(out))
     body = out.read_text()
     assert "SECRET" not in body and "/secret" not in body
-    assert set(out_lines(out)[0]) == {"ts", "source", "session", "agent", "message", "model", *tu.COUNTS}
+    assert set(out_lines(out)[0]) == {"ts", "kind", "source", "session", "agent", "message", "model", *tu.COUNTS}
 
 
 def test_atomic_rewrite_mode_and_no_leftover(tmp_path):
@@ -124,3 +124,23 @@ def test_records_of_purged_transcripts_are_kept_and_repeated_labels_merge(tmp_pa
     assert stats["kept"] == 1 and stats["messages"] == 2
     tu.collect([("L", str(b))], str(out))  # run again: nothing doubles
     assert len(out_lines(out)) == 2
+
+
+def test_the_collector_writes_the_kind_of_each_source(tmp_path):
+    folders = {n: tmp_path / n for n in ("i", "h", "d", "e")}
+    for n, f in folders.items():
+        f.mkdir()
+        write(f, "s.jsonl", [line("m-" + n, usage={"input_tokens": 1})])
+    out = tmp_path / "o.jsonl"
+    tu.main(["--source", f"interactive:Lab={folders['i']}", "--source", f"headless:other={folders['h']}",
+             "--source", f"headless-old={folders['d']}", "--source", f"plain={folders['e']}", "--out", str(out)])
+    assert {(r["source"], r["kind"]) for r in out_lines(out)} == {("Lab", "interactive"), ("other", "headless"), ("headless-old", "headless"),
+                                                                   ("plain", "interactive")}
+    tu.collect([("headless", "X", str(folders["i"])), ("Y", str(folders["e"]))], str(out))
+    assert {(r["source"], r["kind"]) for r in out_lines(out) if r["source"] in ("X", "Y")} == {("X", "headless"), ("Y", "interactive")}
+
+
+def test_an_unknown_kind_is_refused(tmp_path):
+    import pytest
+    with pytest.raises(SystemExit):
+        tu.main(["--source", f"batch:L={tmp_path}", "--out", str(tmp_path / "o.jsonl")])

@@ -83,6 +83,7 @@
   {"path": "tests/test_usage_order.py", "module": "githubclient", "basis": "tests the order of the Token Usage cards (the one list USAGE_ORDER in the page)"},
   {"path": "tests/test_quota_estimates.py", "module": "githubclient", "basis": "tests the quota estimates per vendor window of the Token Usage page (calibration, plan period, weak and none states)"},
   {"path": "tests/test_usage_monthly.py", "module": "githubclient", "basis": "tests the Token Usage card Per project, by month (months, start month, split, aggregate, unassigned)"},
+  {"path": "tests/test_session_kinds.py", "module": "githubclient", "basis": "tests the interactive and headless session cards of the Token Usage page and transcript_report in logic.py"},
   {"path": "tests/test_sessions_history.py", "module": "githubclient", "basis": "tests the Interactive sessions history card of the Token Usage page"},
   {"path": "tests/test_token_reconcile.py", "module": "githubclient", "basis": "tests the token reconciliation script and its page card"},
   {"path": "tests/test_install_commands.py", "module": "docs", "basis": "checks that every command in the README install section exists"},
