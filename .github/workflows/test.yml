@@ -2,16 +2,16 @@ name: test
 on: [push, pull_request]
 permissions:
   contents: read
+# One job: only the owner's installed Python on the owner's OS is supported and tested, no matrix (standing policy, owner, 2026-11-25).
+# It runs the merge gate, the same command the merge step runs, with node so that the page-code tests run too.
 jobs:
-  pytest:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        python: ["3.10", "3.11", "3.12", "3.13"]
-    runs-on: ${{ matrix.os }}
+  gate:
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: "${{ matrix.python }}"}
+        with: {python-version: "3.14"}
+      - uses: actions/setup-node@v4
+        with: {node-version: "22"}
       - run: pip install pytest
-      - run: python -m pytest
+      - run: python tools/merge_gate

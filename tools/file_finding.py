@@ -15,7 +15,7 @@ import sys
 
 log = logging.getLogger("file_finding")
 TIMEOUT = 60
-LABELS = ("policy-finding", "author:interactive")
+LABELS = ("policy-finding",)
 
 
 def build_body(text, policy, files, filed_by, today):
@@ -27,8 +27,9 @@ def build_body(text, policy, files, filed_by, today):
             f"(released at once; the finder does not work on it).\n\n</details>\n")
 
 
-def labels_for(module=None):
-    return [*LABELS, f"module:{module}"] if module else list(LABELS)
+def labels_for(module=None, author="interactive"):
+    """author: interactive (an agent found it) or job (a scheduled job found it)."""
+    return [*LABELS, f"author:{author}", *([f"module:{module}"] if module else [])]
 
 
 def gh_run(args):
@@ -39,7 +40,7 @@ def file_finding(a, run=gh_run, today=None):
     """Build and (unless dry-run) file the issue; -> (the issue URL or None, the gh arguments)."""
     text = open(a.body[1:], encoding="utf-8").read() if a.body.startswith("@") else a.body
     body = build_body(text, a.policy, a.file, a.filed_by, today or dt.date.today().isoformat())
-    labels = labels_for(a.module)
+    labels = labels_for(a.module, getattr(a, "author", "interactive"))
     args = ["issue", "create", "-R", a.repo, "--title", a.title, "--body", body]
     for l in labels:
         args += ["--label", l]

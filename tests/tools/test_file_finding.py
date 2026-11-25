@@ -26,6 +26,7 @@ def test_marker_is_read_back_by_the_cockpit():
 def test_labels():
     assert F.labels_for() == ["policy-finding", "author:interactive"]
     assert F.labels_for("taskqueue") == ["policy-finding", "author:interactive", "module:taskqueue"]
+    assert F.labels_for(author="job") == ["policy-finding", "author:job"]
 
 
 def test_files_with_injected_runner():

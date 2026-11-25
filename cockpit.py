@@ -806,6 +806,17 @@ def get_rule_prs(p, fresh=False):
     return dict(configured=True, available=True, pending=L.pending_rule_prs(v["prs"], rc["groups"]), at=v["at"])
 
 
+def get_ci(p):
+    """The last run of the test workflow on main, for the Task Queue page (until the daily job reports a red main, PC-91); hourly cache,
+    served on its own so that it can never block the page. -> logic.ci_run(...) plus at, or dict(state="unknown", error)."""
+    fetch = lambda: dict(L.ci_run(run_gh(["run", "list", "-R", p["repo"], "--workflow", L.CI_WORKFLOW, "--branch", "main", "--limit", "1", "--json", L.CI_FIELDS])), at=time.time())
+    try:
+        return cached(pk(p, "ci"), fetch, GH_REFRESH_S, swr=True, persist=True, disk_fresh=DISK_FRESH_S, queue=True)
+    except (RuntimeError, ValueError) as ex:
+        log.warning("ci: last run of main unavailable (%s)", str(ex)[:80])
+        return dict(state="unknown", error=str(ex)[:200])
+
+
 # ---------- timeline / code ----------
 def load_commits(p):
     if p.get("git"):
@@ -1206,6 +1217,8 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, get_card_settings(p))
             if u.path == "/api/queue":
                 return self.send(200, get_queue(p))
+            if u.path == "/api/ci":
+                return self.send(200, get_ci(p))
             if u.path == "/api/usage":
                 return self.send(200, usage_served(p))
             if u.path == "/api/rules":

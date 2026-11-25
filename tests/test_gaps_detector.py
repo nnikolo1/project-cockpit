@@ -313,6 +313,11 @@ def test_collect_command_setting():
             pass
 
 
+def test_a_trailing_z_is_read_as_utc_on_every_python():
+    """Python 3.10's fromisoformat does not read `Z`: the usage records then looked unreadable (CI red on 3.10, PC-94)."""
+    assert L._epoch("2026-11-24T10:00:00Z") == L._epoch("2026-11-24T10:00:00+00:00") is not None
+
+
 def test_refresh_outcome():
     fresh = {"generated_at": STAMP}
     assert L.refresh_outcome(0, fresh, NOW) == (True, "")
