@@ -537,6 +537,7 @@ def main(argv=None):
     ap.add_argument("--repo", help="the task repository, owner/name (not needed when the settings list the projects)")
     ap.add_argument("--repo-dir", help="the task repository's clone on the host (not needed when the settings list the projects)")
     ap.add_argument("--data-dir", help="the processing log's data folder (outside any git repository)")
+    ap.add_argument("--synopsis-dir", help="the projects' session synopses, <project>.md (default with --data-root: its synopsis folder; else none is copied)")
     ap.add_argument("--gh", default="gh", help="the GitHub CLI")
     ap.add_argument("--git", default="git", help="git")
     ap.add_argument("--call-timeout", type=int, default=60, help="seconds a gh or git call may take")
@@ -547,6 +548,8 @@ def main(argv=None):
         for flag, key in (("settings", "settings"), ("state", "state"), ("area", "area"), ("socket", "socket"), ("usage_file", "usage"), ("data_dir", "processing")):
             if getattr(a, flag) is None:
                 setattr(a, flag, str(root[key]))
+        if a.synopsis_dir is None:
+            a.synopsis_dir = os.path.join(str(root["dir"]), "synopsis")
     missing = [f"--{f.replace('_', '-')}" for f in ("settings", "state", "area", "socket", "usage_file", "data_dir") if getattr(a, f) is None]
     if missing:
         ap.error(f"required without --data-root: {', '.join(missing)}")
@@ -558,7 +561,8 @@ def main(argv=None):
     s = load_settings(a.settings)
     if not s.get("projects") and not (a.repo and a.repo_dir):
         ap.error("--repo and --repo-dir are required when the settings do not list the projects")
-    cfg = rt.Config(area=a.area, socket=a.socket, container=a.container_tool, name=a.container_name, image=a.image, runaway_minutes=s["runaway_minutes"])
+    cfg = rt.Config(area=a.area, socket=a.socket, container=a.container_tool, name=a.container_name, image=a.image, runaway_minutes=s["runaway_minutes"],
+                    synopsis_dir=a.synopsis_dir)
     runtime = rt.Runtime(cfg)
     probes = Probes(
         free_disk=lambda: shutil.disk_usage(a.area).free,

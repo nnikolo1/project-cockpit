@@ -164,6 +164,30 @@ def test_prepare_task_layout(tmp_path, repo):
         r.prepare_task("T-1", repo, "again")
 
 
+def test_prepare_task_copies_the_projects_synopsis_marked_stale_when_old(tmp_path, repo):
+    import datetime as dt
+    syn = tmp_path / "synopsis"
+    syn.mkdir()
+    old = (dt.date.today() - dt.timedelta(days=9)).isoformat()
+    (syn / "cockpit.md").write_text(f"Synopsis of {old}\nstate")
+    r, _ = make(tmp_path, synopsis_dir=str(syn))
+    base = pathlib.Path(r.prepare_task("cockpit-1", repo, "x", project="cockpit"))
+    assert (base / "inbox" / "synopsis.md").read_text() == f"STALE: 9 days old\nSynopsis of {old}\nstate"
+    single = pathlib.Path(r.prepare_task("cockpit-2", repo, "x"))   # one project: the key comes from the task id
+    assert (single / "inbox" / "synopsis.md").is_file()
+    other = pathlib.Path(r.prepare_task("other-3", repo, "x"))      # no synopsis for that project: no file, no failure
+    assert not (other / "inbox" / "synopsis.md").exists()
+
+
+def test_prepare_task_without_a_synopsis_folder_copies_none(tmp_path, repo):
+    r, _ = make(tmp_path)
+    assert not (pathlib.Path(r.prepare_task("cockpit-1", repo, "x")) / "inbox" / "synopsis.md").exists()
+
+
+def test_the_instruction_names_the_synopsis_and_forbids_copying_it():
+    assert "{inbox}/synopsis.md" in rt.INSTRUCTION and "never copy its text" in rt.INSTRUCTION
+
+
 def test_prepare_task_bad_repo(tmp_path):
     r, _ = make(tmp_path)
     with pytest.raises(rt.ContainerError):

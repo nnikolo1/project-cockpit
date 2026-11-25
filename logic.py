@@ -2060,7 +2060,7 @@ def _stale(project, kind, label, age, max_h, module=None):
 
 def metadata_gaps(project, now, modules, cards, metrics, usage, policies, max_age_h=GAPS_MAX_AGE_H, descs=None,
                   tracked=None, assign=None, docs_heads=None, content=None, data_root=None, data_entries=None, timings=None, timing_limit=3.0, quality=None,
-                  retention=None, backup=None, snapshot=None):
+                  retention=None, backup=None, snapshot=None, synopsis=None):
     """Pure detection of what the Cockpit shows as no data / not wired / not measured / stale / missing. Every fact comes from the project's own
     data, already read; -> list of gap dicts {project, module|None, kind, what, age_h|None}; an empty list means clean. A check whose input is
     None is not run (e.g. no clone: no `tracked`).
@@ -2075,7 +2075,8 @@ def metadata_gaps(project, now, modules, cards, metrics, usage, policies, max_ag
       data_root     the project's data folder, data_entries the names in it; timings [(request, seconds|None)] of a live check
       retention     dict(path, text|None, key, min_days) of the coding tool's settings file (transcript_retention_gaps)
       backup        dict(text=the daily backup's status record or None when missing) (backup_status_gaps)
-      snapshot      dict(configured, collector, last) of the code snapshot settings and the last refresh record (_snapshot_gaps)"""
+      snapshot      dict(configured, collector, last) of the code snapshot settings and the last refresh record (_snapshot_gaps)
+      synopsis      dict(text=the project's session synopsis or None when missing) (ckp.core.synopsis.gaps, PC-70)"""
     g = []
     add = lambda kind, what, mod=None, age=None: g.append(_gap(project, kind, what, mod, age))
     mods = modules or []
@@ -2140,6 +2141,10 @@ def metadata_gaps(project, now, modules, cards, metrics, usage, policies, max_ag
     if backup is not None:
         for what, age in backup_status_gaps(backup.get("text"), now, max_age_h):
             add("backup", what, None, age)
+    if synopsis is not None:
+        from ckp.core.synopsis import gaps as synopsis_gaps
+        for what, age in synopsis_gaps(synopsis.get("text"), now.date()):
+            add("synopsis", what, None, age)
     for name, secs in timings or []:
         if secs is None or secs > timing_limit:
             add("slow", f"request {name} " + ("failed" if secs is None else f"took {secs:.1f} s (limit {timing_limit:g} s)"))

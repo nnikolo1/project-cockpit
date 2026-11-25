@@ -4,6 +4,7 @@ Every call to the container tool goes through one injectable function, `run(args
 `(returncode, output)` or raises `subprocess.TimeoutExpired`; a timeout surfaces as `ContainerTimeout`, so the
 Dispatcher can skip the firing and record the reason (3p). The proxy and the relay (4f-4h) are not here.
 """
+import datetime as dt
 import json
 import logging
 import os
@@ -13,6 +14,7 @@ import signal
 import subprocess
 from dataclasses import dataclass
 
+from ckp.core import synopsis as syn
 from dispatcher import note as good_bye
 from dispatcher.agent import ClaudeCode
 
@@ -25,7 +27,8 @@ TASK_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 INSTRUCTION = (  # 4r
     "Read {inbox}/task.md. Work in your own clone ({clone}). Write {outbox}/started first. "
     "At the end write {outbox}/goodbye.json (outcome, summary) and {outbox}/result.bundle "
-    "(a git bundle of your branch).")
+    "(a git bundle of your branch). If {inbox}/synopsis.md exists, read it after the task: a dated synopsis of the project's "
+    "latest interactive session, for context only; never copy its text into commits, issues or notes.")
 EGRESS_PROBE = (  # prints BLOCKED only if the connection fails; any other outcome counts as a leak or an error
     "import socket,sys\n"
     "try:\n socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=5).close(); print('OPEN')\n"
@@ -54,6 +57,7 @@ class Config:
     data_folder: str = os.path.expanduser("~/Library/Application Support/com.apple.container")  # size shown in the heartbeat
     runaway_minutes: int = 40           # 3i; the in-guest backstop is twice this (4e)
     build_dns: str = "1.1.1.1"          # name resolution of the image build fails with the tool's default (first real run)
+    synopsis_dir: str = None            # <queue root>/synopsis: the projects' session synopses (PC-70); None = none is copied
 
 
 def default_run(args, timeout):
@@ -219,12 +223,29 @@ class Runtime:
                 raise ContainerError(f"git bundle of main failed: {p.stderr.strip()}")
             with open(os.path.join(inbox, "task.md"), "w") as f:
                 f.write(task_text)
+            self.copy_synopsis(task_id, inbox, project)
         except BaseException:
             log.warning("preparing %s failed; removing the folder made by this call", base)
             shutil.rmtree(base, ignore_errors=True)
             raise
         log.info("task folder ready: %s", base)
         return base
+
+    def copy_synopsis(self, task_id, inbox, project=None, today=None):
+        """Copy <synopsis_dir>/<project>.md to inbox/synopsis.md, marked STALE when old or undated; no synopsis, no file (PC-70)."""
+        if not self.cfg.synopsis_dir:
+            return
+        if project is None:
+            from dispatcher.tasks import project_of   # the one place that parses the project key; only needed on the single-project path
+            project = project_of(task_id)
+        try:
+            with open(os.path.join(self.cfg.synopsis_dir, f"{check_project(project)}.md"), errors="replace") as f:
+                text = f.read()
+        except (OSError, ValueError):
+            log.info("no synopsis for project %s", project)
+            return
+        with open(os.path.join(inbox, "synopsis.md"), "w") as f:
+            f.write(syn.inbox_text(text, today or dt.date.today()))
 
     def discard_task(self, task_id, project=None):
         """Remove the task folder of a launch that did not start a Worker, so that the task can be selected again (3m)."""

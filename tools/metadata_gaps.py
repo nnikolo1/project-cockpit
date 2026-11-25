@@ -2,11 +2,12 @@
 """Reports the gaps in a project's metadata, as the Cockpit would show them. Read-only: files nothing, changes nothing.
 
     python3 tools/metadata_gaps.py [--project NAME] [--projects-file FILE] [--data-dir DIR] [--max-age-hours 24] [--timing URL] [--timing-limit 3]
-                                   [--tool-settings FILE] [--min-retention-days 3650] [--json]
+                                   [--tool-settings FILE] [--min-retention-days 3650] [--queue-root DIR] [--json]
 
 Reads what the Cockpit reads for the project: its entry in the projects file, the module map, the card files (footprint, churn, ambiguity),
 the code snapshot (`code`, its collector `code_collect` and the last refresh record), the token-usage files under DATA_DIR/<project>/, with a local clone, `git ls-files` for the Policies, and the coding
-tool's settings file for the transcript retention (checked only for a project whose transcripts are collected).
+tool's settings file for the transcript retention (checked only for a project whose transcripts are collected), and the project's session
+synopsis for the Workers in the Task Queue's root (`synopsis/<name>.md`).
 Prints one line per gap (project | module | what | age) or, with --json, the report documented in docs/contracts/metadata-gaps.md.
 Exit code: 0 no gap, 1 at least one gap, 2 the project or a file argument cannot be used. The detection itself is logic.metadata_gaps.
 """
@@ -25,6 +26,7 @@ import urllib.request
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import cockpit as C  # noqa: E402
 import logic as L  # noqa: E402
+from ckp.store import layout as store_layout  # noqa: E402
 
 log = logging.getLogger("metadata_gaps")
 DEFAULT_PROJECTS = "~/.config/project-cockpit/projects.json"  # the example path of docs/deployment.md
@@ -126,6 +128,7 @@ def main(argv=None, now=None):
     ap.add_argument("--timing-limit", type=float, default=3.0, help="seconds a request may take (default: %(default)s)")
     ap.add_argument("--tool-settings", default=TOOL_SETTINGS, help="the coding tool's user settings file (default: %(default)s)")
     ap.add_argument("--min-retention-days", type=int, default=L.RETENTION_MIN_DAYS, help="shortest acceptable transcript retention (default: %(default)s)")
+    ap.add_argument("--queue-root", default=str(store_layout.QUEUE_ROOT), help="the Task Queue's data root, which holds synopsis/<project>.md (default: %(default)s)")
     ap.add_argument("--json", action="store_true", help="print the JSON report instead of text lines")
     a = ap.parse_args(argv)
     now = now or dt.datetime.now(dt.timezone.utc)
@@ -141,7 +144,8 @@ def main(argv=None, now=None):
     timings = time_requests(a.timing, p["name"], a.timing_limit) if a.timing else None
     settings = pathlib.Path(a.tool_settings).expanduser()
     retention = dict(path=str(settings), text=_read(settings), key=RETENTION_KEY, min_days=a.min_retention_days)
-    gaps = L.metadata_gaps(p["name"], now, max_age_h=a.max_age_hours, timings=timings, timing_limit=a.timing_limit, retention=retention,
+    synopsis = dict(text=_read(pathlib.Path(a.queue_root).expanduser() / "synopsis" / f"{p['name']}.md"))
+    gaps = L.metadata_gaps(p["name"], now, max_age_h=a.max_age_hours, timings=timings, timing_limit=a.timing_limit, retention=retention, synopsis=synopsis,
                            **collect(p, pathlib.Path(a.data_dir).expanduser(), now))
     rep = report(p["name"], gaps, a.max_age_hours, now)
     log.info("project %s: %d gap(s)", p["name"], len(gaps))

@@ -76,6 +76,8 @@
   {"path": "dispatcher/core.py", "module": "taskqueue/dispatcher", "basis": "the Dispatcher's firing logic; its test follows it"},
   {"path": "dispatcher/host.py", "module": "taskqueue/dispatcher", "basis": "the host readings (memory pressure, power source) the Dispatcher puts in its heartbeat; its test is tests/dispatcher/test_host.py"},
   {"path": "dispatcher/runtime.py", "module": "taskqueue/dispatcher", "basis": "the container-runtime interface the Dispatcher calls; its test follows it"},
+  {"path": "ckp/core/synopsis.py", "module": "taskqueue/dispatcher", "basis": "the session synopsis the Dispatcher copies into a Worker's inbox, marked stale when old (PC-70)"},
+  {"path": "tests/ckp/core/test_core_synopsis.py", "module": "taskqueue/dispatcher", "basis": "tests of ckp/core/synopsis.py"},
   {"path": "dispatcher/proxy.py", "module": "taskqueue/dispatcher", "basis": "the host-side reverse proxy the Dispatcher starts; its test is tests/dispatcher/test_proxy.py"},
   {"path": "dispatcher/tasks.py", "module": "taskqueue/dispatcher", "basis": "the Dispatcher's task source (GitHub); its test follows it"},
   {"path": "dispatcher/plog.py", "module": "taskqueue/dispatcher", "basis": "the Dispatcher's processing log; its test follows it"},

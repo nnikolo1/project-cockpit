@@ -324,3 +324,11 @@ def test_refresh_outcome():
     assert not L.refresh_outcome(None, fresh, NOW)[0] and not L.refresh_outcome(1, fresh, NOW)[0]
     assert "unreadable" in L.refresh_outcome(0, None, NOW)[1]
     assert "still stale" in L.refresh_outcome(0, {"generated_at": "2026-11-20T00:00:00Z"}, NOW)[1]
+
+
+def test_missing_undated_or_stale_synopsis_is_a_gap_and_a_fresh_one_is_not():
+    assert [g["kind"] for g in gaps(synopsis=dict(text=None))] == ["synopsis"]
+    assert [g["kind"] for g in gaps(synopsis=dict(text="no date here"))] == ["synopsis"]
+    old = gaps(synopsis=dict(text="Synopsis of 2026-11-10\n..."))
+    assert [(g["kind"], g["age_h"]) for g in old] == [("synopsis", 14 * 24.0)]
+    assert gaps(synopsis=dict(text="Synopsis of 2026-11-20\n...")) == []
