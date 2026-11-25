@@ -30,7 +30,7 @@ def test_no_usage_at_all_gives_empty_lists_and_the_empty_line():
     for r in (rep(""), rep(u("2026-03-02T10:00:00Z", 0))):
         assert r["days"] == [] and r["windows"] == []
     assert "const NOUSE='no usage in the last 90 days'" in HTML
-    assert "usageTable('Usage per day',USE.days,NOUSE)" in HTML and re.search(r"usageTable\('Usage per 5-hour window',.*?,NOUSE\)", HTML)
+    assert "usageTable('Usage per day',USE.days,NOUSE," in HTML and re.search(r"usageTable\('Usage per 5-hour window',.*?,NOUSE[,)]", HTML)
     assert L.usage_report(None, None, lambda f: None)["days"] is None   # a missing file is still "no data"
 
 
@@ -46,7 +46,7 @@ def test_only_the_last_90_days_are_listed():
 
 def test_bar_is_scaled_to_the_highest_row_listed():
     body = HTML[HTML.index("function usageTable("):HTML.index("function quotaCard(")]
-    assert "const mx=Math.max(1,...rows.map(r=>r.total));" in body and "100*r.total/mx" in body
+    assert "const mx=Math.max(1,...rows.map(r=>r.total))" in body and "100*r.total/mx" in body
     r = rep(u("2026-03-01T00:00:00Z", 1), u("2026-03-05T00:00:00Z", 4))
     mx = max(d["total"] for d in r["days"])
     assert [100 * d["total"] / mx for d in r["days"]] == [100, 25]

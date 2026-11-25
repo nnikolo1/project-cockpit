@@ -153,7 +153,7 @@ tr.blocked{background:var(--danger-tint)}tr.blocked td:first-child{box-shadow:in
 .band{display:inline-block;border-radius:6px;padding:1px 8px;font-size:12px;font-weight:600;white-space:nowrap}
 .band-hot{background:var(--p1);color:var(--p1-ink)}.band-mid{background:var(--p2);color:var(--p2-ink)}.band-cold{background:var(--p3);color:var(--p3-ink)}
 .pbar{position:relative;display:inline-block;vertical-align:middle;flex:none;width:200px;height:12px;border-radius:1px;background:var(--line);overflow:hidden}
-.pbar i{position:absolute;left:0;top:0;bottom:0;background:var(--accent)}.pbar s{position:absolute;top:0;bottom:0;width:1px;margin-left:-1px;background:var(--muted);opacity:.7}
+.pbar i{position:absolute;left:0;top:0;bottom:0;background:var(--accent)}.pbar.rel i{background:var(--muted);opacity:.6}.pbar s{position:absolute;top:0;bottom:0;width:1px;margin-left:-1px;background:var(--muted);opacity:.7}
 .pscale{position:relative;display:inline-block;width:200px;height:1em;font-size:11px;font-weight:400;color:var(--muted)}.pscale span{position:absolute;transform:translateX(-50%)}.pscale span:first-child{transform:none}.pscale span:last-child{transform:translateX(-100%)}
 .qbar{height:6px;border-radius:3px;background:var(--q-none)}.qbar.qb-ok{background:var(--q-ok)}.qbar.qb-warn{background:var(--q-warn)}.qbar.qb-bad{background:var(--q-bad)}
 .qw{font-size:12px;font-weight:600}.qleg{display:flex;flex-wrap:wrap;gap:14px;font-size:13px}.qleg i{display:inline-block;width:18px;height:6px;border-radius:3px;margin-right:6px;vertical-align:middle}
@@ -959,16 +959,26 @@ function recentRows(rows,has){return (rows||[]).filter(has||(()=>true)).reverse(
    the fill width is a pure, non-decreasing function of the value, 0 for no value, capped at the full track above 100, with no minimum width. */
 const PTICKS=[25,50,75,100];
 function pctWidth(v){v=Number(v);return v>0?Math.min(100,v):0;}
-function pctBar(v,label){return '<span class="pbar" role="img" aria-label="'+esc(label)+'"><i style="width:'+pctWidth(v)+'%"></i>'+PTICKS.map(t=>'<s data-tick="'+t+'" style="left:'+t+'%"></s>').join('')+'</span>';}
+function pctBar(v,label,cls){return '<span class="pbar'+(cls?' '+cls:'')+'" role="img" aria-label="'+esc(label)+'"><i style="width:'+pctWidth(v)+'%"></i>'+PTICKS.map(t=>'<s data-tick="'+t+'" style="left:'+t+'%"></s>').join('')+'</span>';}
 function pctScale(){return '<span class="pscale" aria-hidden="true">'+[0].concat(PTICKS).map(t=>'<span style="left:'+t+'%">'+t+(t===100?' %':'')+'</span>').join('')+'</span>';}
-function usageTable(title,rows,empty){
+/* A usage table (per day or per 5-hour window). The bar column (owner, 2026-11-25, PC-105): where the vendor's quota readings cover the row,
+   quota(r) gives {pct, label} and the bar is that percentage with the text "<label> <pct> %"; else quota(r) is null and the bar is the row's
+   share of the largest row listed, a lighter fill, with the text "share of the largest row <n> %". */
+function usageTable(title,rows,empty,quota,what){
   const nf=x=>x.toLocaleString('en-US');
   if(!rows)return '<div class="card"><h2>'+title+'</h2><span class="muted">no data</span></div>';
-  const mx=Math.max(1,...rows.map(r=>r.total));
-  return '<div class="card"><h2>'+title+'</h2><span class="muted">Bar: share of the largest row listed (0 to 100 %), ticks at 25, 50, 75 and 100 %.</span><div class="tblbox narrow"><table><thead><tr><th>'+title.split(' ').pop()+'</th>'+USEF.map(f=>'<th>'+f[1]+'</th>').join('')+'<th>'+pctScale()+'</th></tr></thead><tbody>'
-   +rows.map(r=>'<tr><td class="mono">'+esc(r.key)+'</td>'+USEF.map(f=>'<td class="mono">'+nf(r[f[0]])+'</td>').join('')+'<td>'+pctBar(100*r.total/mx,Math.round(100*r.total/mx)+' % of the largest row')+'</td></tr>').join('')
+  const mx=Math.max(1,...rows.map(r=>r.total)),q=quota||(()=>null);
+  const bar=r=>{const v=q(r);if(v&&v.pct!=null)return '<td class="ubar" data-bar="quota">'+pctBar(v.pct,v.label+' '+v.pct+' % used')+' <span class="mono">'+esc(v.label)+' '+v.pct+' %</span></td>';
+    const s=100*r.total/mx;return '<td class="ubar" data-bar="share">'+pctBar(s,Math.round(s)+' % of the largest row','rel')+' <span class="muted">share of the largest row '+Math.round(s)+' %</span></td>';};
+  return '<div class="card"><h2>'+title+'</h2><span class="muted">Bar: where the vendor’s quota readings cover the row, the 5-hour quota used'+(what?' ('+what+')':'')+', the percentage written next to it; else the row’s tokens as a share of the largest row listed (lighter bar, “share of the largest row”), which says nothing about the quota. Ticks at 25, 50, 75 and 100 %.</span><div class="tblbox narrow"><table><thead><tr><th>'+title.split(' ').pop()+'</th>'+USEF.map(f=>'<th>'+f[1]+'</th>').join('')+'<th title="5-hour quota used where readings exist, else share of the largest row">Quota used, else share of the largest row<br>'+pctScale()+'</th></tr></thead><tbody>'
+   +rows.map(r=>'<tr><td class="mono">'+esc(r.key)+'</td>'+USEF.map(f=>'<td class="mono">'+nf(r[f[0]])+'</td>').join('')+bar(r)+'</tr>').join('')
    +(rows.length?'':'<tr><td class="muted" colspan="7">'+(empty||'no data')+'</td></tr>')+'</tbody></table></div></div>';
 }
+/* The vendor 5-hour readings for the usage tables: per window start (as the window key, kind vendor) the window's highest reading, per day the
+   day's highest 5-hour reading; null where there is none. */
+function windowQuota(q){const m={};((q&&q.windows)||[]).forEach(w=>{if(w.peak!=null)m[new Date((w.end-18000)*1000).toISOString().slice(0,16).replace('T',' ')]=w.peak;});
+  return r=>r.kind==='vendor'&&m[r.start]!=null?{pct:m[r.start],label:'5-hour quota'}:null;}
+function dayQuota(q){const m={};((q&&q.days)||[]).forEach(d=>{if(d.five_hour!=null)m[d.key]=d.five_hour;});return r=>m[r.key]!=null?{pct:m[r.key],label:'5-hour quota'}:null;}
 function quotaCard(q){
   const T='Vendor quota used';
   if(!q)return '<div class="card"><h2>'+T+'</h2><span class="muted">no data</span></div>';
@@ -1064,8 +1074,8 @@ function vUsage(){
   const tk=USE.tasks;
   const dv={},fh={},ag=(USE.sessions&&USE.sessions.aggregate_days)||{};(USE.days||[]).forEach(r=>{dv[r.key]=r.total;});Object.keys(ag).forEach(d=>{dv[d]=(dv[d]||0)+ag[d];});((USE.quota&&USE.quota.days)||[]).forEach(r=>{if(r.five_hour!=null)fh[r.key]=r.five_hour;});
   const hm='<div class="card"><h2>Tokens per day</h2>'+heatmap(dv,(d,n)=>nf(n)+' tokens on '+d+(ag[d]!=null?'\nincl. '+nf(ag[d])+' daily aggregate, no split':'')+(fh[d]!=null?'\nhighest 5-hour reading '+fh[d]+' %':''),'Sum of the four token counts per day (UTC), as in the per-day table below; the proxy file has usage on '+((USE.days||[]).length)+' of the last 90 days. Days before the interactive transcripts add the statistics cache’s daily total (daily aggregate, no split).')+'</div>';
-  const C={windows:()=>usageTable('Usage per 5-hour window',USE.windows&&USE.windows.map(r=>Object.assign({},r,{key:r.key+' ('+r.kind+')'})),NOUSE),heatmap:()=>hm,
-   readings:()=>latestCard(USE.quota),estimates:()=>estimateCard(USE.estimates),sessions:()=>sessionCards(USE.sessions),days:()=>usageTable('Usage per day',USE.days,NOUSE),quota:()=>quotaCard(USE.quota),
+  const C={windows:()=>usageTable('Usage per 5-hour window',USE.windows&&USE.windows.map(r=>Object.assign({},r,{start:r.key,key:r.key+' ('+r.kind+')'})),NOUSE,windowQuota(USE.quota),'the window’s highest reading'),heatmap:()=>hm,
+   readings:()=>latestCard(USE.quota),estimates:()=>estimateCard(USE.estimates),sessions:()=>sessionCards(USE.sessions),days:()=>usageTable('Usage per day',USE.days,NOUSE,dayQuota(USE.quota),'the day’s highest reading'),quota:()=>quotaCard(USE.quota),
    projects:()=>projectsCard(),fit:()=>fitCard(USE.reconcile),
    tasks:()=>'<div class="card"><h2>Per task</h2><div class="tblbox narrow"><table><thead><tr><th>Task</th><th>Worker</th><th>Launched (UTC)</th><th>Proxy sum</th><th>Good-bye note</th><th>Difference</th></tr></thead><tbody>'
    +(tk?recentRows(tk).map(t=>'<tr><td class="mono">'+esc(t.task)+'</td><td class="mono">'+esc(t.worker||'')+'</td><td class="mono">'+esc(t.start)+'</td><td class="mono">'+nf(t.proxy)+(t.overlap?' <span class="muted" title="Another task ran at the same time; the sum may include its requests">overlap</span>':'')+'</td><td class="mono">'+nf(t.note)+'</td><td class="mono">'+nf(t.diff)+'</td></tr>').join(''):'')
