@@ -93,3 +93,7 @@ Only the Python version installed on the owner's machine is supported and tested
 ## Blocked tasks are not assigned (owner, 2026-11-25, constitutional amendment)
 
 A released task that is blocked by a task which is not yet merged is never assigned to a Worker (owner, 2026-11-25, constitutional amendment): a task's blockers are its relations "blocked by"; the task counts as blocked until every blocker is merged (a blocker that is open in any other state, failed or cancelled keeps it blocked until it is merged or the owner removes the relation); the Dispatcher skips blocked tasks when it chooses, and the Cockpit shows them as blocked. A blocked task may be released: release states the owner's decision, the blockers state the order.
+
+## Every UI action has a test (owner, 2026-11-25)
+
+Every action the UI offers is covered by a test (owner, 2026-11-25): each server action and each page action has at least one test that exercises it (the happy path and the refusal), a test enumerates the actions the code defines and fails for an action no test names, and a new action ships with its tests in the same change; an action without a test is a policy violation that the policy harness reports.
