@@ -33,6 +33,7 @@ full = lambda form, **kw: C.plan_action(form, S, R, **kw)
 plan = lambda form, **kw: ([o for o in full(form, **kw)[0] if o[0] != "label"], full(form, **kw)[1])   # without the label-create calls
 
 
+@pytest.mark.ui_action("server:release")
 def test_release_embryo_adds_released_priority_and_deadline():
     ops, msg = plan(dict(action="release", n=1, p="2", d="2026-12-24"))
     assert ops == [["issue", "edit", "1", "-R", R, "--add-label", "released", "--add-label", "P2", "--add-label", "due:2026-12-24"]]
@@ -40,6 +41,7 @@ def test_release_embryo_adds_released_priority_and_deadline():
     assert plan(dict(action="release", n=1, p=3))[0] == [["issue", "edit", "1", "-R", R, "--add-label", "released", "--add-label", "P3"]]
 
 
+@pytest.mark.ui_action("server:release/refused")
 def test_release_only_embryos_and_valid_values():
     for n in (2, 3, 4):
         with pytest.raises(ValueError, match="only embryos"):
@@ -56,6 +58,7 @@ def test_release_over_a_forged_released_label_removes_then_re_adds_it():
                                                           ["issue", "edit", "5", "-R", R, "--add-label", "released", "--add-label", "P1"]]
 
 
+@pytest.mark.ui_action("server:change", "server:change/refused")
 def test_change_priority_swaps_label_and_deadline_is_set_or_cleared():
     assert plan(dict(action="change", n=2, p="1", d="2026-12-24"))[0] == [["issue", "edit", "2", "-R", R, "--add-label", "P1", "--add-label", "due:2026-12-24", "--remove-label", "P2", "--remove-label", "due:2026-12-01"]]
     assert plan(dict(action="change", n=2, p="2", d=""))[0] == [["issue", "edit", "2", "-R", R, "--remove-label", "due:2026-12-01"]]
@@ -65,12 +68,14 @@ def test_change_priority_swaps_label_and_deadline_is_set_or_cleared():
         plan(dict(action="change", n=1, p="1"))
 
 
+@pytest.mark.ui_action("server:cancel", "server:cancel/refused")
 def test_cancel_labels_then_closes_as_not_planned():
     assert plan(dict(action="cancel", n=1))[0] == [["issue", "edit", "1", "-R", R, "--add-label", "cancelled"], ["issue", "close", "1", "-R", R, "--reason", "not planned"]]
     with pytest.raises(ValueError):
         plan(dict(action="cancel", n=4))
 
 
+@pytest.mark.ui_action("server:new", "server:new/refused")
 def test_new_task_labels_and_parent_link_use_the_created_id():
     ops, _ = plan(dict(action="new", title="Do it", desc="why", module="alpha", type="bug", cls="must", parent="2"))
     assert ops == [["api", "-X", "POST", f"repos/{R}/issues", "-f", "title=Do it", "-f", "body=why", "-f", "labels[]=type:bug", "-f", "labels[]=must", "-f", "labels[]=module:alpha"],
@@ -81,6 +86,7 @@ def test_new_task_labels_and_parent_link_use_the_created_id():
             plan(dict(action="new", **bad))
 
 
+@pytest.mark.ui_action("server:block", "server:block/refused", "server:unblock", "server:unblock/refused")
 def test_blockers_use_native_dependencies_with_the_blockers_database_id():
     assert plan(dict(action="block", n=2, b=3))[0] == [["api", "-X", "POST", f"repos/{R}/issues/2/dependencies/blocked_by", "-F", "issue_id=1003"]]
     assert plan(dict(action="unblock", n=6, b=1))[0] == [["api", "-X", "DELETE", f"repos/{R}/issues/6/dependencies/blocked_by/1001"]]
@@ -89,6 +95,7 @@ def test_blockers_use_native_dependencies_with_the_blockers_database_id():
             plan(form)
 
 
+@pytest.mark.ui_action("server:moddl", "server:moddl/refused")
 def test_module_deadline_variable_merges_and_clears():
     S2 = dict(S, modDeadline={"beta": "2026-03-01"})
     assert C.plan_action(dict(action="moddl", module="alpha", d="2026-12-31"), S2, R)[0] == [["variable", "set", "MODULE_DEADLINES", "--body", '{"alpha": "2026-12-31", "beta": "2026-03-01"}', "-R", R]]
@@ -99,6 +106,7 @@ def test_module_deadline_variable_merges_and_clears():
         plan(dict(action="moddl", module="unassigned", d="2026-12-31"))
 
 
+@pytest.mark.ui_action("server:accept", "server:accept/refused", "server:dismiss")
 def test_accept_applies_as_manager_and_resolves_dismiss_only_resolves():
     ops, _ = plan(dict(action="accept", n=2, id="p1"))
     assert ops[0] == ["issue", "edit", "2", "-R", R, "--add-label", "P1", "--remove-label", "P2"]
@@ -111,6 +119,7 @@ def test_accept_applies_as_manager_and_resolves_dismiss_only_resolves():
         plan(dict(action="accept", n=2, id="zz"))
 
 
+@pytest.mark.ui_action("server:take", "server:take/refused", "server:complete", "server:complete/refused")
 def test_simulation_actions_need_the_flag_and_the_right_stage():
     with pytest.raises(PermissionError):
         plan(dict(action="take", n=2))
