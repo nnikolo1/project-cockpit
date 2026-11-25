@@ -93,3 +93,7 @@ Skills: `agent-brief` G; manager review G; independent reviewer G; worker task p
 ## Step 1 done: the base text
 
 The 32 generic rules were condensed into the base text `docs/templates/base-rules.md` (31 lines in four groups, with the conditional tags [db], [UI], [modules] and [optional]), agreed by the owner on 2026-11-25 without changes. Next steps: the generated Cockpit workflow section (step 2), the skills (step 3), the cleanup of the private project's instruction file (step 4), PC-34 (step 5).
+
+## Step 2 done: the Cockpit workflow section
+
+The owner edited the draft (rule 1 names GitHub, rule 5 loses "provisional") and agreed it on 2026-11-25; written to `docs/templates/workflow-section.md` (13 lines). Next: the skills (step 3), the cleanup of the private project's instruction file (step 4), PC-34 (step 5). Open: how rule 8 of the base text (the running log goes to the data folder, not into git) is reconciled with the constitution's Daily reports section.
