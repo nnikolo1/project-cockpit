@@ -87,6 +87,11 @@ tr.gone td:nth-child(3) .linkbtn{text-decoration:line-through}
 .note{display:flex;align-items:center;justify-content:space-between;gap:10px;border-left:4px solid var(--accent)}.note.bad{border-left-color:var(--danger)}.note.unknown{border-left-color:var(--warn,var(--danger))}
 .spin{display:inline-block;width:10px;height:10px;margin-right:6px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;vertical-align:-1px;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.spin{animation:none;border-right-color:currentColor;opacity:.5}}
 .btn[disabled]{opacity:.7;cursor:progress}
+table.qlog{font-size:12.5px}table.qlog tr.qrow{cursor:pointer}tr.qday td{font-weight:600;color:var(--muted);background:var(--bg)}
+tr.qalert{background:var(--danger-tint)}tr.qalert td:first-child{box-shadow:inset 3px 0 0 var(--danger)}tr.qfull pre{margin:0;white-space:pre-wrap;word-break:break-all}
+.qk-launched{background:var(--s-released-bg);color:var(--s-released)}.qk-wip{background:var(--s-wip-bg);color:var(--s-wip)}.qk-unmerged{background:var(--s-unmerged-bg);color:var(--s-unmerged)}
+.qk-failed{background:var(--s-failed-bg);color:var(--s-failed)}.qk-merged{background:var(--s-merged-bg);color:var(--s-merged)}.qk-sleep{background:var(--lv-day-tint);color:var(--lv-day)}
+.qk-heartbeat{background:var(--line);color:var(--muted)}.qk-other{border:1px dashed var(--edge);background:none;color:var(--muted)}
 tr.blocked{background:var(--danger-tint)}tr.blocked td:first-child{box-shadow:inset 3px 0 0 var(--danger)}
 .linkbtn{background:none;border:0;padding:0;text-align:left;cursor:pointer;color:var(--ink)}
 .linkbtn:hover{text-decoration:underline}
@@ -262,7 +267,7 @@ let COMP={steering:false,projects:[]},compTimer=0;  /* /api/compliance: every pr
 let USE=null,SET=null,CSET=null,ALOG=null,D=null,CODE={wired:false,modules:{}},FEED=[],ACT=[],MODULES=[],RULES={configured:false},META=NOMETA();
 const SVGC={};
 const MODDOC={};  /* module page content (/api/moduledoc) by project:id */
-const UI={route:'cockpit',filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',tlType:'all',setSec:'dispatcher',alog:{action:'',outcome:'',task:''},rulesGroup:'all',qProj:'all',codeMod:'unassigned',codeTab:'quality',fit:{deps:true,erd:true,js:true,flow:false},toast:'',err:'',armed:null,busy:null,note:null};
+const UI={route:'cockpit',filter:'all',mod:'all',ex:false,drawer:null,tlMod:'all',tlType:'all',setSec:'dispatcher',alog:{action:'',outcome:'',task:''},qlog:{beats:false,task:'',worker:'',n:15},qlogRows:{},rulesGroup:'all',qProj:'all',codeMod:'unassigned',codeTab:'quality',fit:{deps:true,erd:true,js:true,flow:false},toast:'',err:'',armed:null,busy:null,note:null};
 const ST=()=>!!(D?D.source.steering:(SET&&SET.steering));
 const SIM=()=>!!(D&&D.source.simulate);
 const nd=(v,f)=>v==null?'<span class="muted">no data</span>':(f?f(v):v);
@@ -792,6 +797,15 @@ function tm(x,now){
   const d=tmDate(x);
   return d?'<span class="tm" title="'+d.toISOString().slice(0,16).replace('T',' ')+' UTC">'+tmTxt(x,now)+'</span>':'?';
 }
+/* The processing log's table (PC-120): the local clock time "HH:MM:SS" (with the UTC tooltip) and the local date of its group heading. */
+function tmSec(x){
+  const d=tmDate(x);if(!d)return '?';const p=n=>String(n).padStart(2,'0');
+  return '<span class="tm" title="'+d.toISOString().slice(0,19).replace('T',' ')+' UTC">'+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds())+'</span>';
+}
+function tmDay(x){
+  const d=tmDate(x);if(!d)return 'Unknown date';const p=n=>String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());
+}
 function zoneNote(now){
   const o=-new Date(now==null?Date.now():now).getTimezoneOffset(),a=Math.abs(o);
   return 'times in your local time, UTC'+(o<0?'-':'+')+String(Math.floor(a/60)).padStart(2,'0')+':'+String(a%60).padStart(2,'0');
@@ -820,7 +834,35 @@ function vQueueLocal(){
   return '<div class="card"><div class="row" style="gap:10px"><h2>Being processed now</h2><span class="muted" style="font-size:13px" title="Read from the Dispatcher\'s files on every page load; the task table below is GitHub data'+(D?' from '+tmTxt(D.source.fetchedAt):'')+', with newer Dispatcher events marked live">live, '+tmTxt(L.asOf)+'</span></div>'+(L.workers.length?L.workers.map(w=>{const t=nf(w.task);return '<div class="row" style="gap:10px;margin-top:8px"><b class="mono">'+esc(w.worker)+'</b><b class="mono">'+esc(w.task||'?')+'</b>'+(t?'<button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button>':'')+'<span class="muted">launched '+tm(w.launched)+(w.started?'':' · starting')+'</span></div>';}).join(''):'<p class="muted" style="margin:8px 0 0">No Worker is running now.</p>')
    +'<p class="muted" style="font-size:12px;margin:10px 0 0">From the Dispatcher: '+(L.settings.values.enabled?'on':'off')+', '+L.settings.values.workers+' Worker'+(L.settings.values.workers===1?'':'s')+' at most, every '+L.settings.values.interval_minutes+' min (settings in the Settings tab).</p>'
    +bkLine(L.backup)+ciLine(CI)
-   +(L.log.length?'<details id="qlog" style="margin-top:8px"'+(UI.qlogOpen?' open':'')+'><summary class="muted">Processing log, newest '+L.log.length+'</summary><div class="mono" style="font-size:12px;margin-top:6px">'+L.log.map(r=>tm(r.time)+' '+esc(r.heartbeat?r.heartbeat:[r.task,r.state,r.reason,r.worker].filter(Boolean).join(' '))).join('<br>')+'</div></details>':'')+'</div>';
+   +(L.log.length?'<details id="qlog" style="margin-top:8px"'+(UI.qlogOpen?' open':'')+'><summary class="muted">Processing log</summary>'+block('Processing log',()=>vQlog(L.log))+'</details>':'')+'</div>';
+}
+/* The processing log as a table (PC-120): the server gives the rows (logic.log_rows: events, sleeps, heartbeats with idle runs condensed,
+   unreadable lines as "other"), newest first; the page keeps the events (or, toggled, every heartbeat too), filters by task and Worker,
+   shows the newest 15, 50 or 200 under date headings, highlights failures and reconciliations, and opens a row to its original lines. */
+const QLOG_LIMITS=[15,50,200];
+function qlogSplit(s){return String(s||'').split(', ').filter(Boolean);}
+function qlogKey(r){return r.count>1?'g'+r.first:r.lines[0];}
+function qlogPick(rows,F){
+  return rows.filter(r=>(F.beats||r.event)&&(!F.task||qlogSplit(r.task).includes(F.task))&&(!F.worker||qlogSplit(r.worker).includes(F.worker))).slice(0,F.n);
+}
+function vQlog(rows){
+  const F=UI.qlog,pick=qlogPick(rows,F),opts=k=>[...new Set(rows.flatMap(r=>qlogSplit(r[k])))].sort();
+  const sel=(n,vals,lab,cur)=>'<label class="muted" style="font-size:12px">'+lab+' <select name="'+n+'">'+vals.map(v=>'<option value="'+esc(v)+'"'+(String(cur)===String(v)?' selected':'')+'>'+(v===''?'all':esc(v))+'</option>').join('')+'</select></label>';
+  let h='<div class="row" style="gap:12px;margin:8px 0"><button class="btn small" data-act="qlogbeats" aria-pressed="'+F.beats+'">'+(F.beats?'Every heartbeat shown':'Events only')+'</button>'
+   +'<form data-form="qlog" class="row" style="gap:12px">'+sel('task',[''].concat(opts('task')),'Task',F.task)+sel('worker',[''].concat(opts('worker')),'Worker',F.worker)+sel('n',QLOG_LIMITS,'Newest',F.n)
+   +'<button class="btn small">Show</button></form></div>';
+  if(!pick.length)return h+'<p class="muted" style="margin:0">No '+(F.beats?'rows':'events')+(F.task||F.worker?' match the filters':' in the log')+'.</p>';
+  h+='<div class="tblbox"><table class="qlog"><thead><tr><th>Time</th><th>Kind</th><th>Task</th><th>Worker</th><th>Detail</th></tr></thead><tbody>';
+  let day=null;
+  pick.forEach(r=>{
+    const d=tmDay(r.time),k=qlogKey(r),open=!!UI.qlogRows[k];
+    if(d!==day){day=d;h+='<tr class="qday"><td colspan="5">'+esc(d)+'</td></tr>';}
+    const what=r.kind==='heartbeat'?esc(r.what)+(r.count>1?', '+r.count+' heartbeats, '+tmSec(r.first)+' to '+tmSec(r.time):'')+(r.detail?' · ':''):'';
+    h+='<tr class="qrow'+(r.alert?' qalert':'')+'" data-act="qlogrow" data-k="'+esc(k)+'"><td class="mono"><button class="linkbtn" data-act="qlogrow" data-k="'+esc(k)+'" aria-expanded="'+open+'" title="The full record">'+(open?'▾':'▸')+'</button> '+tmSec(r.time)+'</td>'
+      +'<td><span class="chip qk-'+esc(r.kind)+'">'+esc(r.kind)+'</span></td><td class="mono">'+esc(r.task)+'</td><td class="mono">'+esc(r.worker)+'</td><td>'+what+esc(r.detail)+'</td></tr>';
+    if(open)h+='<tr class="qfull"><td colspan="5"><pre class="mono">'+r.lines.map(esc).join('\n')+(r.count>r.lines.length?'\n… and '+(r.count-r.lines.length)+' older heartbeats':'')+'</pre></td></tr>';
+  });
+  return h+'</tbody></table></div>';
 }
 function vBacklog(){
   if(!D)return '<div class="page">'+qLive()+'<p class="muted">The task list needs GitHub and is not available yet.</p></div>';
@@ -1396,6 +1438,8 @@ function act(a,ds){
    case 'retryact':{const b=UI.toastRetry;UI.toast='';UI.toastRetry=null;render();post(b);break;}
    case 'toastx':UI.toast='';UI.toastRetry=null;clearTimeout(toastTimer);render();break;
    case 'problems':UI.problems=!UI.problems;render();break;
+   case 'qlogbeats':UI.qlog.beats=!UI.qlog.beats;render();break;
+   case 'qlogrow':if(UI.qlogRows[ds.k])delete UI.qlogRows[ds.k];else UI.qlogRows[ds.k]=true;render();break;
    case 'unblock':post({action:'unblock',n:t.number,b:num(ds.b)});break;
    case 'accept':case 'dismiss':post({action:a,n:+ds.n,id:ds.id});break;
   }
@@ -1407,7 +1451,8 @@ window.addEventListener('unhandledrejection',e=>note('script','','',String(e.rea
 setInterval(flush,30000);  /* sends the events kept while the server was unreachable */
 document.addEventListener('input',function(e){const f=e.target.closest('[data-form=edit]');if(f&&UI.drawer)UI.drawer.draft={title:f.elements.title.value,body:f.elements.body.value};});
 document.addEventListener('toggle',function(e){if(e.target.id==='qlog')UI.qlogOpen=e.target.open;},true);  /* the log stays open across refreshes */
-document.addEventListener('change',function(e){if(e.target.id==='psel')pickProject(e.target.value);});
+document.addEventListener('change',function(e){if(e.target.id==='psel')pickProject(e.target.value);
+  const f=e.target.closest&&e.target.closest('[data-form=qlog]');if(f&&f.requestSubmit)f.requestSubmit();});  /* the log's selectors apply at once */
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&UI.drawer){UI.drawer=null;render();}});
 document.addEventListener('submit',async function(e){
   const f=e.target.closest('[data-form]');if(!f)return;e.preventDefault();
@@ -1423,6 +1468,7 @@ document.addEventListener('submit',async function(e){
   else if(kind==='settings'){const b={action:'settings',enabled:f.elements.enabled.checked};
     SETROWS.slice(1).forEach(r=>{b[r[0]]=fd.get(r[0]);});post(b);}
   else if(kind==='cardsettings')post({action:'cardsettings',churn_colour:fd.get('churn_colour'),quality_thresholds:qThRead(fd),quota_plan_start:fd.get('quota_plan_start'),quota_weak_readings:fd.get('quota_weak_readings'),queue_refresh_s:fd.get('queue_refresh_s')});
+  else if(kind==='qlog'){const n=+fd.get('n');UI.qlog=Object.assign({},UI.qlog,{task:fd.get('task')||'',worker:fd.get('worker')||'',n:QLOG_LIMITS.includes(n)?n:QLOG_LIMITS[0]});render();}
   else if(kind==='alog'){UI.alog={action:fd.get('action')||'',outcome:fd.get('outcome')||'',task:(fd.get('task')||'').trim()};ALOG=null;render();loadAlog();}
   else if(kind==='moddl')post({action:'moddl',module:f.dataset.m,d:fd.get('d')||''});
   else if(kind==='new'){const title=fd.get('title');

@@ -124,6 +124,7 @@
   {"path": "tests/test_module_order.py", "module": "githubclient", "basis": "tests the order of the module cards by code lines"},
   {"path": "tests/test_queue_local_times.py", "module": "githubclient", "basis": "tests the launch time shown for running Workers in the Task Queue view"},
   {"path": "tests/test_live_overlay.py", "module": "githubclient", "basis": "tests the live overlay of Dispatcher events on the cached task stages (PC-119)"},
+  {"path": "tests/test_processing_log_table.py", "module": "githubclient", "basis": "tests the processing log table of the Task Queue view (PC-120)"},
   {"path": "tests/test_health_endpoint.py", "module": "githubclient", "basis": "tests the unauthenticated /health endpoint of the viewer (the deploy's health check, PC-84)"},
   {"path": "tests/test_safe_render.py", "module": "cockpitwebpage", "basis": "tests the page's time helper and the per-block error guard in web/index.html (PC-114)"},
   {"path": "tests/test_projects.py", "module": "githubclient", "basis": "tests the --projects handling in cockpit.py"},

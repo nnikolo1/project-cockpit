@@ -2431,9 +2431,9 @@ def _when(t):
     return (d if d.tzinfo else d.astimezone()).isoformat(timespec="seconds")
 
 
-def queue_local(state_text, plog_text, limit=15):
+def queue_local(state_text, plog_text):
     """The Task Queue facts that need no GitHub: the Workers the Dispatcher's state file lists as running (worker, task id, launched, started)
-    and the newest `limit` lines of the processing log (newest first). Missing or unreadable files give empty lists. Times as `_when` gives them."""
+    and the processing log's newest rows (`log_rows`). Missing or unreadable files give empty lists. Times as `_when` gives them."""
     try:
         st = json.loads(state_text) if state_text else {}
     except ValueError:
@@ -2441,10 +2441,117 @@ def queue_local(state_text, plog_text, limit=15):
     ws = st.get("workers") if isinstance(st, dict) and isinstance(st.get("workers"), dict) else {}
     workers = [dict(worker=u, task=w.get("task_id"), launched=_when(w.get("launched")), started=bool(w.get("started")))
                for u, w in sorted(ws.items()) if isinstance(w, dict)]
-    recs = [r for r in (_json_lines(plog_text) or []) if r.get("time")]
-    log_ = [dict(time=_when(r["time"]), task=r.get("task"), state=r.get("state"), reason=r.get("reason"), worker=r.get("worker"), heartbeat=r.get("heartbeat"))
-            for r in recs[-limit:]][::-1]
-    return dict(workers=workers, log=log_)
+    return dict(workers=workers, log=log_rows(plog_text))
+
+
+# ---------- the processing log as a table (PC-120) ----------
+LOG_KINDS = ("launched", "wip", "unmerged", "failed", "merged")   # the task states a log record names; besides them: sleep, heartbeat, other
+LOG_LIMITS = (15, 50, 200)                 # the page's row limits; the server sends up to the largest of each class (events, heartbeats)
+GROUP_LINES = 50                           # the original lines a condensed heartbeat row keeps (the newest)
+QUIET = ("skipped: interval", "skipped: switched off in Settings")   # heartbeats that tell nothing new; other skips are events
+READINGS = ("memory pressure", "free disk", "load", "power", "proxy")   # the host readings a heartbeat row shows, in this order
+_GIB, _MIB = 1 << 30, 1 << 20
+
+
+def _size(n):
+    """Bytes as "1.2 GiB" (a whole number without decimals: "4 GiB"), below a GiB as "512 MiB"."""
+    if n >= _GIB:
+        return f"{n / _GIB:.1f}".removesuffix(".0") + " GiB"
+    return f"{n / _MIB:.0f} MiB"
+
+
+def container_reading(text):
+    """The container's stats (raw JSON, possibly cut short by the Dispatcher) as "1.2 GiB of 4 GiB, 37 processes"; never the raw text."""
+    if not isinstance(text, str) or "{" not in text:
+        return text.strip() if isinstance(text, str) and text.strip() else "not reported"
+    num = lambda k: (m := re.search(r'"%s"\s*:\s*(\d+)' % k, text)) and int(m.group(1))   # noqa: E731
+    use, lim, procs = num("memoryUsageBytes"), num("memoryLimitBytes"), num("numProcesses")
+    out = ", ".join(x for x in ((_size(use) + (f" of {_size(lim)}" if lim else "")) if use is not None else "",
+                                f"{procs} process{'' if procs == 1 else 'es'}" if procs is not None else "") if x)
+    return out or "readings unreadable"
+
+
+def parse_heartbeat(line):
+    """A Dispatcher heartbeat line (`<time> | running: ... | <what it did> | memory pressure ... | ... | container <JSON>`) ->
+    dict(running=[(worker, task)], what, readings): `what` is what the firing did (with "slept N minutes" when given), `readings` one
+    short text of the host and container readings. A line of another shape keeps its text as `what`."""
+    parts = line.split(" | ") if isinstance(line, str) else [str(line)]
+    i = next((k for k, p in enumerate(parts) if p.startswith("container ") and not p.startswith("container data ")), len(parts))
+    head, cont = parts[:i], " | ".join(parts[i:])[len("container "):] if i < len(parts) else None
+    running, what, read = [], [], {}
+    for p in head[1:] if head and re.match(r"\d{4}-\d\d-\d\d", head[0]) else head:
+        key = next((k for k in READINGS if p.startswith(k + " ")), None)
+        if p.startswith("running: "):
+            running = [tuple(x.split("=", 1)) if "=" in x else (x, "") for x in p[9:].split(", ") if x and x != "none"]
+        elif key:
+            read[key] = p
+        elif not p.startswith("container data "):
+            what.append(p)
+    readings = [f"running {', '.join(w for w, _ in running) or 'none'}"] + [read[k] for k in READINGS if k in read]
+    if cont is not None:
+        readings.append("container " + container_reading(cont))
+    return dict(running=running, what=" | ".join(what), readings=" · ".join(readings))
+
+
+def _row(rec, raw):
+    """One processing-log record (a dict, or None for an unreadable line) -> a table row."""
+    base = dict(time=_when(rec.get("time")) if rec else None, kind="other", task="", worker="", detail="", what="", count=1, first=None,
+                lines=[raw], event=True, alert=False, idle=False)
+    if rec is None:
+        return dict(base, detail=raw)
+    if "heartbeat" in rec:
+        h = parse_heartbeat(rec["heartbeat"])
+        idle = not h["running"] and h["what"].startswith("nothing to do") and "slept" not in h["what"]
+        skip = h["what"].startswith("skipped:") and not h["what"].startswith(QUIET)
+        return dict(base, kind="heartbeat", task=", ".join(t for _, t in h["running"] if t), worker=", ".join(w for w, _ in h["running"]),
+                    what=h["what"], detail=h["readings"], event=skip, alert=skip, idle=idle, first=base["time"])
+    task = rec.get("task") if isinstance(rec.get("task"), str) and rec.get("task") != "-" else ""
+    worker = rec.get("worker") if isinstance(rec.get("worker"), str) else ""
+    if rec.get("event") == "sleep":
+        return dict(base, kind="sleep", detail=f"the host slept or the Dispatcher was down for {rec.get('minutes', '?')} minutes")
+    st = rec.get("state") if isinstance(rec.get("state"), str) else ""
+    m = RECONCILED.search(st)
+    if st in LOG_KINDS or m:
+        reason = rec.get("reason") if isinstance(rec.get("reason"), str) else ""
+        return dict(base, kind=m.group(1) if m else st, task=task, worker=worker, detail=st if m else reason,
+                    alert=bool(m) or st == "failed")
+    return dict(base, task=task, worker=worker, detail=st or raw)
+
+
+def log_rows(plog_text, limit=max(LOG_LIMITS)):
+    """The processing log as table rows, newest first (PC-120). Every line gives a row: a task event (kind launched, wip, unmerged, failed,
+    merged; a failure or a stale-WIP reconciliation is `alert`), a sleep, a heartbeat, or `other` (an unknown record, an unreadable line
+    with its text); never an exception. Consecutive idle heartbeats (no Worker running, "nothing to do") collapse into one row with the
+    newest readings, `count` and the oldest time `first`; a heartbeat that carries a Worker or an event is its own row. `event` marks the
+    rows of the default view (all but heartbeats, and heartbeats with a skip worth seeing). Up to `limit` rows of each class are kept,
+    so that the page can filter and choose among 15, 50 and 200. Each row keeps its original lines (a condensed row its newest
+    GROUP_LINES)."""
+    rows, kept, prev = [], {True: 0, False: 0}, None
+    for raw in reversed((plog_text or "").splitlines()):
+        if not raw.strip():
+            continue
+        try:
+            rec = json.loads(raw)
+        except ValueError:
+            rec = None
+        r = _row(rec if isinstance(rec, dict) else None, raw)
+        if r["idle"] and prev is not None and prev["idle"]:   # the line before (newer) was idle too: one row
+            prev["count"] += 1
+            prev["first"] = r["time"]
+            if len(prev["lines"]) < GROUP_LINES:
+                prev["lines"].append(raw)
+            continue
+        prev = r
+        if kept[r["event"]] >= limit:
+            if all(v >= limit for v in kept.values()):
+                break
+            continue
+        kept[r["event"]] += 1
+        rows.append(r)
+    for r in rows:
+        if r["idle"] and r["count"] > 1:
+            r["what"] = "nothing to do"
+    return rows
 
 
 # ---------- the live overlay on the cached task table (PC-119) ----------
