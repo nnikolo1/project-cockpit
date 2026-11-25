@@ -14,6 +14,7 @@ import sys
 from ckp.adapters import git as git_adapter
 from ckp.adapters.deploy import GitDeployAdapter
 from ckp.core import deploy as core_deploy
+from ckp.core import projects as core_projects
 from ckp.store import env as store_env
 
 log = logging.getLogger("ckp.cli")
@@ -56,6 +57,34 @@ def cmd_deploy(a, adapter=None, today=None):
         return _out({"ok": False, "error": f"{type(e).__name__}: {e}", "data": {"project": a.project, "tag": tag}, "dry_run": not a.apply})
 
 
+# --- project registry (PC-140 slice 2, part A) ---
+def cmd_project(a, run=None):
+    if a.sub == "add":
+        rec = {"name": a.name, "repo": a.repo, "repo_dir": a.repo_dir, "short": a.short, "first": a.first}
+        return _out(core_projects.add_project(rec, dry_run=a.dry_run, **({"run": run} if run else {})))
+    if a.sub == "list":
+        return _out(core_projects.list_projects())
+    if a.sub == "show":
+        return _out(core_projects.get_project(a.name))
+    return _out(core_projects.remove_project(a.name))
+
+
+def _project_parser(sub):
+    ps = sub.add_parser("project", help="the project registry").add_subparsers(dest="sub", required=True)
+    add = ps.add_parser("add", help="register a project (like git init; --dry-run changes nothing)")
+    add.add_argument("--name", required=True)
+    add.add_argument("--repo", required=True, help="OWNER/NAME on the hosting service")
+    add.add_argument("--repo-dir", required=True)
+    add.add_argument("--short", help="task-id prefix (default: the name in capitals)")
+    add.add_argument("--first", type=int, help="first task number (default 1)")
+    add.add_argument("--dry-run", action="store_true")
+    ps.add_parser("list")
+    ps.add_parser("show").add_argument("name")
+    ps.add_parser("remove", help="remove the registry entry only; data is kept").add_argument("name")
+    for p in ps.choices.values():
+        p.set_defaults(func=cmd_project)
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog="ckp", description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -74,6 +103,7 @@ def build_parser():
     d.add_argument("--tag")
     d.add_argument("--apply", action="store_true")
     d.set_defaults(func=cmd_deploy)
+    _project_parser(sub)
     return p
 
 
