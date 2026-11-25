@@ -3,6 +3,8 @@
     ckp env set --project P --env production --port 8800 --label com.example.job --data-dir DIR
     ckp deploy --project P --repo OWNER/NAME --repo-dir DIR [--env production] [--tag vYYYY.MM.DD-N] [--apply]
 
+    ckp task list|show|file|comment --project P [--repo OWNER/NAME --short S] ...   (file makes embryos only)
+
 `deploy` is a dry run unless `--apply` is given. Exit status: 0 ok, 1 the result is not ok, 2 usage.
 """
 import argparse
@@ -15,6 +17,7 @@ from ckp.adapters import git as git_adapter
 from ckp.adapters.deploy import GitDeployAdapter
 from ckp.core import deploy as core_deploy
 from ckp.core import projects as core_projects
+from ckp.core import tasks as core_tasks
 from ckp.store import env as store_env
 
 log = logging.getLogger("ckp.cli")
@@ -83,6 +86,71 @@ def _project_parser(sub):
     ps.add_parser("remove", help="remove the registry entry only; data is kept").add_argument("name")
     for p in ps.choices.values():
         p.set_defaults(func=cmd_project)
+# --- ckp task (PC-140 slice 2, part B) ---
+def _task_project(a):
+    """The project record of the task commands: from the registry when it has `a.project`, else from --repo/--short."""
+    try:
+        from ckp.store import registry
+        got = registry.get_project(a.project)
+        rec = got.get("data") if isinstance(got, dict) and "ok" in got else got
+        if rec:
+            return rec
+    except (ImportError, AttributeError):
+        pass
+    if not a.repo:
+        return None
+    return {"name": a.project, "repo": a.repo, "short": a.short or a.repo.split("/")[1]}
+
+
+def _task_cmd(a, fn, *args, run=None):
+    proj = _task_project(a)
+    if proj is None:
+        return _out({"ok": False, "error": f"unknown project {a.project!r}: register it or give --repo OWNER/NAME", "data": None})
+    return _out(fn(proj, *args, **({"run": run} if run else {})))
+
+
+def cmd_task_list(a, run=None):
+    return _task_cmd(a, core_tasks.list_tasks, a.state, run=run)
+
+
+def cmd_task_show(a, run=None):
+    return _task_cmd(a, core_tasks.get_task, a.id, run=run)
+
+
+def cmd_task_file(a, run=None):
+    return _task_cmd(a, core_tasks.file_task, a.title, a.body, a.label, run=run)
+
+
+def cmd_task_comment(a, run=None):
+    return _task_cmd(a, core_tasks.comment, a.id, a.text, run=run)
+
+
+def _add_task_parsers(sub):
+    t = sub.add_parser("task", help="the tasks of a project: list, show, file (an embryo), comment").add_subparsers(dest="sub", required=True)
+
+    def common(p):
+        p.add_argument("--project", required=True)
+        p.add_argument("--repo", help="OWNER/NAME, when the project is not in the registry")
+        p.add_argument("--short", help="task-id prefix (default: the repository name)")
+    p = t.add_parser("list")
+    common(p)
+    p.add_argument("--state")
+    p.set_defaults(func=cmd_task_list)
+    p = t.add_parser("show")
+    common(p)
+    p.add_argument("id")
+    p.set_defaults(func=cmd_task_show)
+    p = t.add_parser("file")
+    common(p)
+    p.add_argument("--title", required=True)
+    p.add_argument("--body", default="")
+    p.add_argument("--label", action="append", default=[])
+    p.set_defaults(func=cmd_task_file)
+    p = t.add_parser("comment")
+    common(p)
+    p.add_argument("id")
+    p.add_argument("--text", required=True)
+    p.set_defaults(func=cmd_task_comment)
 
 
 def build_parser():
@@ -104,6 +172,7 @@ def build_parser():
     d.add_argument("--apply", action="store_true")
     d.set_defaults(func=cmd_deploy)
     _project_parser(sub)
+    _add_task_parsers(sub)
     return p
 
 

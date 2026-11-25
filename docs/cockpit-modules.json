@@ -64,6 +64,8 @@
   {"path": "tests/ckp/store/test_store_releases.py", "module": "githubclient", "basis": "tests of ckp/store/releases.py (PC-84)"},
   {"path": "tests/ckp/store/test_store_env.py", "module": "githubclient", "basis": "tests of ckp/store/env.py (PC-84)"},
   {"path": "tests/ckp/store/test_store_lock.py", "module": "githubclient", "basis": "tests of ckp/store/lock.py and layout.deploy_lock (PC-84)"},
+  {"path": "tests/ckp/core/test_core_tasks.py", "module": "githubclient", "basis": "tests of the project-scoped task functions, ckp/core/tasks.py (PC-140 slice 2)"},
+  {"path": "tests/ckp/test_cli_task.py", "module": "githubclient", "basis": "tests of the `ckp task` subcommands in ckp/cli.py (PC-140 slice 2)"},
   {"path": "tests/ckp/core/test_core_deploy.py", "module": "githubclient", "basis": "tests of the deploy orchestration, ckp/core/deploy.py (PC-84)"},
   {"path": "tests/ckp/adapters/test_adapters_git.py", "module": "githubclient", "basis": "tests the git adapter of the deploy command (PC-84)"},
   {"path": "tests/ckp/adapters/test_adapters_github.py", "module": "githubclient", "basis": "tests the GitHub release and deployment adapter of the deploy command (PC-84)"},
