@@ -33,6 +33,8 @@ DEFAULTS = {                        # 6a: the spec's values, used when the file 
     "enabled": True, "interval_minutes": 2, "retries": 0, "workers": 6,
     "runaway_minutes": 40, "idle_minutes": 20, "start_minutes": 1,
 }
+# PC-67: the projects the queue serves, [{"short", "repo", "repo_dir", "first"?}]; a list, so not one of the Settings page's numeric DEFAULTS.
+# Absent or unusable = no key in the loaded settings = the one project of the command line (today's behaviour).
 
 
 class Skip(Exception):
@@ -52,6 +54,11 @@ def load_settings(path):
     if not isinstance(data, dict):
         log.warning("settings %s is not an object; using defaults", path)
         return s
+    if "projects" in data:
+        if valid_projects(data["projects"]):
+            s["projects"] = data["projects"]
+        else:
+            log.warning("settings key projects=%r is unusable; only the project of the command line is served", data["projects"])
     for k, default in DEFAULTS.items():
         if k not in data:
             continue
@@ -67,6 +74,18 @@ def load_settings(path):
     return s
 
 
+def valid_projects(v):
+    """A non-empty list of {"short", "repo", "repo_dir"} (strings, each short once; optional boolean "first")."""
+    if not isinstance(v, list) or not v:
+        return False
+    for p in v:
+        if not isinstance(p, dict) or not all(isinstance(p.get(k), str) and p[k] for k in ("short", "repo", "repo_dir")):
+            return False
+        if not isinstance(p.get("first", False), bool):
+            return False
+    return len({p["short"] for p in v}) == len(v)
+
+
 # --- ranking (3a) --------------------------------------------------------------------------------------------
 def rank_key(t):
     """P1 first (no label counts as P2), then the deadline, then what it unblocks, then must before nice."""
@@ -79,10 +98,11 @@ def filed_by_worker(task, worker_id):
     return bool(task.filed_by) and worker_id is not None and task.filed_by == worker_id
 
 
-def choose_task(tasks, active_ids, worker_id=None):
-    """The best released task that is not blocked, not already being worked on and not filed by this Worker, or None."""
+def choose_task(tasks, active_ids, worker_id=None, first=()):
+    """The best released task that is not blocked, not already being worked on and not filed by this Worker, or None.
+    One global order over all projects: the tasks of the `first` projects (the Project cockpit) before all others, then rank_key."""
     ready = [t for t in tasks if not t.blocked and t.id not in active_ids and not filed_by_worker(t, worker_id)]
-    return min(ready, key=rank_key) if ready else None
+    return min(ready, key=lambda t: (getattr(t, "project", None) not in first, *rank_key(t))) if ready else None
 
 
 INTERVAL_TOLERANCE = 30     # seconds: launchd's timing is not exact (3c)
@@ -143,11 +163,18 @@ class Dispatcher:
     actions: list = field(default_factory=list)
     relay_path: str = "/opt/relay.py"   # the relay script inside the image
     repo_dir: str = ""                  # the task repository's clone on the host (3d); the bundle is made from it
+    projects: dict = None               # PC-67: short name -> clone of every project the queue serves; None = one project (repo_dir), today's behaviour
+    first: tuple = ()                   # the projects ranked before all others
 
     # -- bookkeeping --
+    @staticmethod
+    def _kw(w):
+        """The project argument of the runtime calls for a Worker's task: only when the queue serves several projects."""
+        return {"project": w["project"]} if w.get("project") else {}
+
     def _fail(self, st, user, w, reason):
         tid = w["task_id"]
-        tail = getattr(self.runtime, "worker_output_tail", lambda t: "")(tid)
+        tail = getattr(self.runtime, "worker_output_tail", lambda t, **kw: "")(tid, **self._kw(w))
         log.error("task %s failed: %s%s", tid, reason, f" | Worker output: {tail}" if tail else "")
         self.tasks.set_state(tid, "failed")
         self.plog.failure(tid, w["folder"], reason)
@@ -180,7 +207,7 @@ class Dispatcher:
         for user, w in list(st["workers"].items()):
             if user in last:
                 w["last_request"] = last[user]   # the `ts` of the proxy's last usage line for this Worker
-            started, note, reason = self.runtime.read_outbox(w["task_id"])
+            started, note, reason = self.runtime.read_outbox(w["task_id"], **self._kw(w))
             if started and not w["started"]:
                 w["started"] = True
                 self.tasks.set_state(w["task_id"], "wip")
@@ -208,7 +235,7 @@ class Dispatcher:
         if note is None:
             return self._fail(st, user, w, reason)
         try:
-            self.tasks.fetch_branch(tid, self.runtime.bundle_path(tid), f"worker/{tid}")
+            self.tasks.fetch_branch(tid, self.runtime.bundle_path(tid, **self._kw(w)), f"worker/{tid}")
             ahead = self.probes.commits_ahead(w["repo"], tid)
         except Exception:  # a missing or broken bundle holds no commit; it must fail this task, not the firing
             log.exception("fetching the branch of %s failed", tid)
@@ -241,22 +268,27 @@ class Dispatcher:
             return "nothing to do (all Workers busy)"
         active = {w["task_id"] for w in st["workers"].values()}
         released = self.tasks.released()
+        if self.projects:   # a project that is not listed is never served, whatever the adapter returns
+            released = [t for t in released if getattr(t, "project", None) in self.projects]
         for t in released:  # 3m: a folder in the area means the task was attempted before; never select it again
-            if t.id not in active and os.path.exists(os.path.join(self.runtime.cfg.area, t.id)):
+            if t.id not in active and os.path.exists(self.runtime.task_dir(t.id, t.project) if self.projects else os.path.join(self.runtime.cfg.area, t.id)):
                 log.info("task %s skipped: its folder already exists in the Workers' area", t.id)
                 active.add(t.id)
         user = free[0]
-        task = choose_task(released, active, user)
+        task = choose_task(released, active, user, self.first)
         if task is None:
             return "nothing to do (no released task)"
+        project = task.project if self.projects else None
+        kw = {"project": project} if self.projects else {}
+        repo_dir = self.projects[project] if self.projects else self.repo_dir   # the bundle is made from the task's own project's clone
         try:
             if not self.runtime.egress_blocked(user):
                 raise Skip(f"egress check failed for {user}")
-            folder = self.runtime.prepare_task(task.id, self.repo_dir, f"# {task.title}\n\n{task.text}\n")
+            folder = self.runtime.prepare_task(task.id, repo_dir, f"# {task.title}\n\n{task.text}\n", **kw)
             try:
-                proc = self.runtime.launch(user, task.id)
+                proc = self.runtime.launch(user, task.id, **kw)
             except BaseException:  # no Worker started: the folder must not mark the task as attempted
-                getattr(self.runtime, "discard_task", lambda t: None)(task.id)
+                getattr(self.runtime, "discard_task", lambda t, **k: None)(task.id, **kw)
                 raise
         except rt.ContainerTimeout as e:
             raise Skip(f"container call over its time limit: {e}")
@@ -266,8 +298,8 @@ class Dispatcher:
             log.exception("task %s cannot be prepared", task.id)
             raise Skip(f"cannot prepare {task.id}: {e}")
         st["workers"][user] = {
-            "task_id": task.id, "repo": self.repo_dir, "folder": folder, "pid": proc.pid, "launched": self.probes.now(),
-            "started": False}
+            "task_id": task.id, "repo": repo_dir, "folder": folder, "pid": proc.pid, "launched": self.probes.now(),
+            "started": False, **kw}
         self.plog.event(task.id, folder, "launched", worker=user)
         log.info("started %s for task %s (pid %s)", user, task.id, proc.pid)
         return f"started {user} on {task.id}"
@@ -474,32 +506,58 @@ def make_git(tool, timeout):
     return lambda args, cwd: _run([tool, *args], cwd, timeout)
 
 
+def build_tasks(s, repo, repo_dir, gh, git):
+    """The task source and the project table: ProjectsTasks over the projects of the settings when more than one is listed; else the one
+    project of the command line through GitHubTasks (today's path). -> (tasks, {short: clone} or None, tuple of the `first` projects)."""
+    from dispatcher import tasks as T
+    listed = s.get("projects") or []
+    if len(listed) > 1:
+        first = tuple(p["short"] for p in listed if p.get("first"))
+        log.info("one queue for %d projects: %s", len(listed), ", ".join(p["short"] for p in listed))
+        return (T.ProjectsTasks([{k: p[k] for k in ("short", "repo", "repo_dir")} for p in listed], gh, git, first=first),
+                {p["short"]: p["repo_dir"] for p in listed}, first)
+    if len(listed) == 1:
+        repo, repo_dir = listed[0]["repo"], listed[0]["repo_dir"]
+    return T.GitHubTasks(repo, gh, git, repo_dir), None, ()
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="One firing of the Dispatcher.")
-    ap.add_argument("--settings", required=True, help="the settings JSON file (6a)")
-    ap.add_argument("--state", required=True, help="the Dispatcher's state file (running Workers)")
-    ap.add_argument("--area", required=True, help="the Workers' area (host folder)")
-    ap.add_argument("--socket", required=True, help="the proxy's host socket")
+    ap.add_argument("--data-root", help="the shared processing-data root of one queue for all projects; every folder and file flag below that is not given is taken from it")
+    ap.add_argument("--settings", help="the settings JSON file (6a)")
+    ap.add_argument("--state", help="the Dispatcher's state file (running Workers)")
+    ap.add_argument("--area", help="the Workers' area (host folder)")
+    ap.add_argument("--socket", help="the proxy's host socket")
     ap.add_argument("--token-file", required=True, help="the proxy's credential file")
-    ap.add_argument("--usage-file", required=True, help="the proxy's JSONL usage file")
+    ap.add_argument("--usage-file", help="the proxy's JSONL usage file")
     ap.add_argument("--relay-path", default="/opt/relay.py", help="the relay script inside the image")
     ap.add_argument("--container-tool", default="container")
     ap.add_argument("--container-name", default="cockpit-workers", help="the Workers' container (a test run must use a name of its own)")
     ap.add_argument("--image", default="cockpit-worker:latest", help="the Workers' image (the test runs a stub image)")
-    ap.add_argument("--repo", required=True, help="the task repository, owner/name")
-    ap.add_argument("--repo-dir", required=True, help="the task repository's clone on the host")
-    ap.add_argument("--data-dir", required=True, help="the processing log's data folder (outside any git repository)")
+    ap.add_argument("--repo", help="the task repository, owner/name (not needed when the settings list the projects)")
+    ap.add_argument("--repo-dir", help="the task repository's clone on the host (not needed when the settings list the projects)")
+    ap.add_argument("--data-dir", help="the processing log's data folder (outside any git repository)")
     ap.add_argument("--gh", default="gh", help="the GitHub CLI")
     ap.add_argument("--git", default="git", help="git")
     ap.add_argument("--call-timeout", type=int, default=60, help="seconds a gh or git call may take")
     a = ap.parse_args(argv)
+    if a.data_root:
+        from dispatcher import launchd
+        root = launchd.queue_paths(a.data_root)
+        for flag, key in (("settings", "settings"), ("state", "state"), ("area", "area"), ("socket", "socket"), ("usage_file", "usage"), ("data_dir", "processing")):
+            if getattr(a, flag) is None:
+                setattr(a, flag, str(root[key]))
+    missing = [f"--{f.replace('_', '-')}" for f in ("settings", "state", "area", "socket", "usage_file", "data_dir") if getattr(a, f) is None]
+    if missing:
+        ap.error(f"required without --data-root: {', '.join(missing)}")
     os.makedirs(a.area, exist_ok=True)  # the Workers' area is the Dispatcher's own folder: a first firing finds none
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
     from dispatcher.plog import ProcessingLog
-    from dispatcher.tasks import GitHubTasks
 
     s = load_settings(a.settings)
+    if not s.get("projects") and not (a.repo and a.repo_dir):
+        ap.error("--repo and --repo-dir are required when the settings do not list the projects")
     cfg = rt.Config(area=a.area, socket=a.socket, container=a.container_tool, name=a.container_name, image=a.image, runaway_minutes=s["runaway_minutes"])
     runtime = rt.Runtime(cfg)
     probes = Probes(
@@ -512,9 +570,13 @@ def main(argv=None):
         stop_proxy=lambda pid: stop_proxy(pid, a.socket),
         commits_ahead=commits_ahead,
         heartbeat_parts=lambda: host_readings(a.area, runtime))
-    tasks = GitHubTasks(a.repo, make_gh(a.gh, a.call_timeout), make_git(a.git, a.call_timeout), a.repo_dir)
-    Dispatcher(s, a.state, runtime, tasks, ProcessingLog(a.data_dir), probes, relay_path=a.relay_path,
-               repo_dir=a.repo_dir).fire()
+    tasks, projects, first = build_tasks(s, a.repo, a.repo_dir, make_gh(a.gh, a.call_timeout), make_git(a.git, a.call_timeout))
+    project_of = None
+    if projects:
+        from dispatcher.tasks import project_of   # PC-67 adapter; not imported on the single-project path
+    multi = dict(projects=projects, first=first) if projects else {}   # the single-project call stays exactly as it was
+    Dispatcher(s, a.state, runtime, tasks, ProcessingLog(a.data_dir, **({"project_of": project_of} if projects else {})), probes,
+               relay_path=a.relay_path, repo_dir=a.repo_dir or "", **multi).fire()
 
 
 if __name__ == "__main__":

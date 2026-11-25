@@ -37,6 +37,7 @@
   {"path": "docs/footprint-declared.json", "module": "internal/metadata", "basis": "committed footprint declaration read by the collectors; project metadata"},
   {"path": "dispatcher/", "module": "taskqueue", "basis": "the Dispatcher and Workers runtime of the spec docs/specs/dispatcher-and-workers.md, the redesign of the boot-filling job"},
   {"path": "tests/dispatcher/", "module": "taskqueue", "basis": "tests the dispatcher/ package; tests follow the code"},
+  {"path": "tests/dispatcher/test_queue.py", "module": "taskqueue/dispatcher", "basis": "tests the one queue for several projects (PC-67): global order, per-project task folders, the log's project field, unlisted projects, the queue job"},
   {"path": "tests/dispatcher/test_reconcile_wip.py", "module": "taskqueue/dispatcher", "basis": "tests the reconciliation of stale wip tasks (PC-98)"},
   {"path": "dispatcher/__init__.py", "module": "taskqueue", "candidates": ["taskqueue/dispatcher", "taskqueue/worker"], "basis": "package marker of dispatcher/, imported by the Dispatcher and, with note.py, by the Worker side; it belongs to neither alone"},
   {"path": "dispatcher/agent.py", "module": "taskqueue/dispatcher", "basis": "the agent adapter (command, environment, activity glob) the Dispatcher side calls through runtime.py; it has no test of its own"},

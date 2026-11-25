@@ -23,12 +23,13 @@ def _outside_git(path):
 
 
 class ProcessingLog:
-    def __init__(self, data_dir, now=dt.datetime.now):
+    def __init__(self, data_dir, now=dt.datetime.now, project_of=None):
+        """project_of(task_id) -> the task's project; given when one queue serves several projects, so that every record of a task carries a `project` field."""
         _outside_git(data_dir)
         self.dir = pathlib.Path(data_dir)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.path = self.dir / LOG_NAME
-        self.now = now
+        self.now, self.project_of = now, project_of
 
     def _write(self, **rec):
         rec = dict(time=self.now().isoformat(timespec="seconds"), **rec)
@@ -36,8 +37,16 @@ class ProcessingLog:
             f.write(json.dumps(rec) + "\n")
         log.info("processing log: %s", rec)
 
+    def _project(self, task_id):
+        if self.project_of is None or task_id == "-":   # "-" marks an entry about no task (proxy started, WIP reconciliation)
+            return {}
+        try:
+            return {"project": self.project_of(task_id)}
+        except ValueError:
+            return {}
+
     def event(self, task_id, task_folder, state, reason=None, worker=None):
-        self._write(task=task_id, folder=str(task_folder), state=state, **({"reason": reason} if reason else {}), **({"worker": worker} if worker else {}))
+        self._write(task=task_id, **self._project(task_id), folder=str(task_folder), state=state, **({"reason": reason} if reason else {}), **({"worker": worker} if worker else {}))
 
     def failure(self, task_id, task_folder, reason):
         if reason not in REASONS and not re.fullmatch(r"over \d+ minutes", reason):

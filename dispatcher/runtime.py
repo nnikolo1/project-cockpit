@@ -95,6 +95,18 @@ PRIVATE_AREA = ('own="/tmp/own-$1"; mkdir -p "$own" && mount --bind "/area/$1" "
                 'mkdir "/area/$1" && mount --bind "$own" "/area/$1" && shift && exec "$@"')
 
 
+# The same for a task folder one level down, <area>/<project>/<task-id> (one queue for several projects): $1 the task id, $2 the project.
+PRIVATE_AREA_PROJECT = ('own="/tmp/own-$1"; mkdir -p "$own" && mount --bind "/area/$2/$1" "$own" && mount -t tmpfs none /area && '
+                        'mkdir -p "/area/$2/$1" && mount --bind "$own" "/area/$2/$1" && shift 2 && exec "$@"')
+
+
+def check_project(project):
+    """The project key (the repository short name) names a folder: the same rule as a task id."""
+    if not isinstance(project, str) or not TASK_ID.match(project):
+        raise ValueError(f"unusable project {project!r}")
+    return project
+
+
 class Runtime:
     def __init__(self, cfg, run=default_run, spawn=subprocess.Popen):
         self.cfg, self._run, self._spawn = cfg, run, spawn
@@ -181,12 +193,19 @@ class Runtime:
         return blocked
 
     # --- the per-task folder (4q, 3d) --------------------------------------------------------------------
-    def task_dir(self, task_id):
-        return os.path.join(self.cfg.area, check_task_id(task_id))
+    def task_dir(self, task_id, project=None):
+        """<area>/<task-id>, or <area>/<project>/<task-id> when the queue serves several projects."""
+        if project is None:
+            return os.path.join(self.cfg.area, check_task_id(task_id))
+        return os.path.join(self.cfg.area, check_project(project), check_task_id(task_id))
 
-    def prepare_task(self, task_id, repo, task_text):
-        """Create <area>/<task-id>/{inbox,outbox}, write inbox/main.bundle (current main of `repo`) and task.md."""
-        base = self.task_dir(task_id)
+    def guest_dir(self, task_id, project=None):
+        """The task folder as the Worker sees it inside the container."""
+        return f"/area/{task_id}" if project is None else f"/area/{check_project(project)}/{task_id}"
+
+    def prepare_task(self, task_id, repo, task_text, project=None):
+        """Create <area>/[<project>/]<task-id>/{inbox,outbox}, write inbox/main.bundle (current main of `repo`, the project's clone) and task.md."""
+        base = self.task_dir(task_id, project)
         inbox, outbox = os.path.join(base, "inbox"), os.path.join(base, "outbox")
         os.makedirs(os.path.dirname(base), exist_ok=True)
         os.mkdir(base)  # FileExistsError if the folder is taken: ids never overwrite each other; from here on it is ours
@@ -207,15 +226,15 @@ class Runtime:
         log.info("task folder ready: %s", base)
         return base
 
-    def discard_task(self, task_id):
+    def discard_task(self, task_id, project=None):
         """Remove the task folder of a launch that did not start a Worker, so that the task can be selected again (3m)."""
-        shutil.rmtree(self.task_dir(task_id), ignore_errors=True)
+        shutil.rmtree(self.task_dir(task_id, project), ignore_errors=True)
         log.warning("task folder of %s removed: its launch did not start a Worker", task_id)
 
-    def read_outbox(self, task_id):
+    def read_outbox(self, task_id, project=None):
         """(started, note, reason): `note` is the parsed good-bye note, or None with `reason` 'no note' or
         'unusable note' (5b)."""
-        out = os.path.join(self.task_dir(task_id), "outbox")
+        out = os.path.join(self.task_dir(task_id, project), "outbox")
         started = os.path.exists(os.path.join(out, "started"))
         path = os.path.join(out, "goodbye.json")
         if not os.path.exists(path):
@@ -231,28 +250,28 @@ class Runtime:
             return started, None, "unusable note"
         return started, note, None
 
-    def bundle_path(self, task_id):
-        return os.path.join(self.task_dir(task_id), "outbox", "result.bundle")
+    def bundle_path(self, task_id, project=None):
+        return os.path.join(self.task_dir(task_id, project), "outbox", "result.bundle")
 
     # --- launching a Worker (4e, 4i, 4k, 4l, 4r) ---------------------------------------------------------
-    def clone_main(self, user, task_id):
+    def clone_main(self, user, task_id, project=None):
         """Clone main.bundle into <task-id>/clone on the container's own disk, no hardlinks (4k, 4l)."""
         check_task_id(task_id)
         home = f"/home/{user}/{task_id}"
         self.exec(user, "sh", "-c", f"chmod 700 /home/{user} && mkdir -p -m 700 /home/{user}/.tmp", timeout=30)  # the clones of one Worker are private to it (the container's own disk enforces modes)
         self.exec(user, "rm", "-rf", home, timeout=60)  # a clone left by an earlier aborted launch of this task would block the new one
-        rc, out = self.exec(user, "git", "clone", "--no-hardlinks", f"/area/{task_id}/inbox/main.bundle",
+        rc, out = self.exec(user, "git", "clone", "--no-hardlinks", f"{self.guest_dir(task_id, project)}/inbox/main.bundle",
                             f"{home}/clone", timeout=120)
         if rc:
             raise ContainerError(f"clone for {task_id} failed: {out[-300:]}")
         return f"{home}/clone"
 
-    def launch(self, user, task_id, agent=None):
+    def launch(self, user, task_id, agent=None, project=None):
         """Start the Worker; returns the host-side process handle (killing it ends the guest process, which
         the Dispatcher uses for 3i/3j). The in-guest `timeout` is the backstop of 4e."""
         agent = agent or ClaudeCode()
-        clone = self.clone_main(user, task_id)
-        base = f"/area/{task_id}"
+        clone = self.clone_main(user, task_id, project)
+        base = self.guest_dir(task_id, project)
         env = dict(agent.env(user, f"http://127.0.0.1:{self.cfg.relay_port}", dummy_token(user)),
                    HOME=f"/home/{user}", TMPDIR=f"/home/{user}/.tmp", WORKER_TASK_ID=task_id, WORKER_OUTBOX=f"{base}/outbox")  # 4t: for the Stop hook
         prompt = INSTRUCTION.format(inbox=f"{base}/inbox", outbox=f"{base}/outbox", clone=clone)
@@ -260,20 +279,22 @@ class Runtime:
         cmd = [self.cfg.container, "exec", "--user", user, "--workdir", clone]
         for k, v in env.items():
             cmd += ["--env", f"{k}={v}"]
-        cmd += [self.cfg.name, "timeout", str(backstop), "unshare", "-Urm", "sh", "-c", PRIVATE_AREA, "sh", task_id, *agent.command(prompt)]
+        cmd += [self.cfg.name, "timeout", str(backstop), "unshare", "-Urm", "sh", "-c"]
+        cmd += [PRIVATE_AREA, "sh", task_id] if project is None else [PRIVATE_AREA_PROJECT, "sh", task_id, project]
+        cmd += agent.command(prompt)
         log.info("launching %s for task %s in %s", user, task_id, clone)
-        os.makedirs(self.task_dir(task_id), exist_ok=True)
-        out = os.open(os.path.join(self.task_dir(task_id), "worker.log"), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        os.makedirs(self.task_dir(task_id, project), exist_ok=True)
+        out = os.open(os.path.join(self.task_dir(task_id, project), "worker.log"), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
         try:  # the Worker's own output (error messages of the agent) is kept: without it a Worker that ends without a note is a mystery
             # its own session: launchd ends every process of the Dispatcher's job when a firing exits (a firing lasts seconds, a Worker hours)
             return self._spawn(cmd, stdout=out, stderr=out, start_new_session=True)
         finally:
             os.close(out)
 
-    def worker_output_tail(self, task_id, n=600):
+    def worker_output_tail(self, task_id, n=600, project=None):
         """The last n characters of the Worker's output (worker.log in its task folder), '' if there is none."""
         try:
-            with open(os.path.join(self.task_dir(task_id), "worker.log"), errors="replace") as f:
+            with open(os.path.join(self.task_dir(task_id, project), "worker.log"), errors="replace") as f:
                 return f.read()[-n:].strip()
         except OSError:
             return ""
