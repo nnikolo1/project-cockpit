@@ -98,6 +98,18 @@ Before: one Dispatcher job, one quota job and one data folder per project (`com.
 
 **Roll back**: switch the Dispatcher off in Settings and unload the new job; `git revert` the PC-67 merge and pull; re-render and load the old per-project jobs (`dispatcher.launchd render --project cockpit ...`, section 5). Before step 8 the old folder is still complete up to the move, so the old jobs continue from it; work done by the new job since step 7 is only in the data root, so copy `ROOT/processing/processing.jsonl` lines of that period back by hand if they must be kept. After step 8 a rollback needs the daily backup (`tools/project_backup.py`, Retention in Drive) to restore the deleted files.
 
+### 5b. Deploying a release (PC-84)
+
+Production runs from a release folder, `<CP_HOME>/releases/<project>/current` (a link to `v<date>-<n>`), not from the working clone; the viewer, the Dispatcher and the quota jobs start from it. A deploy switches the link:
+
+```
+bin/ckp env set --project NAME --env production --port 8800 --label LABEL --data-dir DIR    # once per environment
+bin/ckp deploy --project NAME --repo OWNER/NAME --repo-dir CLONE            # a dry run: readiness and the plan, nothing changes
+bin/ckp deploy --project NAME --repo OWNER/NAME --repo-dir CLONE --apply     # tag, install, switch, restart, health check, record
+```
+
+Readiness (all must hold): the clone is clean and pushed; the merge gate passes (the full tests); the commit is ahead of the live release; no deploy is running; a release to roll back to exists. The plan is hot, or held when the release changes the proxy, the relay, the runtime, the agent module or the Worker image: a held release waits until no Worker runs. A deploy takes the deploy lock (a Dispatcher firing started during the switch does not start a Worker). The health check polls `/health` for up to 90 seconds; a failure after the switch rolls back to the previous release. Each deploy is recorded as a GitHub Deployment. Roll back by hand: relink `current` to `previous` and restart the job. By-hand steps of the first deploy (2026-11-25): the service definitions were changed to start from `current` (the originals are kept as `*.bak-2026-11-25`).
+
 ### 6. First collectors run and the first check
 
     python3 tools/code_snapshot_refresh.py --project widgets
