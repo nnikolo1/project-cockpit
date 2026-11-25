@@ -1,11 +1,12 @@
 """The command line, `cockpit` and `ckp` (PC-140): thin; every command calls a function of the Cockpit and prints its Result as JSON.
 
     ckp env set --project P --env production --port 8800 --label com.example.job --data-dir DIR
-    ckp deploy --project P --repo OWNER/NAME --repo-dir DIR [--env production] [--tag vYYYY.MM.DD-N] [--apply]
+    ckp deploy --project P --repo OWNER/NAME --repo-dir DIR [--env production] [--tag vYYYY.MM.DD-N | --rollback] [--apply]
 
     ckp task list|show|file|comment --project P [--repo OWNER/NAME --short S] ...   (file makes embryos only)
 
-`deploy` is a dry run unless `--apply` is given. Exit status: 0 ok, 1 the result is not ok, 2 usage.
+`deploy` is a dry run unless `--apply` is given; a rollback is a deploy of an installed (older) tag, `--rollback` names the previous one;
+every applied deploy writes a line to the deploy log (<home>/deploy-log.jsonl). Exit status: 0 ok, 1 the result is not ok, 2 usage.
 """
 import argparse
 import datetime as dt
@@ -18,7 +19,7 @@ from ckp.adapters.deploy import GitDeployAdapter
 from ckp.core import deploy as core_deploy
 from ckp.core import projects as core_projects
 from ckp.core import tasks as core_tasks
-from ckp.store import env as store_env
+from ckp.store import env as store_env, io as store_io, layout, releases
 
 log = logging.getLogger("ckp.cli")
 
@@ -42,22 +43,41 @@ def cmd_deploy(a, adapter=None, today=None):
     envs = store_env.load(a.project)
     if a.env not in envs:
         return _out({"ok": False, "error": f"no environment {a.env!r} for {a.project}: create it with `ckp env set`", "data": None})
+    if a.rollback:
+        if a.tag:
+            return _out({"ok": False, "error": "--rollback and --tag exclude one another: --rollback deploys the previous release", "data": None})
+        a.tag = releases.previous(a.project)
+        if not a.tag:
+            return _out({"ok": False, "error": f"no previous release of {a.project} to roll back to", "data": None})
     ad = adapter or GitDeployAdapter(a.project, a.repo, a.repo_dir, a.env)
     tag = a.tag or git_adapter.next_tag(a.repo_dir, today or dt.date.today())
-    if a.apply and not a.tag:
-        pre = core_deploy.deploy(a.project, tag, envs[a.env], ad, dry_run=True)   # readiness first: a refused deploy leaves no tag behind
-        if not pre["ok"]:
-            return _out(pre)
-        git_adapter.tag(a.repo_dir, tag, "HEAD")
-        try:
-            git_adapter.push_tag(a.repo_dir, tag)
-        except Exception as e:  # noqa: BLE001 - a missing remote must not stop a local deploy; the record will say so
-            log.warning("tag %s not pushed: %s", tag, e)
     try:
-        return _out(core_deploy.deploy(a.project, tag, envs[a.env], ad, dry_run=not a.apply))
+        if a.apply and not a.tag:
+            pre = core_deploy.deploy(a.project, tag, envs[a.env], ad, dry_run=True)   # readiness first: a refused deploy leaves no tag behind
+            if not pre["ok"]:
+                return _out(_logged(a, pre))
+            git_adapter.tag(a.repo_dir, tag, "HEAD")
+            try:
+                git_adapter.push_tag(a.repo_dir, tag)
+            except Exception as e:  # noqa: BLE001 - a missing remote must not stop a local deploy; the record will say so
+                log.warning("tag %s not pushed: %s", tag, e)
+        res = core_deploy.deploy(a.project, tag, envs[a.env], ad, dry_run=not a.apply)
     except Exception as e:  # noqa: BLE001 - a command prints its failure as a Result, never a traceback
         log.exception("deploy failed")
-        return _out({"ok": False, "error": f"{type(e).__name__}: {e}", "data": {"project": a.project, "tag": tag}, "dry_run": not a.apply})
+        res = {"ok": False, "error": f"{type(e).__name__}: {e}", "data": {"project": a.project, "tag": tag}, "dry_run": not a.apply}
+    return _out(_logged(a, res) if a.apply else res)
+
+
+def _logged(a, res):
+    """One line per applied deploy, rollback or refusal in the deploy log (<home>/deploy-log.jsonl, outside every repository)."""
+    data = res.get("data") or {}
+    rec = {"time": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "project": a.project, "env": a.env,
+           "tag": data.get("tag", a.tag), "rollback": bool(a.rollback), "ok": bool(res.get("ok")), "error": res.get("error")}
+    try:
+        store_io.append_jsonl(layout.deploy_log(), rec)
+    except OSError as e:
+        log.warning("deploy log not written: %s", e)
+    return res
 
 
 # --- project registry (PC-140 slice 2, part A) ---
@@ -170,6 +190,7 @@ def build_parser():
     d.add_argument("--env", default="production")
     d.add_argument("--tag")
     d.add_argument("--apply", action="store_true")
+    d.add_argument("--rollback", action="store_true", help="deploy the previous release again (no tag, no gate: it is installed)")
     d.set_defaults(func=cmd_deploy)
     _project_parser(sub)
     _add_task_parsers(sub)

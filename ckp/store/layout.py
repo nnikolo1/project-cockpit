@@ -57,3 +57,8 @@ _home = home  # the parameter of deploy_lock shadows the function name
 def deploy_lock(home=None):
     """The lock file of the deploy command: <home>/deploy.lock."""
     return (pathlib.Path(home).expanduser() if home else _home()) / "deploy.lock"
+
+
+def deploy_log(home=None):
+    """The deploy log, one JSON line per applied deploy or rollback of any project and environment: <home>/deploy-log.jsonl."""
+    return (pathlib.Path(home).expanduser() if home else _home()) / "deploy-log.jsonl"

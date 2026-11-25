@@ -141,3 +141,12 @@ def test_restart_failure_rolls_back(store):
     ad = FakeAd(restarts=[(False, "no job"), (True, "ok")])
     r = d.deploy("p", "v1", "prod", ad, dry_run=False)
     assert r["error"].startswith("rolled back") and "health" not in ad.calls
+
+
+def test_an_installed_release_skips_the_clone_checks_and_the_install(store):
+    ad = FakeAd(facts=dict(installed=True, clean=False, tests_green=False))
+    r = d.deploy("p", "v2026.11.24-1", {}, ad, dry_run=False)
+    assert r["ok"] and r["data"]["installed"], r
+    assert ad.calls == ["restart", "health"] and "install" not in store.log and store.log[-1] == "switch"
+    assert not d.deploy("p", "v2026.11.24-1", {}, FakeAd(facts=dict(installed=True, ahead_of_live=False)), dry_run=True)["ok"]
+    assert not d.deploy("p", "v2026.11.24-1", {}, FakeAd(facts=dict(clean=False)), dry_run=True)["ok"]

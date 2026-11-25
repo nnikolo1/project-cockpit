@@ -32,3 +32,10 @@ Three agents build in parallel in separate branches: the store (A), the core (B)
 ## Not in phase 1
 
 The deploy command line (`cockpit deploy`), the Environments view, the heartbeat pings and the renderer of the service definitions for the release folders: the integrator (the interactive session) wires the parts together after the three branches are merged.
+
+## Phase 2: the environments (PC-84)
+
+- `facts["installed"]` (adapter): the release folder of the tag exists. `readiness` then counts `clean` and `tests_green` as met and `deploy` skips fetch, selftest and install: a rollback is a deploy of an installed tag. `ckp deploy --rollback` takes `releases.previous(project)` as the tag.
+- `layout.deploy_log(home=None) -> Path`: `<home>/deploy-log.jsonl`; `ckp deploy --apply` appends one line per deploy, refusal or rollback: `{time, project, env, tag, rollback, ok, error}`.
+- The adapter's default test gate is `tools/test_env.py --repo-dir CLONE`: the merge gate in a throwaway clone of HEAD with a temporary `CP_HOME` and `CP_ENV=test`, then a release rehearsal.
+- `dispatcher.launchd.label(kind, project, env="production")`: `com.project-cockpit.<kind>.<project>`, or `com.project-cockpit.<env>.<kind>.<project>` for another environment; `dispatcher_plist` and `quota_plist` take `env` (another environment also gets `--container-name cockpit-workers-<env>`; every job gets `CP_ENV`). `render --env NAME --cockpit-dir DIR` refuses production from a git working clone and keeps DIR as given (a `current` link is not resolved).

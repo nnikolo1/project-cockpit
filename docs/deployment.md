@@ -99,17 +99,33 @@ Before: one Dispatcher job, one quota job and one data folder per project (`com.
 
 **Roll back**: switch the Dispatcher off in Settings and unload the new job; `git revert` the PC-67 merge and pull; re-render and load the old per-project jobs (`dispatcher.launchd render --project cockpit ...`, section 5). Before step 8 the old folder is still complete up to the move, so the old jobs continue from it; work done by the new job since step 7 is only in the data root, so copy `ROOT/processing/processing.jsonl` lines of that period back by hand if they must be kept. After step 8 a rollback needs the daily backup (`tools/project_backup.py`, Retention in Drive) to restore the deleted files.
 
-### 5b. Deploying a release (PC-84)
+### 5b. Environments: development, test and production (PC-84)
 
-Production runs from a release folder, `<CP_HOME>/releases/<project>/current` (a link to `v<date>-<n>`), not from the working clone; the viewer, the Dispatcher and the quota jobs start from it. A deploy switches the link:
+Three environments, each a setting (its home, ports, labels, container), not a copy of the code:
+
+| | Code it runs | Data | Jobs and container | Made by |
+|---|---|---|---|---|
+| **development** | the working clone, edited by hand and by sub-agents | none of production's | no job points at it | the developer |
+| **test** | a throwaway clone of the committed HEAD | a temporary home (`CP_HOME`), removed afterwards; `CP_ENV=test` | the e2e step's own container `cockpit-workers-test`, the stub of the model | `tools/test_env.py`, on demand and by every deploy |
+| **production** | a release folder, `<CP_HOME>/releases/<project>/current` (a link to `v<date>-<n>`), read-only, never edited | the Cockpit's home | the unprefixed labels `com.project-cockpit.*`, container `cockpit-workers`, `CP_ENV=production` | `ckp deploy` |
+
+A further environment (a staging copy, a second test) gets the labels `com.project-cockpit.<env>.*` and the container `cockpit-workers-<env>` from `python3 -m dispatcher.launchd render --env NAME`. `ckp env set` records its viewer port, viewer label and data folder; two environments of any project sharing a port, a label or a data folder are refused. The hosting-service account is the same for all three (identity separation is a later phase, [the roles memo](memos/2026.11.17-roles-and-identity.md)). On this MacBook production and test take turns: the e2e step is refused while production has Workers running.
+
+**The test environment.** `python3 tools/test_env.py` clones the committed HEAD into a temporary folder, runs the merge gate there with a temporary home, rehearses a release (install read-only, switch `current`, import from the link) and removes everything (`--keep` keeps it). With `--e2e-repo OWNER/THROWAWAY --token-file F` it also runs the Dispatcher's failure paths with the stub of the model (`tools/e2e/README.md`). Prints `PASS`/`FAIL` per step; exit 0 passed, 1 failed, 2 refused.
+
+**Deploy and rollback.** Production runs from the release folder, not from the working clone; the viewer, the Dispatcher and the quota jobs start from it. A deploy switches the link:
 
 ```
 bin/ckp env set --project NAME --env production --port 8800 --label LABEL --data-dir DIR    # once per environment
 bin/ckp deploy --project NAME --repo OWNER/NAME --repo-dir CLONE            # a dry run: readiness and the plan, nothing changes
-bin/ckp deploy --project NAME --repo OWNER/NAME --repo-dir CLONE --apply     # tag, install, switch, restart, health check, record
+bin/ckp deploy --project NAME --repo OWNER/NAME --repo-dir CLONE --apply     # test, tag, install, switch, restart, health check, record
+bin/ckp deploy --project NAME --repo OWNER/NAME --repo-dir CLONE --rollback --apply     # the previous release again
+bin/ckp deploy --project NAME --repo OWNER/NAME --repo-dir CLONE --tag vYYYY.MM.DD-N --apply   # any installed release again
 ```
 
-Readiness (all must hold): the clone is clean and pushed; the merge gate passes (the full tests); the commit is ahead of the live release; no deploy is running; a release to roll back to exists. The plan is hot, or held when the release changes the proxy, the relay, the runtime, the agent module or the Worker image: a held release waits until no Worker runs. A deploy takes the deploy lock (a Dispatcher firing started during the switch does not start a Worker). The health check polls `/health` for up to 90 seconds; a failure after the switch rolls back to the previous release. Each deploy is recorded as a GitHub Deployment. Roll back by hand: relink `current` to `previous` and restart the job. By-hand steps of the first deploy (2026-11-25): the service definitions were changed to start from `current` (the originals are kept as `*.bak-2026-11-25`).
+Readiness (all must hold): the clone is clean and pushed; the test environment passes; the commit is ahead of the live release; no deploy is running; a release to roll back to exists. A tag whose release is installed already (a rollback, or forward again after one) skips the clone and test checks, the fetch and the install: that tree was tested when it was installed; the switch, restart, health check and records are the same. The plan is hot, or held when the release changes the proxy, the relay, the runtime, the agent module or the Worker image: a held release waits until no Worker runs. A deploy takes the deploy lock (a Dispatcher firing started during the switch does not start a Worker). The health check polls `/health` for up to 90 seconds; a failure after the switch rolls back to the previous release. Each deploy is recorded as a GitHub Deployment and, with refusals and rollbacks, as one line in the deploy log `<CP_HOME>/deploy-log.jsonl` (time, project, environment, tag, rollback, ok, error; outside every repository). The deploy command changes the running production: the interactive session runs it on the owner's request.
+
+**The jobs of production** start from the release link: render them with `--cockpit-dir <CP_HOME>/releases/<project>/current` (kept as a link, so a deploy needs no re-render). `dispatcher.launchd render` refuses production from a folder inside a git working clone. By hand, once: production's Dispatcher works on its own clone of each task repository (a `git clone` under `<CP_HOME>/repos/<project>`, given as the project's `repo_dir` in production's settings), so the bundles of main and the fetched Worker branches never land in the developer's clone; the interactive session fetches `worker/*` from that clone to review and merge. By-hand steps of the first deploy (2026-11-25): the service definitions were changed to start from `current` (the originals are kept as `*.bak-2026-11-25`).
 
 ### 6. First collectors run and the first check
 
@@ -127,7 +143,7 @@ Checks the prerequisites of step 1 (Python, git, `gh` and its login, the model c
 
 ### 8. Upgrade and uninstall
 
-- **Upgrade**: `git -C ~/src/project-cockpit pull --ff-only`, then restart the viewer (unload and load: a kick-start reuses the old definition) and re-render and reload the Dispatcher's two jobs; rebuild the image when `dispatcher/image/` or `dispatcher/relay.py` changed. Nothing to migrate.
+- **Upgrade**: `git -C ~/src/project-cockpit pull --ff-only` updates development only; production is upgraded by `ckp deploy` (section 5b), which restarts the viewer; reload the Dispatcher's two jobs when their arguments changed; rebuild the image when `dispatcher/image/` or `dispatcher/relay.py` changed. Nothing to migrate.
 - **Uninstall**: `launchctl bootout gui/$(id -u)/com.project-cockpit.dispatcher.widgets` and `.../com.project-cockpit.quota.widgets`, stop the viewer (section 5), `container stop cockpit-workers` and `container delete cockpit-workers`, delete the property lists, the unit, the project's entry in the projects file and `~/.local/share/project-cockpit/widgets`. Nothing was written to GitHub except by your own actions, the Workers' pull requests and the kit labels.
 
 ## 1. What runs where

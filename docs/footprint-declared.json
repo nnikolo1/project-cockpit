@@ -361,7 +361,23 @@
    }
   },
   "devops/deployment": {
-   "files": [],
+   "files": [
+    {
+     "path": "~/.local/share/project-cockpit/releases",
+     "kind": "dir",
+     "personal_data": false,
+     "written_by": "devops/deployment (ckp deploy)",
+     "note": "the release folders of production, one read-only copy of the code per tag, with the links current and previous per project (PC-84); a rollback switches the links; old releases are kept until the owner deletes them"
+    },
+    {
+     "path": "~/.local/share/project-cockpit/deploy-log.jsonl",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "devops/deployment (ckp deploy --apply)",
+     "volume": true,
+     "note": "one line per applied deploy, refusal or rollback of any project and environment (time, project, environment, tag, rollback, ok, error); append-only"
+    }
+   ],
    "logging": [],
    "policy": {
     "backup": "the git repository and its remote; nothing else to back up",
