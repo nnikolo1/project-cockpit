@@ -12,11 +12,11 @@ import plistlib
 import shutil
 import sys
 
+from dispatcher import layout
 from dispatcher import runtime as rt
 
 COCKPIT_DIR = pathlib.Path(__file__).resolve().parent.parent
-DATA_DIR = pathlib.Path("~/.local/share/project-cockpit").expanduser()  # as cockpit.DATA_DIR
-QUEUE_ROOT = pathlib.Path("~/.local/share/project-cockpit/task-queue").expanduser()   # the shared processing-data root (contract), argument --data-root
+DATA_DIR, QUEUE_ROOT = layout.DATA_DIR, layout.QUEUE_ROOT   # the places are defined in dispatcher/layout.py
 QUEUE = "queue"     # the name of the one job that serves all projects
 SOCKET_LIMIT = 104  # bytes, 4f
 INTERVAL = 120      # seconds, 3c
@@ -25,17 +25,13 @@ PREFIX = "com.project-cockpit"
 
 
 def paths(project, data_dir=DATA_DIR):
-    """The per-project files, under <data dir>/<project>/ (the folder the Cockpit reads: settings_path, USAGE_FILE, PLOG_FILE, AREA_DIR)."""
-    d = pathlib.Path(data_dir) / project
-    return dict(dir=d, settings=d / "dispatcher-settings.json", state=d / "dispatcher-state.json", area=d / "area",
-                socket=d / "proxy.sock", usage=d / "proxy-usage.jsonl", quota=d / "quota-history.jsonl", processing=d / "processing", launchd=d / "launchd")
+    """The per-project files (see layout.per_project)."""
+    return layout.per_project(data_dir, project)
 
 
 def queue_paths(root=QUEUE_ROOT):
-    """The files of the one queue, directly under the shared root (task folders are <area>/<project>/<task-id>); the settings list the projects."""
-    d = pathlib.Path(root).expanduser()
-    return dict(dir=d, settings=d / "dispatcher-settings.json", state=d / "dispatcher-state.json", area=d / "area",
-                socket=d / "proxy.sock", usage=d / "proxy-usage.jsonl", quota=d / "quota-history.jsonl", processing=d / "processing", launchd=d / "launchd")
+    """The files of the one queue, directly under the shared root (see layout.queue)."""
+    return layout.queue(root)
 
 
 def check_socket(sock):
