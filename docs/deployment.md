@@ -55,7 +55,7 @@ Before: one Dispatcher job, one quota job and one data folder per project (`com.
 **What changes**
 
 - The job: the Label loses its project suffix (`com.project-cockpit.dispatcher`; the quota job likewise) and the arguments of the old job that name one project (`--repo`, `--repo-dir`, `--settings`, `--state`, `--area`, `--socket`, `--usage-file`, `--data-dir`) are replaced by `--data-root` and the list of served projects read from the settings. Open: the exact arguments and how a project's repo and clone are found (the code of PC-67 decides; this note follows it).
-- The settings key: `served_projects`, the list of project keys the queue serves (name proposed here, open until the code is merged). A project not in the list is never touched. Today: `["cockpit"]`. Adding another project is the owner's act, in the settings.
+- The settings key: `projects`, a list of `{"short", "repo", "repo_dir", "first"?}` entries, one per project the queue serves; `first: true` ranks that project's tasks before all others. With one entry, or none, the Dispatcher works as before. A project not in the list is never touched. Adding another project is the owner's act, in the settings.
 - The data root: `~/.local/share/project-cockpit/task-queue/` (`--data-root`), laid out as in the contract: `dispatcher-state.json`, `processing/processing.jsonl`, `area/<project>/<task-id>/`, `proxy.sock`, `proxy-usage.jsonl`, `quota-history.jsonl`. The old per-project folder `<data dir>/<project>/` keeps its other files (cardmeta, tokens, backup status).
 
 **Order**
@@ -69,7 +69,7 @@ Before: one Dispatcher job, one quota job and one data folder per project (`com.
    `cp -Rp OLD/processing ROOT/processing`
    `cp -Rp OLD/area ROOT/area/cockpit`
    (OLD is `~/.local/share/project-cockpit/cockpit`, ROOT the data root.) Open: whether old processing-log lines get a `project` field added (the specification 5a wants it on every entry) or stay without it; the reader's tolerance of old lines is the code's to state. The task folders hold the Workers' good-bye notes and bundles: copied with the area, so they must be kept.
-5. Add `served_projects` to the settings (`["cockpit"]`); the Dispatcher switch stays off.
+5. Add `projects` to the settings (the Project cockpit with `first: true`, plus only the projects the owner has configured); the Dispatcher switch stays off.
 6. Render and load the new job: the new `render` command prints the property lists and the `launchctl bootstrap` lines (quota job first); run them **by hand**. Rebuild or keep the image: no change needed (open: image recipes per project, PC-71).
 7. Switch the Dispatcher on in Settings. Expected: the heartbeat in `ROOT/processing/processing.jsonl`, entries naming the project `cockpit`; the Task Queue tab shows the old and new history.
 8. After a day of normal runs, **by hand**, delete the copied files from the old folder (not its cardmeta, token or backup files). Log each by-hand step in `docs/manual-interventions-log.md`.
