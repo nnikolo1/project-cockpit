@@ -2439,9 +2439,16 @@ def queue_local(state_text, plog_text):
     except ValueError:
         st = {}
     ws = st.get("workers") if isinstance(st, dict) and isinstance(st.get("workers"), dict) else {}
-    workers = [dict(worker=u, task=w.get("task_id"), launched=_when(w.get("launched")), started=bool(w.get("started")))
+    workers = [dict(worker=u, task=w.get("task_id"), project=w.get("project") if isinstance(w.get("project"), str) else project_key(w.get("task_id")),
+                    launched=_when(w.get("launched")), started=bool(w.get("started")))
                for u, w in sorted(ws.items()) if isinstance(w, dict)]
     return dict(workers=workers, log=log_rows(plog_text))
+
+
+def project_key(task_id):
+    """The project key of a task id (spec 2d: `cockpit-44` -> `cockpit`); "" for anything else (PC-67: the queue's project column)."""
+    m = re.fullmatch(r"(.+)-\d+", task_id) if isinstance(task_id, str) else None
+    return m.group(1) if m else ""
 
 
 # ---------- the processing log as a table (PC-120) ----------
@@ -2495,7 +2502,7 @@ def parse_heartbeat(line):
 
 def _row(rec, raw):
     """One processing-log record (a dict, or None for an unreadable line) -> a table row."""
-    base = dict(time=_when(rec.get("time")) if rec else None, kind="other", task="", worker="", detail="", what="", count=1, first=None,
+    base = dict(time=_when(rec.get("time")) if rec else None, kind="other", task="", project="", worker="", detail="", what="", count=1, first=None,
                 lines=[raw], event=True, alert=False, idle=False)
     if rec is None:
         return dict(base, detail=raw)
@@ -2503,10 +2510,12 @@ def _row(rec, raw):
         h = parse_heartbeat(rec["heartbeat"])
         idle = not h["running"] and h["what"].startswith("nothing to do") and "slept" not in h["what"]
         skip = h["what"].startswith("skipped:") and not h["what"].startswith(QUIET)
-        return dict(base, kind="heartbeat", task=", ".join(t for _, t in h["running"] if t), worker=", ".join(w for w, _ in h["running"]),
+        return dict(base, kind="heartbeat", task=", ".join(t for _, t in h["running"] if t),
+                    project=", ".join(dict.fromkeys(k for _, t in h["running"] if (k := project_key(t)))), worker=", ".join(w for w, _ in h["running"]),
                     what=h["what"], detail=h["readings"], event=skip, alert=skip, idle=idle, first=base["time"])
     task = rec.get("task") if isinstance(rec.get("task"), str) and rec.get("task") != "-" else ""
     worker = rec.get("worker") if isinstance(rec.get("worker"), str) else ""
+    base["project"] = rec["project"] if isinstance(rec.get("project"), str) else project_key(task)   # an old line has no field: from the id
     if rec.get("event") == "sleep":
         return dict(base, kind="sleep", detail=f"the host slept or the Dispatcher was down for {rec.get('minutes', '?')} minutes")
     st = rec.get("state") if isinstance(rec.get("state"), str) else ""

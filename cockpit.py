@@ -110,6 +110,7 @@ def register(projects, default):
     DEFAULT = default
 SVGS = {"erd": "erd.svg", "dataflow": "dataflow.svg", "deps": "deps.svg", "js": "js.svg"}
 DATA_DIR = pathlib.Path("~/.local/share/project-cockpit").expanduser()  # where deployment.md keeps each project's token folder
+QUEUE_ROOT = store_layout.QUEUE_ROOT  # the one Task Queue's data root (PC-67, spec 5c), the Dispatcher's --data-root default
 
 
 def meta_dir(p):
@@ -697,9 +698,15 @@ def execute(ops, run=run_gh):
     return outs
 
 
+def queue_dir(p):
+    """The folder of the Task Queue's files (settings, state, processing log): the one queue's data root once it holds a settings file
+    (migrated, deployment.md 5a; the same queue and settings for every project, spec 3c, 6a), else the project's own folder (before)."""
+    return QUEUE_ROOT if (QUEUE_ROOT / "dispatcher-settings.json").exists() else DATA_DIR / (p.get("name") or p["repo"].split("/")[-1])
+
+
 def settings_path(p):
-    """The Dispatcher's settings file of the project: <data dir>/<project name>/dispatcher-settings.json (spec 6a)."""
-    return DATA_DIR / (p.get("name") or p["repo"].split("/")[-1]) / "dispatcher-settings.json"
+    """The Dispatcher's settings file (spec 6a): dispatcher-settings.json in `queue_dir`."""
+    return queue_dir(p) / "dispatcher-settings.json"
 
 
 def get_settings(p):
@@ -712,9 +719,9 @@ def get_settings(p):
 def get_queue(p):
     """The local part of the Task Queue tab (no GitHub): running Workers from the Dispatcher's state file, the processing log's newest lines,
     the Dispatcher settings and the last daily backup's status record (None when there is none). The token and quota files are read for the Token Usage tab (`/api/usage`), also local."""
-    d = DATA_DIR / (p.get("name") or p["repo"].split("/")[-1])
+    d, o = queue_dir(p), DATA_DIR / (p.get("name") or p["repo"].split("/")[-1])   # the backup and compliance records stay per project
     return dict(L.queue_local(_read_text(d / "dispatcher-state.json"), _read_text(d / PLOG_FILE)), settings=get_settings(p), asOf=time.time(),
-                backup=L.backup_status(_read_text(d / L.BACKUP_STATUS_FILE)), compliance=L.compliance_summary(_read_text(d / L.COMPLIANCE_REPORT_FILE)))
+                backup=L.backup_status(_read_text(o / L.BACKUP_STATUS_FILE)), compliance=L.compliance_summary(_read_text(o / L.COMPLIANCE_REPORT_FILE)))
 
 
 def card_settings_path(p):
@@ -820,6 +827,12 @@ def save_settings(p, form):
     """Validate and write the settings file atomically, mode 0600. ValueError on a refused value."""
     values = L.validate_settings(form, SETTING_DEFAULTS, RuntimeConfig.image_workers)
     f = settings_path(p)
+    try:  # the list of served projects (spec 3c) is not on the form: kept as the file has it
+        old = json.loads(_read_text(f) or "{}")
+    except ValueError:
+        old = {}
+    if isinstance(old, dict) and "projects" in old:
+        values = dict(values, projects=old["projects"])
     store_io.atomic_write_json(f, values, mode=0o600, indent=2)
     log.info("dispatcher settings saved for %s: %s", p.get("name", ""), values)
     return "settings saved"
@@ -1410,7 +1423,7 @@ def live_state(p, S, fresh=False):
     and, when the processing log has a state change newer than the cache, one background refresh at most every LIVE_REFRESH_S seconds."""
     if "tasks" not in S:
         return S
-    d = DATA_DIR / (p.get("name") or p["repo"].split("/")[-1])
+    d = queue_dir(p)
     shorts = {s.lower() for s in (p.get("short"), p.get("name"), p["repo"].split("/")[-1]) if s}
     events, k, now = L.live_events(_read_text(d / PLOG_FILE), shorts), pk(p, "state"), time.time()
     at = S.get("source", {}).get("fetchedAt", 0)

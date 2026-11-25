@@ -131,8 +131,8 @@ PAGE = (ROOT / "web" / "index.html").read_text()
 node = pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
 
 
-def test_the_page_draws_the_log_as_a_table_with_the_five_columns():
-    assert "<th>Time</th><th>Kind</th><th>Task</th><th>Worker</th><th>Detail</th>" in PAGE and "QLOG_LIMITS=[15,50,200]" in PAGE
+def test_the_page_draws_the_log_as_a_table_with_the_six_columns():
+    assert "<th>Time</th><th>Kind</th><th>Project</th><th>Task</th><th>Worker</th><th>Detail</th>" in PAGE and "QLOG_LIMITS=[15,50,200]" in PAGE
     assert "block('Processing log',()=>vQlog(L.log))" in PAGE
 
 
@@ -160,7 +160,7 @@ def test_page_events_by_default_the_toggle_and_the_filters(run_node):
 @node
 def test_page_table_has_date_headings_clock_times_tags_highlights_and_no_raw_json(run_node):
     h = run_node("UI.qlog.beats=true;return vQlog(%s);" % page_rows())
-    assert '<tr class="qday"><td colspan="5">2026-11-25</td></tr>' in h and "Unknown date" in h
+    assert '<tr class="qday"><td colspan="6">2026-11-25</td></tr>' in h and "Unknown date" in h
     assert ">06:35:00</span>" in h and 'class="chip qk-failed">failed' in h and 'class="qrow qalert"' in h
     assert "nothing to do, 2 heartbeats, " in h and "1.2 GiB of 4 GiB, 37 processes" in h and "memoryUsageBytes" not in re.sub(r"<[^>]*>", "", h)   # not as visible text; the expandable full record keeps it in an attribute
 
@@ -179,4 +179,4 @@ def test_page_toggle_expand_and_filter_form():
 @node
 def test_page_expanded_row_shows_the_original_line(run_node):
     h = run_node("const R=%s;UI.qlogRows[qlogKey(R[1])]=true;return vQlog(R);" % page_rows())
-    assert '<tr class="qfull"><td colspan="5"><pre class="mono">' in h and "no note" in h and 'aria-expanded="true"' in h
+    assert '<tr class="qfull"><td colspan="6"><pre class="mono">' in h and "no note" in h and 'aria-expanded="true"' in h

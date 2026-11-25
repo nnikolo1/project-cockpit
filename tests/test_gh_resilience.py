@@ -152,7 +152,7 @@ def test_task_queue_local_part_is_served_while_github_fails(monkeypatch):
     monkeypatch.setattr(C, "run_gh", down)
     monkeypatch.setattr(C, "build_state", down)
     q = C.get_queue(P)
-    assert q["workers"] == [dict(worker="worker2", task="T-7", launched=1767261600, started=True)]
+    assert q["workers"] == [dict(worker="worker2", task="T-7", project="T", launched=1767261600, started=True)]
     assert q["log"][1]["kind"] == "launched" and q["log"][0]["kind"] == "other" and q["log"][1]["time"] == "2026-01-01T10:00:00+00:00" and "values" in q["settings"]
 
 
