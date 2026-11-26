@@ -2,6 +2,7 @@
 `ckp.core.deploy.deploy` calls (docs/contracts/deploy-interfaces.md). The integrator's piece of PC-84 phase 1: no logic of its own beyond
 the facts it reports; every outside effect goes through the injected modules (`git`, `github`, `process`, `releases`, `layout`)."""
 import logging
+import pathlib
 import tempfile
 
 from ckp.adapters import git as _git, github as _github, process as _process, run as _run
@@ -14,12 +15,16 @@ SMOKE = "import ckp, logic, cockpit, dispatcher.core"   # the release tree must 
 
 class GitDeployAdapter:
     def __init__(self, project, repo, repo_dir, env_name, home=None, *, git=_git, github=_github, process=_process, releases=_releases,
-                 layout=_layout, run=_run, tests_green=None, health_wait_s=90, health_interval_s=2, sleep=None, clock=None):
+                 layout=_layout, run=_run, tests_green=None, health_wait_s=90, health_interval_s=2, sleep=None, clock=None,
+                 from_release=False, problems=None):
         """`repo`: OWNER/NAME on the hosting service; `repo_dir`: the working clone; `env_name`: the environment being deployed;
-        `tests_green`: a bool or a callable returning one (default: the test environment, tools/test_env.py, on the clone's HEAD)."""
+        `tests_green`: a bool or a callable returning one (default: the test environment, tools/test_env.py, on the clone's HEAD);
+        `from_release`: fetch the tree from the tag's release asset instead of the clone (PC-142); `problems`: a callable returning the
+        open heartbeat and backup problems (default: ckp.core.monitor.problems), asked only for a release that is not installed yet."""
         self.project, self.repo, self.repo_dir, self.env_name, self.home = project, repo, repo_dir, env_name, home
         self.git, self.github, self.process, self.releases, self.layout, self.run = git, github, process, releases, layout, run
         self._tests_green = tests_green
+        self.from_release, self._problems = from_release, problems
         import time
         self.health_wait_s, self.health_interval_s = health_wait_s, health_interval_s
         self.sleep, self.clock = sleep or time.sleep, clock or time.monotonic
@@ -56,8 +61,19 @@ class GitDeployAdapter:
             ahead = True
         installed = self.releases.release_path(project, tag, self.home).is_dir()   # a rollback: no gate run, the tree was checked then
         return dict(clean=not dirty and pushed, tests_green=installed or self._tests_ok(), ahead_of_live=ahead, deploy_running=False,
-                    ci_ok=None, problems_open=None, installed=installed,
+                    ci_ok=None, problems_open=None if installed else self._problems_open(), installed=installed,
                     rollback_target=live is None or self.releases.release_path(project, live, self.home).is_dir())
+
+    def _problems_open(self):
+        """True when heartbeat or backup problems are open (a rollback is never held by them: not asked for an installed release)."""
+        try:
+            if self._problems is None:
+                from ckp.core import monitor
+                return bool(monitor.problems(self.home))
+            return bool(self._problems())
+        except Exception as e:  # noqa: BLE001 - an unreadable monitor state is unknown, not a refusal
+            log.warning("monitoring problems unknown: %s", e)
+            return None
 
     def _ref(self, tag):
         """The tag when it exists, else HEAD (a dry run plans a tag that is created only when the deploy is applied)."""
@@ -76,7 +92,15 @@ class GitDeployAdapter:
     # -- the steps of a deploy --
     def fetch(self, tag):
         dest = tempfile.mkdtemp(prefix="ckp-release-")
+        if self.from_release:
+            return self.github.download_release(self.repo, tag, dest, run=self.run)
         return self.git.archive(self.repo_dir, tag, dest, run=self.run)
+
+    def publish(self, tag):
+        """The release asset (PC-142): a GitHub Release of the tag with the archive of the tagged tree and its checksum. Returns the URL."""
+        with tempfile.TemporaryDirectory(prefix="ckp-asset-") as tmp:
+            arch = self.git.archive_file(self.repo_dir, tag, pathlib.Path(tmp) / self.github.asset_name(tag), run=self.run)
+            return self.github.create_release(self.repo, tag, f"Release {tag} of {self.project} (archive of the tagged tree).", arch, run=self.run)
 
     def selftest(self, tree):
         try:

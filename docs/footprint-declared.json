@@ -345,11 +345,34 @@
    }
   },
   "devops/monitoring": {
-   "files": [],
+   "files": [
+    {
+     "path": "~/.local/share/project-cockpit/heartbeats.json",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "devops/monitoring (ckp heartbeat set)",
+     "note": "the owner's checks at the monitoring service: per job its ping URL and how often it must run (PC-142); mode 0600, a ping URL lets anyone ping the check"
+    },
+    {
+     "path": "~/.local/share/project-cockpit/heartbeat-state.json",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "devops/monitoring (ckp heartbeat run, ckp deploy --apply, ckp watch)",
+     "note": "the last run of each job and the problems a desktop notification was shown for (PC-142); rewritten in place"
+    },
+    {
+     "path": "~/.local/share/project-cockpit/watch.log",
+     "kind": "file",
+     "personal_data": false,
+     "written_by": "devops/monitoring (the watch job)",
+     "volume": true,
+     "note": "the log of the hourly watch job rendered by dispatcher.launchd (PC-142)"
+    }
+   ],
    "logging": [],
    "policy": {
-    "backup": "nothing persisted yet (no file is wired); the declaration follows when PC-84 builds it",
-    "retention": "nothing persisted yet (no file is wired)"
+    "backup": "not backed up: the checks are re-entered with ckp heartbeat set, the state rebuilds at the next runs",
+    "retention": "the two JSON files are rewritten in place; the watch log grows until the owner deletes it"
    }
   },
   "devops/policy": {
@@ -376,6 +399,13 @@
      "written_by": "devops/deployment (ckp deploy --apply)",
      "volume": true,
      "note": "one line per applied deploy, refusal or rollback of any project and environment (time, project, environment, tag, rollback, ok, error); append-only"
+    },
+    {
+     "path": "~/.local/share/project-cockpit/deploy-run",
+     "kind": "dir",
+     "personal_data": false,
+     "written_by": "devops/deployment (the deploy button of the Environments view)",
+     "note": "per project the last deploy started from the page: its process id and mode, the command's JSON result and its log (PC-142); replaced by the next run"
     }
    ],
    "logging": [],

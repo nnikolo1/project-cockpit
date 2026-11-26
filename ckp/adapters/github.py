@@ -23,6 +23,30 @@ def create_release(repo, tag, notes, asset=None, *, run=_run):
     return url
 
 
+def asset_name(tag):
+    """The release asset of a tag: the archive of the tagged tree (a `.sha256` file with the same name next to it)."""
+    return f"{tag}.tar.gz"
+
+
+def download_release(repo, tag, dest, *, run=_run):
+    """Download the release asset of `tag`, check it against its `.sha256` file and unpack it into `dest`/tree; returns that folder.
+    A missing asset or a wrong checksum raises (nothing is unpacked)."""
+    import tarfile
+    dest, name = Path(dest), asset_name(tag)
+    dest.mkdir(parents=True, exist_ok=True)
+    run(["gh", "release", "download", tag, "--repo", repo, "--pattern", name, "--pattern", name + ".sha256", "--dir", str(dest), "--clobber"])
+    arch = dest / name
+    want = (dest / (name + ".sha256")).read_text().split()[0]
+    got = hashlib.sha256(arch.read_bytes()).hexdigest()
+    if got != want:
+        raise ValueError(f"release asset {name} of {repo}: checksum {got} is not the published {want}")
+    tree = dest / "tree"
+    with tarfile.open(arch) as t:
+        t.extractall(tree, filter="data")
+    log.info("release asset %s of %s unpacked into %s", name, repo, tree)
+    return tree
+
+
 def record_deployment(repo, tag, environment, state, description, *, run=_run):
     """Create a GitHub deployment of `tag` to `environment` and set its status (`state`: success, failure, ...)."""
     body = dict(ref=tag, environment=environment, auto_merge=False, required_contexts=[], description=description[:140])

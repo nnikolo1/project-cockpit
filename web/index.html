@@ -266,6 +266,7 @@ let QL=null;  /* /api/queue: the local part of the Task Queue (Dispatcher state 
 let QA=null;  /* PC-138 /api/queueall: the one queue's tasks over every listed project ({projects, tasks}); only when the settings list more than one */
 const QMULTI=()=>!!(QL&&QL.projects&&QL.projects.length>1);  /* the new parts of the Task Queue tab appear only then; one project: the view as before */
 let Q={questions:[],counts:{},projects:[]};  /* open questions of every project: /api/questions, not tied to the selected project */
+let ENVS={environments:[],log:[]},envTimer=0;  /* /api/environments: the project's environments, releases, deploy log and the last deploy started here (PC-142), polled while it runs */
 let COMP={steering:false,projects:[]},compTimer=0;  /* /api/compliance: every project's compliance report and check run (local files), polled while a run is on */
 let USE=null,SET=null,CSET=null,ALOG=null,D=null,CODE={wired:false,modules:{}},FEED=[],ACT=[],MODULES=[],RULES={configured:false},META=NOMETA();
 const SVGC={};
@@ -328,6 +329,11 @@ async function flush(){
 /* action-log:end */
 async function loadPrs(fresh){  /* never blocks or fails anything else: its own request, its own state */
   try{PRS=await api('/api/rulesprs'+(fresh?'?fresh=1':''));}catch(e){PRS={configured:true,available:false,pending:[],error:e.message};}
+}
+async function loadEnvs(){  /* a failed load (the viewer restarting during its own deploy) keeps the last copy and goes on polling while it showed a run */
+  try{ENVS=await api('/api/environments');}catch(e){ENVS=Object.assign({},ENVS,{error:String(e.message||e)});}
+  clearTimeout(envTimer);
+  if(ENVS.run&&ENVS.run.state==='running')envTimer=setTimeout(async()=>{await loadEnvs();if(UI.route==='settings'&&UI.setSec==='environments')render();},3000);
 }
 async function loadCompliance(){
   try{COMP=await fetch('/api/compliance').then(async r=>{const j=await r.json();if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j;});}
@@ -436,7 +442,7 @@ async function refreshTab(R){
   const mine=PROJ,ok=f=>x=>{if(mine===PROJ)f(x);};
   const part={questions:()=>loadQuestions(false),timeline:()=>api('/api/timeline').then(ok(f=>{FEED=f.entries;ACT=f.activity||[];})),
     backlog:()=>api('/api/queue').then(ok(x=>{QL=x;})).then(()=>QMULTI()?loadQueueAll():null),cockpit:()=>loadCompliance(),usage:()=>api('/api/usage').then(ok(x=>{USE=x;})),
-    settings:()=>Promise.all([api('/api/settings').then(ok(x=>{SET=x;})),api('/api/cardsettings').then(ok(x=>{CSET=x;})),loadCompliance(),loadPrs(false)])}[R];
+    settings:()=>Promise.all([api('/api/settings').then(ok(x=>{SET=x;})),api('/api/cardsettings').then(ok(x=>{CSET=x;})),loadCompliance(),loadPrs(false),loadEnvs()])}[R];
   try{await Promise.all([api('/api/state').then(ok(setState)),part?part():null]);}catch(e){if(mine===PROJ)UI.err=String(e.message||e);}
   STALE.delete(R);
   clearTimeout(staleTimer);if(D&&(D.stale||D.warming)&&mine===PROJ)staleTimer=setTimeout(poll,4000);
@@ -709,7 +715,7 @@ function ageBanner(D){
 const GH_ACTS=['accept','dismiss','take','complete','unblock','new','subtask','followup','hotspot','edit'];
 function disableSteering(why){
   document.querySelectorAll('#app [data-act]').forEach(b=>{const a=b.dataset.act;
-    if(GH_ACTS.includes(a)||(a==='arm'&&b.dataset.a!=='compliance')){b.disabled=true;b.title='Off: '+why;}});
+    if(GH_ACTS.includes(a)||(a==='arm'&&!['compliance','deploy'].includes(b.dataset.a))){b.disabled=true;b.title='Off: '+why;}});
   ['block','change','edit','moddl','new','release'].forEach(f=>document.querySelectorAll('#app [data-form='+f+'] button:not([type=button])').forEach(b=>{b.disabled=true;b.title='Off: '+why;}));
 }
 function queueBar(){  /* the Task Queue pane: the data's actual age, the next refresh, a slowed or failed refresh (PC-130) */
@@ -992,7 +998,7 @@ function cardSettingsForm(){
    +(ro?'':'<div><button class="btn primary">Save</button></div>')+'</form>';}
 /* Settings > Action log (PC-132): the last events of the project's action log (read only), newest first, filtered on the server; failures highlighted,
    a failed or refused row links to its task. */
-const ALOG_ACTIONS=['release','cancel','edit','change','block','unblock','new','accept','dismiss','moddl','compliance','settings','cardsettings','draw'];
+const ALOG_ACTIONS=['release','cancel','edit','change','block','unblock','new','accept','dismiss','moddl','compliance','deploy','settings','cardsettings','draw'];
 async function loadAlog(){
   const F=UI.alog,mine=PROJ,q=['action','outcome','task'].filter(k=>F[k]).map(k=>k+'='+encodeURIComponent(F[k])).join('&');
   let x;try{x=await api('/api/actionlog'+(q?'?'+q:''));}catch(e){x={error:String(e.message||e),events:[]};}
@@ -1018,9 +1024,10 @@ function vActionLog(){
    +'</tbody></table></div></div>';
 }
 function vSettings(){
-  const sec=UI.setSec,head='<div class="page"><div><h1>Settings</h1></div><div class="filters" role="group" aria-label="Section">'+[['dispatcher','Dispatcher settings'],['cards','Module cards'],['policies','Policies'],['actionlog','Action log']].map(x=>'<button class="f" data-act="setsec" data-v="'+x[0]+'" aria-pressed="'+(sec===x[0])+'">'+x[1]+'</button>').join('')+'</div>';
+  const sec=UI.setSec,head='<div class="page"><div><h1>Settings</h1></div><div class="filters" role="group" aria-label="Section">'+[['dispatcher','Dispatcher settings'],['cards','Module cards'],['policies','Policies'],['environments','Environments'],['actionlog','Action log']].map(x=>'<button class="f" data-act="setsec" data-v="'+x[0]+'" aria-pressed="'+(sec===x[0])+'">'+x[1]+'</button>').join('')+'</div>';
   if(sec==='policies')return head+vCompliance()+vRules()+'</div>';
   if(sec==='actionlog')return head+block('Action log',vActionLog)+'</div>';
+  if(sec==='environments')return head+vEnvironments()+'</div>';
   const dh='<span class="muted">How the Dispatcher behaves. It reads the file at each firing.</span>';
   const cards=CSET?cardSettingsForm():'<div class="card"><span class="muted">Module card settings could not be loaded.</span></div>';
   if(sec==='cards')return head+cards+'</div>';
@@ -1165,6 +1172,36 @@ function vUsage(){
    +(tk&&tk.length?'':'<tr><td class="muted" colspan="6">no data</td></tr>')+'</tbody></table></div><p class="muted" style="font-size:13px;margin:8px 0 0">The proxy sum counts the requests of the task’s Worker between the task’s launch and its last log entry. Older tasks, launched before the log named the Worker, count all Workers’ requests in that span (marked overlap when another task ran then).</p></div>'};
   return head+USAGE_ORDER.map(k=>C[k]()).filter(Boolean).join('')+'</div>';
 }
+/* environments:start */
+/* Environments (Settings, PC-142): a thin client of `ckp deploy`. The server gives the environments, the live and previous release, the
+   deploy log and the last run started here; the buttons only start the command (a check, a deploy, a rollback), each after a second click. */
+function envRun(r){
+  if(!r)return '';
+  const what={check:'Readiness check',apply:'Deploy',rollback:'Rollback'}[r.mode]||'Deploy';
+  if(r.state==='running')return '<span class="warnline">'+what+' to '+esc(r.env)+' running since '+esc(r.started)+'\u2026</span>';
+  return '<div><span class="'+(r.ok?'':'warnline')+'">'+what+' to '+esc(r.env)+' started '+esc(r.started)+(r.tag?' ('+esc(r.tag)+')':'')+': '+(r.ok?'ok':'failed')+'</span>'
+   +(r.error?' <span class="muted">'+esc(r.error)+'</span>':'')
+   +((r.steps||[]).length?'<ol class="muted" style="font-size:13px;margin:4px 0">'+r.steps.map(x=>'<li'+(x.ok?'':' class="warnline"')+'>'+esc(x.step)+(x.detail?': '+esc(x.detail):'')+'</li>').join('')+'</ol>':'')+'</div>';}
+function vEnvironments(){
+  const E=ENVS,run=E.run,busy=run&&run.state==='running';
+  let h='<div><h2>Environments</h2><span class="muted">The releases of this project and its deploy log. The buttons start <span class="mono">ckp deploy</span>, which does every check; a deploy of the Cockpit restarts this page\'s server.</span></div>';
+  if(E.error)h+='<div class="card" style="border-color:var(--danger)"><b class="warnline">Environments data unavailable.</b> <span class="muted">'+esc(E.error)+'</span></div>';
+  h+='<div class="card"><dl class="facts"><dt>Live release</dt><dd class="mono">'+esc(E.live||'none')+'</dd><dt>Previous release</dt><dd class="mono">'+esc(E.previous||'none')+'</dd>'
+   +'<dt>Installed</dt><dd class="mono">'+esc((E.releases||[]).join(', ')||'none')+'</dd></dl>'+envRun(run)+'</div>';
+  if(!(E.environments||[]).length)h+='<div class="card"><span class="muted">No environment recorded: <span class="mono">ckp env set --project NAME --env production ...</span></span></div>';
+  h+='<div class="grid">'+(E.environments||[]).map(e=>{
+    const btn=(m,label,dis)=>{const k=e.name+':'+m,on=UI.armed==='deploy:'+k;
+      return '<button class="btn small'+(on?' armed':'')+'" data-act="arm" data-a="deploy" data-k="'+esc(k)+'"'+(busy||dis?' disabled':'')+'>'+(on?'Confirm '+label.toLowerCase():label)+'</button>';};
+    return '<div class="card" data-env="'+esc(e.name)+'" style="display:flex;flex-direction:column;gap:8px"><h2>'+esc(e.name)+'</h2>'
+     +'<dl class="facts"><dt>Port</dt><dd class="mono">'+esc(String(e.port))+'</dd><dt>Service</dt><dd class="mono">'+esc(e.label||'')+'</dd><dt>Data</dt><dd class="mono">'+esc(e.data_dir||'')+'</dd></dl>'
+     +(!E.steering?'':!E.configured?'<span class="muted" style="font-size:12px">Deploy not configured: give the project a "git" clone.</span>'
+      :'<div class="row" style="gap:8px">'+btn('check','Check readiness')+btn('apply','Deploy')+btn('rollback','Roll back',!E.previous)+'</div>')+'</div>';}).join('')+'</div>';
+  const L=E.log||[];
+  h+='<div class="card"><h2>Deploy log</h2><div class="tblbox narrow"><table><thead><tr><th>Time (UTC)</th><th>Environment</th><th>Tag</th><th>Kind</th><th>Result</th></tr></thead><tbody>'
+   +(L.length?L.map(r=>'<tr><td class="mono">'+esc(r.time||'')+'</td><td>'+esc(r.env||'')+'</td><td class="mono">'+esc(r.tag||'')+'</td><td>'+(r.rollback?'rollback':'deploy')+'</td>'
+     +'<td'+(r.ok?'':' class="warnline"')+'>'+(r.ok?'ok':esc(r.error||'failed'))+'</td></tr>').join(''):'<tr><td class="muted" colspan="5">no deploy recorded</td></tr>')+'</tbody></table></div></div>';
+  return h;}
+/* environments:end */
 /* compliance:start */
 const compCount=p=>p&&p.report?p.report.violations.length:0;
 /* Compliance (Settings > Policies): one card per project (violation count, last report link and date, run state, the Run button), then every
@@ -1485,7 +1522,7 @@ function act(a,ds){
    case 'arm':{const id=ds.a+':'+ds.k;
      if(UI.armed!==id){UI.armed=id;clearTimeout(armTimer);armTimer=setTimeout(()=>{UI.armed=null;render();},6000);render();break;}
      UI.armed=null;clearTimeout(armTimer);
-     post(ds.a==='compliance'?{action:'compliance',project:ds.k}:ds.a==='submit'?{action:'release',n:t.number,p:'P2',d:''}:{action:'cancel',n:t.number},id);break;}
+     post(ds.a==='compliance'?{action:'compliance',project:ds.k}:ds.a==='deploy'?{action:'deploy',env:ds.k.slice(0,ds.k.lastIndexOf(':')),mode:ds.k.slice(ds.k.lastIndexOf(':')+1)}:ds.a==='submit'?{action:'release',n:t.number,p:'P2',d:''}:{action:'cancel',n:t.number},id);break;}
    case 'retryact':{const b=UI.toastRetry;UI.toast='';UI.toastRetry=null;render();post(b);break;}
    case 'toastx':UI.toast='';UI.toastRetry=null;clearTimeout(toastTimer);render();break;
    case 'problems':UI.problems=!UI.problems;render();break;

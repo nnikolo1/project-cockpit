@@ -96,6 +96,8 @@ def test_arm_needs_a_second_click_and_posts_release_cancel_or_compliance():
     assert ok["armed"] is None
     posted(twice % ("cancel", "#2", "cancel", "#2"), body(action="cancel", n=2), "#2 is merged")
     posted(twice % ("compliance", "proj", "compliance", "proj"), body(action="compliance"), "a compliance check of proj is already running")
+    posted(twice % ("deploy", "production:rollback", "deploy", "production:rollback"), body(action="deploy", env="production", mode="rollback"),
+           "a deploy of proj is already running (started 2026-11-26T10:00:00Z)")   # the Environments view (PC-142)
 
 
 @pytest.mark.ui_action("page:take", "page:take/refused", "page:complete", "page:complete/refused")

@@ -25,6 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlparse
 
 import logic as L
+from ckp.core import environments as core_environments
 from ckp.store import io as store_io, layout as store_layout
 from ckp.store.cache import DiskCache
 from dispatcher.core import DEFAULTS as SETTING_DEFAULTS, load_settings
@@ -1104,6 +1105,9 @@ def _do_act(form, run, state, ctx):
             return 200, dict(ok=True, msg=save_card_settings(p, form))
         if form.get("action") == "compliance":  # starts the project's compliance check; same guard (the UI is the owner's alone)
             return 200, dict(ok=True, msg=start_compliance(p))
+        if form.get("action") == "deploy":  # starts `ckp deploy` detached (PC-142); the command does the checks, the page only asks
+            r = core_environments.start_deploy(p.get("name", ""), p.get("repo"), p.get("git"), str(form.get("env") or "production"), str(form.get("mode") or "check"))
+            return (200, dict(ok=True, msg=r["msg"])) if r["ok"] else (400, dict(error=r["error"]))
         why = steer_block(p)
         if why:  # owner: the write side refuses while GitHub cannot be read; nothing is queued for later
             log.warning("refused action %s on %s: %s", form.get("action"), p.get("name", ""), why)
@@ -1287,6 +1291,12 @@ def start_compliance(p):
     threading.Thread(target=wait, daemon=True).start()
     log.info("compliance check of %s started (pid %d): %s", name, proc.pid, " ".join(p["compliance"]))
     return f"compliance check of {name} started"
+
+
+def get_environments(p):
+    """The Environments view of a project (PC-142): what `ckp env show` prints, and whether the page may offer the deploy buttons."""
+    r = core_environments.view(p.get("name", ""))
+    return dict(r["data"] or {}, error=r["error"], steering=CFG["steer"], configured=bool(p.get("git")))
 
 
 def compliance_report_file(p):
@@ -1876,6 +1886,8 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, get_ci(p))
             if u.path == "/api/usage":
                 return self.send(200, usage_served(p))
+            if u.path == "/api/environments":
+                return self.send(200, get_environments(p))
             if u.path == "/api/compliance":
                 return self.send(200, build_compliance())
             if u.path == "/api/actionlog":
