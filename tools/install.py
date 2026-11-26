@@ -44,7 +44,7 @@ CONFIG = ".config/project-cockpit"          # relative to the home folder, as in
 DATA = ".local/share/project-cockpit"
 CRED_CANDIDATES = (f"{CONFIG}/model-token", f"{DATA}/model-token")  # where the owner keeps the `claude setup-token` output
 DIR_CANDIDATES = ("src", "code", "projects", "Projects", "dev", "Developer", "git", "repos", "work")
-VIEWER = "com.project-cockpit.viewer"
+VIEWER = launchd.viewer_label()
 QUEUE_LABELS = [f"{launchd.PREFIX}.{kind}.{launchd.QUEUE}" for kind in ("quota", "dispatcher")]  # quota first
 PLANNED = {"project_sync": ("PC-92", "tools/project_sync.py"), "daily job": ("PC-91", None)}
 REMOTE = re.compile(r"github\.com[:/]+([\w.-]+)/([\w.-]+?)(?:\.git)?/*$")
@@ -236,8 +236,7 @@ def viewer_unit(env, python):
     logf = str(env.p(f"{DATA}/cockpit.log"))
     if env.system == "Darwin":
         path = env.p(f"Library/LaunchAgents/{VIEWER}.plist")
-        body = plistlib.dumps(dict(Label=VIEWER, ProgramArguments=args, WorkingDirectory=str(env.root), RunAtLoad=True, KeepAlive=True,
-                                   EnvironmentVariables={"PATH": launchd.JOB_PATH}, StandardOutPath=logf, StandardErrorPath=logf)).decode()
+        body = plistlib.dumps(launchd.viewer_plist(env.projects_file, env.p(f"{DATA}/token"), logf, env.root, python)).decode()   # one definition (PC-142)
         dom = f"gui/{env.uid}"
         return path, body, ["launchctl", "print", f"{dom}/{VIEWER}"], [["launchctl", "bootstrap", dom, path]], [["launchctl", "bootout", f"{dom}/{VIEWER}"]]
     if env.system == "Linux":

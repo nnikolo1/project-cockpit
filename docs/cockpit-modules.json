@@ -15,9 +15,9 @@
   {"id": "devops/installation", "name": "Installation", "desc": "installing the Cockpit in a repository: kit/setup.sh and the test of the README install commands (the installer of PC-100 joins it when it lands)"},
   {"id": "devops/backup", "name": "Backup", "desc": "the daily backup of a project's Cockpit data to Drive (tools/project_backup.py), its Drive retention script, the restore test (tools/backup_restore.py) and the backup contract"},
   {"id": "devops/ci", "name": "CI", "desc": "continuous integration: the GitHub Actions test workflow (the local gate and the merge gate of PC-94 join it when built)"},
-  {"id": "devops/monitoring", "name": "Monitoring and alerts", "desc": "heartbeat pings and notifications (PC-84); declared, no file yet, so it shows not wired"},
+  {"id": "devops/monitoring", "name": "Monitoring and alerts", "desc": "heartbeat pings to the monitoring service and desktop notifications for a missing heartbeat or a failed or stale backup (PC-142): ckp/core/monitor.py, ckp/adapters/notify.py, `ckp heartbeat` and `ckp watch`"},
   {"id": "devops/policy", "name": "Policy and compliance", "desc": "checks and enforcement of standing policies: the policy-finding tool (tools/file_finding.py) and the protected-label check of the kit (the policy registry, compliance check and Policies tab of PC-91, PC-108, PC-109 join it)"},
-  {"id": "devops/deployment", "name": "Deployment and environments", "desc": "development, test and production environments: the environment-isolation design, the scripted test environment (tools/test_env.py) and its test; the deploy command and the release store live in the ckp package (PC-84; the Environments view is not built)"}
+  {"id": "devops/deployment", "name": "Deployment and environments", "desc": "development, test and production environments: the environment-isolation design, the scripted test environment (tools/test_env.py) and its test; the deploy command and the release store live in the ckp package (PC-84); the Environments view's records and its deploy button, ckp/core/environments.py (PC-142)"}
  ],
  "rules": {"groups": [{"name": "Constitution", "paths": ["docs/constitution.md"]}, {"name": "Instructions", "paths": ["CLAUDE.md", "**/CLAUDE.md", ".claude/**"]}, {"name": "Owner defaults and policies", "paths": ["docs/owner-defaults.md"]}, {"name": "Specification", "paths": ["docs/specs/*.md"]}, {"name": "Decisions (ADRs)", "paths": ["docs/adr/*.md"]}]},
  "assign": [
@@ -76,6 +76,13 @@
   {"path": "dispatcher/core.py", "module": "taskqueue/dispatcher", "basis": "the Dispatcher's firing logic; its test follows it"},
   {"path": "dispatcher/host.py", "module": "taskqueue/dispatcher", "basis": "the host readings (memory pressure, power source) the Dispatcher puts in its heartbeat; its test is tests/dispatcher/test_host.py"},
   {"path": "dispatcher/runtime.py", "module": "taskqueue/dispatcher", "basis": "the container-runtime interface the Dispatcher calls; its test follows it"},
+  {"path": "ckp/core/monitor.py", "module": "devops/monitoring", "basis": "PC-142: heartbeats, their checks and the watch of missing heartbeats and failed or stale backups"},
+  {"path": "ckp/adapters/notify.py", "module": "devops/monitoring", "basis": "PC-142: the heartbeat ping and the desktop notification (the one place that knows the service and the host's notifier)"},
+  {"path": "tests/ckp/core/test_core_monitor.py", "module": "devops/monitoring", "basis": "tests of ckp/core/monitor.py and ckp/adapters/notify.py (PC-142)"},
+  {"path": "ckp/core/environments.py", "module": "devops/deployment", "basis": "PC-142: the Environments view's records and the start of `ckp deploy` from the page"},
+  {"path": "tests/ckp/core/test_core_environments.py", "module": "devops/deployment", "basis": "tests of ckp/core/environments.py and the `ckp env show`, `heartbeat` and `watch` commands (PC-142)"},
+  {"path": "tests/test_environments_view.py", "module": "devops/deployment", "basis": "tests the Environments view's endpoint and the deploy action of the server (PC-142)"},
+  {"path": "tests/ckp/ops/test_ops_release_asset.py", "module": "githubclient", "basis": "tests the release asset of the deploy command: publish, download, --from-release (PC-142)"},
   {"path": "ckp/core/synopsis.py", "module": "taskqueue/dispatcher", "basis": "the session synopsis the Dispatcher copies into a Worker's inbox, marked stale when old (PC-70)"},
   {"path": "tests/ckp/core/test_core_synopsis.py", "module": "taskqueue/dispatcher", "basis": "tests of ckp/core/synopsis.py"},
   {"path": "dispatcher/proxy.py", "module": "taskqueue/dispatcher", "basis": "the host-side reverse proxy the Dispatcher starts; its test is tests/dispatcher/test_proxy.py"},

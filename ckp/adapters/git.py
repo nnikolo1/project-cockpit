@@ -49,6 +49,12 @@ def archive(repo_dir, tag, dest, *, run=_run):
     return dest
 
 
+def archive_file(repo_dir, tag, path, *, run=_run):
+    """`git archive` of the tag as a gzipped tarball at `path` (the release asset); returns `path`."""
+    _git(repo_dir, "archive", "--format=tar.gz", "-o", str(path), tag, run=run)
+    return Path(path)
+
+
 def changed_paths(repo_dir, old_tag, new_tag, *, run=_run):
     """The paths that differ between the tags (`git diff --name-only`); `old_tag` None: every path of `new_tag`."""
     if old_tag is None:

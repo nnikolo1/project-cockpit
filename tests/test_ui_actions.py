@@ -16,7 +16,7 @@ STATE, VIEW = "state-changing", "view-only"
 # state-changing ones that go to the server; the review marks (rev, unrev, revall) never meet a refusal.
 KIND = {
     **{f"server:{a}": STATE for a in ("new", "moddl", "edit", "release", "change", "cancel", "block", "unblock", "accept", "dismiss", "take",
-                                      "complete", "settings", "cardsettings", "compliance")},
+                                      "complete", "settings", "cardsettings", "compliance", "deploy")},
     **{f"form:{a}": STATE for a in ("edit", "release", "change", "block", "settings", "cardsettings", "moddl", "new")},
     "form:alog": VIEW,   # the action log's filter (PC-132): a read of the log
     "form:qlog": VIEW,   # the processing log's task, Worker and limit selectors (PC-120)

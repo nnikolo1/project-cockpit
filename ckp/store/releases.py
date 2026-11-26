@@ -46,6 +46,11 @@ def _link_target(project, name, home):
         return None
 
 
+def current_link(project, home=None):
+    """The path of the `current` link, the folder production's jobs start from (PC-142: dispatcher.launchd render --release)."""
+    return _root(project, home) / "current"
+
+
 def current(project, home=None):
     return _link_target(project, "current", home)
 
