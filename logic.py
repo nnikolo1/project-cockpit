@@ -1304,14 +1304,19 @@ def card_meta(texts, project=None, now=None):
 
 
 # ---------- Dispatcher settings (spec 3c, 3f, 3i, 3j, 4a, 6a) ----------
-SETTING_MINIMUMS = {"runaway_minutes": 30, "idle_minutes": 10, "start_minutes": 1}  # a rule of the page only; the Dispatcher does not enforce them
+# the page's narrower ranges (standing rule of 2026-11-24); the Dispatcher does not enforce them. PC-95: the free-disk floor keeps spec 3n's 10 GiB
+SETTING_MINIMUMS = {"runaway_minutes": 30, "idle_minutes": 10, "start_minutes": 1, "min_free_disk_gib": 10}
+SETTING_MAXIMUMS = {"hold_pressure_level": 4, "max_container_memory_percent": 100}
 SETTING_LABELS = {"enabled": "enabled", "interval_minutes": "interval", "retries": "retries", "workers": "workers",
-                  "runaway_minutes": "runaway limit", "idle_minutes": "no-activity limit", "start_minutes": "no-start limit"}
+                  "runaway_minutes": "runaway limit", "idle_minutes": "no-activity limit", "start_minutes": "no-start limit",
+                  "hold_pressure_level": "memory pressure level", "max_swap_gib": "swap limit", "min_free_memory_gib": "free memory floor",
+                  "min_free_disk_gib": "free disk floor", "max_container_memory_percent": "container memory limit"}
 
 
 def validate_settings(form, defaults, workers_cap):
-    """The seven Dispatcher settings from a form -> a dict of the same keys, or ValueError with a clear message.
-    `defaults` gives the keys and which are switches; whole numbers only, retries from 0, the rest from 1, workers up to the image's cap."""
+    """The Dispatcher settings from a form -> a dict of the same keys, or ValueError with a clear message.
+    `defaults` gives the keys and which are switches; whole numbers only, retries from 0, the rest from 1 (or SETTING_MINIMUMS), up to
+    SETTING_MAXIMUMS, workers up to the image's cap."""
     out = {}
     for k, default in defaults.items():
         v, name = form.get(k), SETTING_LABELS.get(k, k)
@@ -1327,6 +1332,8 @@ def validate_settings(form, defaults, workers_cap):
         low = SETTING_MINIMUMS.get(k, 0 if k == "retries" else 1)
         if v < low:
             raise ValueError(f"{name} must be at least {low}" + (" minutes" if k.endswith("_minutes") else ""))
+        if k in SETTING_MAXIMUMS and v > SETTING_MAXIMUMS[k]:
+            raise ValueError(f"{name} must be at most {SETTING_MAXIMUMS[k]}")
         if k == "workers" and v > workers_cap:
             raise ValueError(f"workers must be at most {workers_cap} (the worker users defined in the image)")
         out[k] = v
@@ -2447,7 +2454,16 @@ def queue_local(state_text, plog_text):
     workers = [dict(worker=u, task=w.get("task_id"), project=w.get("project") if isinstance(w.get("project"), str) else project_key(w.get("task_id")),
                     launched=_when(w.get("launched")), started=bool(w.get("started")))
                for u, w in sorted(ws.items()) if isinstance(w, dict)]
-    return dict(workers=workers, log=log_rows(plog_text))
+    return dict(workers=workers, log=log_rows(plog_text), capacity=capacity(st.get("capacity") if isinstance(st, dict) else None))
+
+
+def capacity(c):
+    """PC-95: the Dispatcher's last decision on the number of Workers from its state file -> dict(effective, ceiling, held, readings, at)
+    (held: the reasons, None when not held; at as `_when` gives it), or None when the state file has none or it is unusable."""
+    if not isinstance(c, dict) or not all(isinstance(c.get(k), int) and not isinstance(c.get(k), bool) for k in ("effective", "ceiling")):
+        return None
+    text = lambda v: v if isinstance(v, str) and v else None   # noqa: E731
+    return dict(effective=c["effective"], ceiling=c["ceiling"], held=text(c.get("held")), readings=text(c.get("readings")), at=_when(c.get("at")))
 
 
 def project_key(task_id):

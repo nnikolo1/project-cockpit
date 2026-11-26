@@ -174,7 +174,7 @@ def test_task_queue_shows_the_last_ci_run_of_main_and_survives_github_failing(mo
 
 def test_task_queue_local_part_without_files_is_empty():
     q = L.queue_local(None, None)
-    assert q == dict(workers=[], log=[])
+    assert q == dict(workers=[], log=[], capacity=None)
     assert L.queue_local("{not json", "x")["workers"] == []
 
 

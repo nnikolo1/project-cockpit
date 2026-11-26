@@ -5,7 +5,8 @@ Deterministic code on the host. launchd starts one firing every 2 minutes (3c):
     python3 -m dispatcher.core --settings FILE --state FILE --area DIR --socket SOCK --usage-file FILE ...
 
 A firing (1) reads the settings, (2) looks after the running Workers (WIP on `started`, results, runaway and
-start checks), (3) starts at most one new Worker unless it must skip (disk, proxy/container/relay, egress),
+start checks), (3) starts at most one new Worker, up to the ceiling (`workers`), when the host readings are under their thresholds
+(PC-95, adaptive number of Workers), unless it must skip (proxy/container/relay, egress),
 (4) writes the heartbeat line. The tasks, the processing log, the container and every probe are injected.
 """
 import argparse
@@ -28,17 +29,23 @@ from dispatcher.host import _cmd, default_probes
 log = logging.getLogger("dispatcher.core")
 
 GIB = 1024 ** 3
-MIN_FREE = 10 * GIB                 # 3n
 DEFAULTS = {                        # 6a: the spec's values, used when the file or a key is missing
     "enabled": True, "interval_minutes": 2, "retries": 0, "workers": 6,
     "runaway_minutes": 40, "idle_minutes": 20, "start_minutes": 1,
+    # PC-95: `workers` is the ceiling; another Worker starts only while every reading is on the right side of its threshold (3n: disk)
+    "hold_pressure_level": 2, "max_swap_gib": 8, "min_free_memory_gib": 2, "min_free_disk_gib": 10, "max_container_memory_percent": 85,
 }
+PRESSURE_LEVELS = {"normal": 1, "warn": 2, "critical": 4}   # the host's memory pressure words (dispatcher.host) as levels
 # PC-67: the projects the queue serves, [{"short", "repo", "repo_dir", "first"?}]; a list, so not one of the Settings page's numeric DEFAULTS.
 # Absent or unusable = no key in the loaded settings = the one project of the command line (today's behaviour).
 
 
 class Skip(Exception):
     """This firing starts nothing; the message is the recorded reason (3k, 3n, 3p, 4s)."""
+
+
+class Held(Skip):
+    """PC-95: a reading is over its threshold, so the number of Workers does not go up; the message names the readings."""
 
 
 # --- settings (6a, 6b) ---------------------------------------------------------------------------------------
@@ -84,6 +91,42 @@ def valid_projects(v):
         if not isinstance(p.get("first", False), bool):
             return False
     return len({p["short"] for p in v}) == len(v)
+
+
+# --- the adaptive number of Workers (PC-95) -------------------------------------------------------------------
+def _gib(n):
+    return f"{n / GIB:.1f}".removesuffix(".0") + " GiB"
+
+
+def admission(r, s):
+    """Whether one more Worker may start: the readings `r` (pressure word; swap, free_memory, free_disk in bytes; container (used, limit)
+    in bytes; a missing or None reading is unknown and never holds) against the thresholds of the settings `s`.
+    -> (allowed, the readings as text, the reasons for holding as text, "" when allowed)."""
+    seen, held = [], []
+    p = r.get("pressure") or "unknown"
+    seen.append(f"pressure {p}")
+    lvl, limit = PRESSURE_LEVELS.get(p), s["hold_pressure_level"]
+    if lvl is not None and lvl >= limit:
+        word = next((k for k, v in PRESSURE_LEVELS.items() if v == limit), f"level {limit}")
+        held.append(f"pressure {p} at or above {word}")
+    for key, name, cap, over in (("swap", "swap", "max_swap_gib", True), ("free_memory", "free memory", "min_free_memory_gib", False),
+                                 ("free_disk", "free disk", "min_free_disk_gib", False)):
+        v = r.get(key)
+        if v is None:
+            seen.append(f"{name} unknown")
+            continue
+        seen.append(f"{name} {_gib(v)}")
+        if (v > s[cap] * GIB) if over else (v < s[cap] * GIB):
+            held.append(f"{name} {_gib(v)} {'above' if over else 'below'} {s[cap]} GiB")
+    c = r.get("container")
+    if c and c[1]:
+        pct = 100 * c[0] / c[1]
+        seen.append(f"container {_gib(c[0])} of {_gib(c[1])}")
+        if pct > s["max_container_memory_percent"]:
+            held.append(f"container memory {pct:.0f} % of its limit above {s['max_container_memory_percent']} %")
+    else:
+        seen.append("container memory unknown")
+    return not held, ", ".join(seen), "; ".join(held)
 
 
 # --- ranking (3a) --------------------------------------------------------------------------------------------
@@ -150,6 +193,7 @@ class Probes:
     stop_proxy: object = None           # (pid) -> bool, True when the process is gone and the socket no longer listens (4d)
     commits_ahead: object = None        # (repo, task_id) -> int, commits of worker/<task-id> beyond main (3e)
     heartbeat_parts: object = None      # () -> dict of the host and container readings (3g)
+    resources: object = None            # () -> {"pressure", "swap", "free_memory", "container"} for `admission` (PC-95); None = all unknown
 
 
 @dataclass
@@ -254,9 +298,15 @@ class Dispatcher:
 
     # -- starting a Worker (3a, 3c, 3k, 3n, 3p, 4s) --
     def start(self, st):
-        """Starts at most one Worker; returns what the firing did. Raises Skip with the reason."""
-        if self.probes.free_disk() < MIN_FREE:
-            raise Skip(f"free disk below 10 GiB ({self.probes.free_disk() / GIB:.1f} GiB)")
+        """Starts at most one Worker, up to the ceiling, when `admission` allows it; returns what the firing did. Raises Skip with
+        the reason (Held when a reading is over its threshold). A reading never stops a running Worker (PC-95)."""
+        n = rt.clamp_workers(self.runtime.cfg, self.settings["workers"])
+        r = {**(self.probes.resources() if self.probes.resources else {}), "free_disk": self.probes.free_disk()}
+        ok, seen, why = admission(r, self.settings)
+        st["capacity"] = {"ceiling": n, "effective": n if ok else min(len(st["workers"]), n), "readings": seen, "held": why or None,
+                          "at": self.probes.now()}
+        if not ok:
+            raise Held(why)
         try:
             self.probes.ensure_proxy()
             self.runtime.ensure_container()
@@ -265,7 +315,6 @@ class Dispatcher:
             raise Skip(f"container call over its time limit: {e}")
         except (rt.ContainerError, Skip) as e:
             raise Skip(f"cannot start proxy, container or relay: {e}")
-        n = rt.clamp_workers(self.runtime.cfg, self.settings["workers"])
         free = [f"worker{i}" for i in range(1, n + 1) if f"worker{i}" not in st["workers"]]
         if not free:
             return "nothing to do (all Workers busy)"
@@ -305,7 +354,7 @@ class Dispatcher:
             "started": False, **kw}
         self.plog.event(task.id, folder, "launched", worker=user)
         log.info("started %s for task %s (pid %s)", user, task.id, proc.pid)
-        return f"started {user} on {task.id}"
+        return f"started {user} on {task.id}: {seen}"
 
     # -- the proxy's lifetime (4d) --
     def manage_proxy(self, st):
@@ -362,6 +411,9 @@ class Dispatcher:
             else:
                 try:
                     did = self.start(st)
+                except Held as e:
+                    log.warning("no Worker started: held: %s", e)
+                    did = f"held: {e}"
                 except Skip as e:
                     log.warning("firing skipped: %s", e)
                     did = f"skipped: {e}"
@@ -401,6 +453,12 @@ def host_readings(volume, runtime, host=None):
         "data_size": f"{int(size.split()[0]) / 1024:.0f} MiB" if size else "unknown",
         "container": _stats_line(runtime),
     }
+
+
+def resource_readings(runtime, host=None):
+    """PC-95: the readings `admission` weighs besides the free disk: memory pressure, swap in use, free memory, the container's memory."""
+    host = host or default_probes()
+    return {"pressure": host.memory_pressure(), "swap": host.swap_used(), "free_memory": host.free_memory(), "container": runtime.memory()}
 
 
 def _stats_line(runtime):
@@ -578,7 +636,8 @@ def main(argv=None):
         start_proxy=lambda: start_proxy(a.socket, a.token_file, a.usage_file, cfg.image_workers),
         stop_proxy=lambda pid: stop_proxy(pid, a.socket),
         commits_ahead=commits_ahead,
-        heartbeat_parts=lambda: host_readings(a.area, runtime))
+        heartbeat_parts=lambda: host_readings(a.area, runtime),
+        resources=lambda: resource_readings(runtime))
     tasks, projects, first = build_tasks(s, a.repo, a.repo_dir, make_gh(a.gh, a.call_timeout), make_git(a.git, a.call_timeout))
     project_of = None
     if projects:

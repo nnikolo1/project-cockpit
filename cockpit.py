@@ -712,7 +712,7 @@ def settings_path(p):
 def get_settings(p):
     """Current values (the defaults when the file is missing) with the cap on workers and the page's minimums."""
     f = settings_path(p)
-    return dict(values=load_settings(f) if f.exists() else dict(SETTING_DEFAULTS), defaults=SETTING_DEFAULTS, minimums=L.SETTING_MINIMUMS,
+    return dict(values=load_settings(f) if f.exists() else dict(SETTING_DEFAULTS), defaults=SETTING_DEFAULTS, minimums=L.SETTING_MINIMUMS, maximums=L.SETTING_MAXIMUMS,
                 workers_cap=RuntimeConfig.image_workers, steering=CFG["steer"])
 
 

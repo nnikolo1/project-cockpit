@@ -819,6 +819,11 @@ function block(name,fn,page){
     const c='<div class="card" role="alert" data-block-error="'+esc(name)+'"><b class="warnline">This block could not be drawn: '+esc(String(e&&e.message||e))+'</b> <span class="muted">('+esc(name)+')</span></div>';
     return page?'<div class="page">'+c+'</div>':c;}
 }
+/* PC-95: the Dispatcher's last decision on the number of Workers: the effective number next to the ceiling, and why it is held. */
+function capLine(c){
+  if(!c)return '<p class="muted" style="font-size:12px;margin:4px 0 0">Effective Workers: not yet decided by the Dispatcher.</p>';
+  return '<p id="qcap" style="font-size:12px;margin:4px 0 0"'+(c.readings?' title="Readings: '+esc(c.readings)+'"':'')+'>Effective Workers: <b>'+c.effective+'</b> of ceiling '+c.ceiling
+   +(c.held?' · <span style="color:var(--warn-ink)">held: '+esc(c.held)+'</span>':' · readings allow more')+(c.at?' <span class="muted">('+tm(c.at)+')</span>':'')+'</p>';}
 /* safe-block:end */
 /* The state of main (the newer of the hosted run and the local merge gate run, marked by its source): red is a warning (until the daily job files it as a finding, PC-91). */
 function ciLine(c){
@@ -833,7 +838,7 @@ function vQueueLocal(){
   if(!L)return '<div class="card"><h2>Being processed now</h2><span class="muted">The Dispatcher files could not be read.</span>'+ciLine(CI)+'</div>';
   return '<div class="card"><div class="row" style="gap:10px"><h2>Being processed now</h2><span class="muted" style="font-size:13px" title="Read from the Dispatcher\'s files on every page load; the task table below is GitHub data'+(D?' from '+tmTxt(D.source.fetchedAt):'')+', with newer Dispatcher events marked live">live, '+tmTxt(L.asOf)+'</span></div>'+(L.workers.length?L.workers.map(w=>{const t=nf(w.task);return '<div class="row" style="gap:10px;margin-top:8px"><b class="mono">'+esc(w.worker)+'</b>'+(w.project?'<span class="chip" title="Project">'+esc(w.project)+'</span>':'')+'<b class="mono">'+esc(w.task||'?')+'</b>'+(t?'<button class="linkbtn" data-act="open" data-k="'+t.key+'">'+esc(t.title)+'</button>':'')+'<span class="muted">launched '+tm(w.launched)+(w.started?'':' · starting')+'</span></div>';}).join(''):'<p class="muted" style="margin:8px 0 0">No Worker is running now.</p>')
    +'<p class="muted" style="font-size:12px;margin:10px 0 0">From the Dispatcher: '+(L.settings.values.enabled?'on':'off')+', '+L.settings.values.workers+' Worker'+(L.settings.values.workers===1?'':'s')+' at most, every '+L.settings.values.interval_minutes+' min (settings in the Settings tab).</p>'
-   +bkLine(L.backup)+ciLine(CI)
+   +capLine(L.capacity)+bkLine(L.backup)+ciLine(CI)
    +(L.log.length?'<details id="qlog" style="margin-top:8px"'+(UI.qlogOpen?' open':'')+'><summary class="muted">Processing log</summary>'+block('Processing log',()=>vQlog(L.log))+'</details>':'')+'</div>';
 }
 /* The processing log as a table (PC-120): the server gives the rows (logic.log_rows: events, sleeps, heartbeats with idle runs condensed,
@@ -921,7 +926,10 @@ function vTimeline(){
 }
 
 const SETROWS=[['enabled','Dispatcher on','Starts a Worker at each firing while on.'],['interval_minutes','Interval (minutes)','How often launchd starts a firing.'],
-  ['retries','Retries','How many times a failed task is tried again (0 = never).'],['workers','Workers','How many run at once.'],
+  ['retries','Retries','How many times a failed task is tried again (0 = never).'],['workers','Workers (ceiling)','How many run at once at most; a firing starts another only while the readings below allow it, and a reading never stops a running Worker.'],
+  ['hold_pressure_level','Hold at memory pressure level','No new Worker while the host\'s memory pressure is at this level or above (1 normal, 2 warn, 4 critical).'],
+  ['max_swap_gib','Swap limit (GiB)','No new Worker while the host has more swap in use.'],['min_free_memory_gib','Free memory floor (GiB)','No new Worker while the host has less free memory.'],
+  ['min_free_disk_gib','Free disk floor (GiB)','No new Worker while the data volume has less free disk.'],['max_container_memory_percent','Container memory limit (%)','No new Worker while the Workers\' container uses more of its memory limit.'],
   ['runaway_minutes','Runaway limit (minutes)','A Worker running longer is killed.'],['idle_minutes','No-activity limit (minutes)','A Worker with no record for this long is killed.'],
   ['start_minutes','No-start limit (minutes)','A Worker that has not started within this time is killed.']];
 function qThForm(ro){
@@ -984,11 +992,11 @@ function vSettings(){
   const cards=CSET?cardSettingsForm():'<div class="card"><span class="muted">Module card settings could not be loaded.</span></div>';
   if(sec==='cards')return head+cards+'</div>';
   if(!SET)return head+dh+'<div class="card"><span class="muted">Settings could not be loaded.</span></div></div>';
-  const v=SET.values,ro=!ST(),mn=SET.minimums;
-  const note=k=>k==='workers'?' Most '+SET.workers_cap+', the worker users in the image.':(mn[k]?' At least '+mn[k]+'.':'');
+  const v=SET.values,ro=!ST(),mn=SET.minimums,mx=Object.assign({workers:SET.workers_cap},SET.maximums||{});
+  const note=k=>k==='workers'?' Most '+SET.workers_cap+', the worker users in the image.':(mn[k]?' At least '+mn[k]+'.':'')+(mx[k]?' Most '+mx[k]+'.':'');
   return head+dh+'<form class="card" data-form="settings" style="display:flex;flex-direction:column;gap:12px">'+SETROWS.map(r=>'<div class="field"><label for="s_'+r[0]+'">'+r[1]+'</label>'
    +(r[0]==='enabled'?'<input id="s_enabled" name="enabled" type="checkbox"'+(v.enabled?' checked':'')+(ro?' disabled':'')+'>'
-     :'<input id="s_'+r[0]+'" name="'+r[0]+'" type="number" step="1" min="'+(mn[r[0]]!==undefined?mn[r[0]]:(r[0]==='retries'?0:1))+'"'+(r[0]==='workers'?' max="'+SET.workers_cap+'"':'')+' value="'+esc(String(v[r[0]]))+'"'+(ro?' disabled':'')+'>')
+     :'<input id="s_'+r[0]+'" name="'+r[0]+'" type="number" step="1" min="'+(mn[r[0]]!==undefined?mn[r[0]]:(r[0]==='retries'?0:1))+'"'+(mx[r[0]]!==undefined?' max="'+mx[r[0]]+'"':'')+' value="'+esc(String(v[r[0]]))+'"'+(ro?' disabled':'')+'>')
    +'<span class="muted" style="font-size:12px">'+r[2]+note(r[0])+'</span></div>').join('')
    +(ro?'<span class="muted">'+(OFF?'This is an offline copy from a backup':'This Cockpit was started with --read-only')+': the values cannot be changed here.</span>':'<div><button class="btn primary">Save</button></div>')+'</form></div>';
 }
