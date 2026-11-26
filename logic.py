@@ -2489,6 +2489,52 @@ def project_key(task_id):
     return m.group(1) if m else ""
 
 
+def listed_projects(values):
+    """PC-138: the projects the one queue serves, from the Dispatcher settings' `projects` list, the `first` ones leading (in listed order),
+    then the others: [{short, repo, first}]. Empty unless more than one usable project is listed (the single-project view stays as it is)."""
+    ps = [p for p in (values or {}).get("projects") or [] if isinstance(p, dict) and isinstance(p.get("short"), str) and isinstance(p.get("repo"), str)]
+    if len(ps) < 2:
+        return []
+    out = [dict(short=p["short"], repo=p["repo"], first=p.get("first") is True) for p in ps]
+    return [p for p in out if p["first"]] + [p for p in out if not p["first"]]
+
+
+def _due_chain(t, by_key):
+    """The task's own deadline, else its parent chain's (the Dispatcher's rank input, dispatcher.tasks._rank_inputs)."""
+    seen = set()
+    while t and t["key"] not in seen:
+        seen.add(t["key"])
+        if t.get("deadline"):
+            return t["deadline"]
+        t = by_key.get(t.get("parent"))
+    return None
+
+
+def queue_all(parts):
+    """PC-138: the tasks of every listed project in one list, each tagged with its `project`, and `rank` (1, 2, ...) on the tasks the
+    Dispatcher would pick (`pick`), ranked as it ranks them (dispatcher.core.choose_task): the `first` projects' tasks before all others, then
+    priority (none counts as P2), deadline (own, else the parent chain's), what it unblocks, must before nice; ties by listed order, number.
+    parts: [{short, first, tasks}] in listed order, each from its own project's state."""
+    keyed, out = [], []
+    for i, part in enumerate(parts):
+        ts = part.get("tasks") or []
+        by_key = {t["key"]: t for t in ts}
+        unblocks = {}
+        for t in ts:
+            if t["stage"] in ("embryo", "released", "wip"):
+                for b in t.get("blockedBy") or []:
+                    unblocks[b] = unblocks.get(b, 0) + 1
+        for t in ts:
+            row = dict(t, project=part["short"], rank=None)
+            out.append(row)
+            if t.get("pick"):
+                keyed.append(((not part.get("first"), t.get("prio") or 2, _due_chain(t, by_key) or "9999-99-99", -unblocks.get(t["key"], 0),
+                               t.get("cls") != "must", i, t.get("number") or 0), row))
+    for n, (_, row) in enumerate(sorted(keyed, key=lambda kr: kr[0]), 1):
+        row["rank"] = n
+    return out
+
+
 # ---------- the processing log as a table (PC-120) ----------
 LOG_KINDS = ("launched", "wip", "unmerged", "failed", "merged")   # the task states a log record names; besides them: sleep, heartbeat, other
 LOG_LIMITS = (15, 50, 200)                 # the page's row limits; the server sends up to the largest of each class (events, heartbeats)
