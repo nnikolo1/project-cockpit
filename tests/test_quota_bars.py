@@ -18,7 +18,7 @@ PAGE = (ROOT / "web" / "index.html").read_text()
 node = pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
 QUOTA_TITLE = "Vendor quota used per day (highest reading)"
 LEGEND = "share of the quota used (0 to 100 %)"
-FILL = re.compile(r'<span class="pbar"[^>]*><i style="width:([0-9.e+-]+)%"></i>')
+FILL = re.compile(r'<span class="pbar(?: rel)?"[^>]*><i style="width:([0-9.e+-]+)%"></i>')
 
 
 def run(js_tail):
@@ -92,7 +92,7 @@ def test_usage_tables_use_the_same_bar():
 
 def test_one_shared_helper_and_no_old_bars_left():
     tables = PAGE[PAGE.index("function usageTable("):PAGE.index("function latestCard(")]
-    assert tables.count("pctBar(") == 2 and "pctScale()" in tables and LEGEND in tables
+    assert tables.count("pctBar(") == 3 and "pctScale()" in tables and LEGEND in tables
     assert 'class="bar"' not in tables and "width:120px" not in tables
     helper = PAGE[PAGE.index("function pctWidth("):PAGE.index("function usageTable(")]
     assert "Math.min(100" in helper and "min-width" not in helper and "Math.max(" not in helper  # no minimum width

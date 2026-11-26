@@ -121,6 +121,7 @@
   {"path": "tests/test_usage_rows.py", "module": "githubclient", "basis": "tests that the Token Usage period tables list only periods with usage"},
   {"path": "tests/test_period_tables_page.py", "module": "githubclient", "basis": "tests the order and the empty-period rule of the Token Usage period tables in the page"},
   {"path": "tests/test_quota_bars.py", "module": "githubclient", "basis": "tests the shared percentage bar of the Token Usage quota and period tables in the page"},
+  {"path": "tests/test_usage_bar_meaning.py", "module": "githubclient", "basis": "tests that the Token Usage period tables label their bar and show the vendor quota reading where there is one"},
   {"path": "tests/test_peak_averages.py", "module": "githubclient", "basis": "tests the 5-hour peak average and weekly peak of the Interactive sessions history card (PC-110)"},
   {"path": "tests/test_module_size_order.py", "module": "githubclient", "basis": "tests the order of sub-modules among their siblings by size (PC-90, logic.order_modules)"},
   {"path": "tests/test_usage_order.py", "module": "githubclient", "basis": "tests the order of the Token Usage cards (the one list USAGE_ORDER in the page)"},
