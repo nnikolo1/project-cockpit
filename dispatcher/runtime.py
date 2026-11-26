@@ -180,6 +180,12 @@ class Runtime:
             return None
         return out if rc == 0 else None
 
+    def memory(self):
+        """(bytes used, bytes limit) of the container from its stats (PC-95), or None if the tool cannot report them."""
+        raw = self.stats() or ""
+        m = [re.search(r'"%s"\s*:\s*(\d+)' % k, raw) for k in ("memoryUsageBytes", "memoryLimitBytes")]
+        return (int(m[0].group(1)), int(m[1].group(1))) if all(m) and int(m[1].group(1)) else None
+
     def build_image(self, context):
         """Build the image; `context` has the repository layout (dispatcher/image/Containerfile, relay.py, note.py, ...) plus the `claude` binary at its root."""
         rc, out = self.call("build", "--dns", self.cfg.build_dns, "-t", self.cfg.image, "-f",
