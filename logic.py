@@ -1677,7 +1677,9 @@ def transcript_report(text, quota=None, aggregate=None):
     aggregate: the text of stats-cache-usage.jsonl (its contract): its token totals per day count in a period's `total` and `aggregate`
     only (no split, no messages), never in sources or sessions; a day with per-message records ignores them (the exact data wins).
     aggregate_days: {day: tokens} of the aggregates used. Only records of kind interactive (record_kind) count in periods, sources and
-    sessions; headless: the graded rows of the headless records alike (no aggregates), [] when there are none."""
+    sessions; headless: the graded rows of the headless records alike (no aggregates), [] when there are none.
+    transcript_days: {day: tokens} of the interactive records of every day (the sums of the history's day rows, not cut at its range);
+    transcript_span: [first, last] day of any record, the days the transcripts cover (None without records)."""
     recs, agg = _json_lines(text), _json_lines(aggregate)
     if recs is None and agg is None:
         return None
@@ -1686,7 +1688,11 @@ def transcript_report(text, quota=None, aggregate=None):
         t = _epoch(rec.get("ts"))
         if t is not None:
             msgs.append((t, str(rec.get("source") or "?"), str(rec.get("session") or "?"), _message_counts(rec), record_kind(rec) == "headless"))
-    exact = {dt.datetime.fromtimestamp(m[0], dt.timezone.utc).date().isoformat() for m in msgs}
+    day = lambda t: dt.datetime.fromtimestamp(t, dt.timezone.utc).date().isoformat()
+    exact, tdays = {day(m[0]) for m in msgs}, {}
+    for m in msgs:
+        if not m[4]:
+            tdays[day(m[0])] = tdays.get(day(m[0]), 0) + m[3]["total"]
     days = {}
     for rec in agg or []:
         d, n = rec.get("day"), rec.get("tokens")
@@ -1727,7 +1733,34 @@ def transcript_report(text, quota=None, aggregate=None):
     top = sorted(sessions.items(), key=lambda kv: (-kv[1]["total"], kv[0]))[:SESSIONS_SHOWN]
     return dict(periods=_history(rows.values(), [m[0] for m in msgs if not m[4]] + [_epoch(f"{d}T00:00:00+00:00") for d in days]),
                 headless=_history(hrows.values(), [m[0] for m in msgs if m[4]]), sources=[dict(key=k, **v) for k, v in sorted(sources.items(), key=lambda kv: (-kv[1]["total"], kv[0]))],
-                sessions=[dict(v, key=k[1]) for k, v in top], aggregate_days=dict(sorted(days.items())))
+                sessions=[dict(v, key=k[1]) for k, v in top], aggregate_days=dict(sorted(days.items())),
+                transcript_days=dict(sorted(tdays.items())), transcript_span=[min(exact), max(exact)] if exact else None)
+
+
+def heat_days(proxy_days, sessions):
+    """The values of the heatmap "Tokens per day" (PC-106): {day: dict(total, sources={source: tokens})} from the proxy file's day rows
+    (`days` of usage_report), the interactive transcripts' day totals and the statistics cache's daily aggregates (transcript_report),
+    added up. Every day of the transcripts' span counts as covered (zero when no interactive record); a day no source covers is absent:
+    the page shows it as "no data", not as zero."""
+    s, out = sessions or {}, {}
+
+    def add(d, src, n):
+        e = out.setdefault(d, dict(total=0, sources={}))
+        e["sources"][src] = e["sources"].get(src, 0) + n
+        e["total"] += n
+    for r in proxy_days or []:
+        add(r["key"], "proxy", r["total"])
+    span = s.get("transcript_span")
+    if span:
+        d, last = dt.date.fromisoformat(span[0]), dt.date.fromisoformat(span[1])
+        while d <= last:
+            add(d.isoformat(), "transcripts", 0)
+            d += dt.timedelta(days=1)
+    for d, n in (s.get("transcript_days") or {}).items():
+        add(d, "transcripts", n)
+    for d, n in (s.get("aggregate_days") or {}).items():
+        add(d, "statistics cache", n)
+    return dict(sorted(out.items()))
 
 
 def _history(rows, times):

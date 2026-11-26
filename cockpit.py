@@ -785,6 +785,7 @@ def get_usage(p, data_dir=None, projects=None, today=None):
     rep = _usage_one(p, data_dir)
     d = (data_dir or DATA_DIR) / (p.get("name") or p["repo"].split("/")[-1])
     rep["sessions"] = L.transcript_report(_read_text(d / TRANSCRIPT_FILE), rep["quota"], _read_text(d / AGGREGATE_FILE))
+    rep["heatmap"] = L.heat_days(rep.get("days"), rep["sessions"])
     try:  # the plan start and the weak threshold live with the card settings (Settings > Module cards > Quota estimates)
         qs = json.loads(_read_text(d / "cockpit-settings.json") or "{}")
     except ValueError:

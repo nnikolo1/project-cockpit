@@ -105,6 +105,7 @@ tr.blocked{background:var(--danger-tint)}tr.blocked td:first-child{box-shadow:in
 .heat .c.l1{background:var(--h1)}.heat .c.l2{background:var(--h2)}.heat .c.l3{background:var(--h3)}.heat .c.l4{background:var(--h4)}
 .heat .lg{display:flex;gap:3px;align-items:center;font-size:11px;color:var(--muted);margin-top:8px}
 .heat .lg .c{display:inline-block}
+.heat .c.nd{background:none;box-shadow:inset 0 0 0 1px var(--line)}
 .feed{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:10px}
 .feed .e{display:grid;grid-template-columns:96px 84px 104px 1fr;gap:12px;padding:11px 14px;border-bottom:1px solid var(--line);align-items:baseline}
 .feed .e:last-child{border-bottom:0}
@@ -886,9 +887,10 @@ function vBacklog(){
 }
 
 /* Calendar heatmap (GitHub style): 52 weeks ending TODAY, weeks as columns, Monday first. vals {YYYY-MM-DD: n}; tip(day,n) -> hover text.
-   Shades 0..4 scale to the largest day shown (same rule as shade_level in logic.py). */
+   Shades 0..4 scale to the largest day shown (same rule as shade_level in logic.py). nodata: a day absent from vals is "no data" (an
+   outlined cell, tip(day,null)), not zero (PC-106). */
 function shade(n,mx){return !n||n<=0||!mx?0:Math.min(4,Math.ceil(4*n/mx));}
-function heatmap(vals,tip,legend){
+function heatmap(vals,tip,legend,nodata){
   const U=s=>{const x=s.split('-');return Date.UTC(+x[0],+x[1]-1,+x[2]);},iso=t=>new Date(t).toISOString().slice(0,10),DAY=864e5;
   const t0=U(TODAY),mon=t0-((new Date(t0).getUTCDay()+6)%7)*DAY,start=mon-51*7*DAY;
   let mx=0;for(let t=start;t<=t0;t+=DAY)mx=Math.max(mx,vals[iso(t)]||0);
@@ -898,9 +900,10 @@ function heatmap(vals,tip,legend){
     const m=new Date(start+w*7*DAY).getUTCMonth();months+='<span>'+(m!==prev?MN[m]:'')+'</span>';prev=m;
     for(let r=0;r<7;r++){const t=start+(w*7+r)*DAY;
       if(t>t0){cells+='<i></i>';continue;}
-      const d=iso(t),n=vals[d]||0;cells+='<i class="c l'+shade(n,mx)+'" title="'+esc(tip(d,n))+'"></i>';}
+      const d=iso(t);if(nodata&&!(d in vals)){cells+='<i class="c nd" title="'+esc(tip(d,null))+'"></i>';continue;}
+      const n=vals[d]||0;cells+='<i class="c l'+shade(n,mx)+'" title="'+esc(tip(d,n))+'"></i>';}
   }
-  return '<div class="heat"><div class="m">'+months+'</div><div class="g">'+cells+'</div><div class="lg">Less '+[0,1,2,3,4].map(i=>'<i class="c l'+i+'"></i>').join('')+' More'+(legend?' &nbsp; '+legend:'')+'</div></div>';
+  return '<div class="heat"><div class="m">'+months+'</div><div class="g">'+cells+'</div><div class="lg">Less '+[0,1,2,3,4].map(i=>'<i class="c l'+i+'"></i>').join('')+' More'+(nodata?' &nbsp; <i class="c nd"></i> no data':'')+(legend?' &nbsp; '+legend:'')+'</div></div>';
 }
 function vTimeline(){
   const up=D.tasks.filter(t=>isOpen(t)&&eff(D,t).d).sort((a,b)=>eff(D,a).d.localeCompare(eff(D,b).d)||a.key.localeCompare(b.key)).slice(0,8);
@@ -1104,8 +1107,8 @@ function vUsage(){
   if(!USE)return head+'<div class="card"><span class="muted">no data</span></div></div>';
   const nf=x=>x==null?'no data':x.toLocaleString('en-US');
   const tk=USE.tasks;
-  const dv={},fh={},ag=(USE.sessions&&USE.sessions.aggregate_days)||{};(USE.days||[]).forEach(r=>{dv[r.key]=r.total;});Object.keys(ag).forEach(d=>{dv[d]=(dv[d]||0)+ag[d];});((USE.quota&&USE.quota.days)||[]).forEach(r=>{if(r.five_hour!=null)fh[r.key]=r.five_hour;});
-  const hm='<div class="card"><h2>Tokens per day</h2>'+heatmap(dv,(d,n)=>nf(n)+' tokens on '+d+(ag[d]!=null?'\nincl. '+nf(ag[d])+' daily aggregate, no split':'')+(fh[d]!=null?'\nhighest 5-hour reading '+fh[d]+' %':''),'Sum of the four token counts per day (UTC), as in the per-day table below; the proxy file has usage on '+((USE.days||[]).length)+' of the last 90 days. Days before the interactive transcripts add the statistics cache’s daily total (daily aggregate, no split).')+'</div>';
+  const HD=USE.heatmap||{},dv={},fh={},SRC=k=>k==='statistics cache'?'statistics cache (daily aggregate, no split)':k;Object.keys(HD).forEach(d=>{dv[d]=HD[d].total;});((USE.quota&&USE.quota.days)||[]).forEach(r=>{if(r.five_hour!=null)fh[r.key]=r.five_hour;});
+  const hm='<div class="card"><h2>Tokens per day</h2>'+heatmap(dv,(d,n)=>(n==null?'no data on '+d+': no source covers this day':nf(n)+' tokens on '+d+Object.keys(HD[d].sources).map(k=>'\n'+SRC(k)+': '+nf(HD[d].sources[k])).join(''))+(fh[d]!=null?'\nhighest 5-hour reading '+fh[d]+' %':''),'Sum of the four token counts per day (UTC) of the proxy file (Workers), the interactive transcripts (as the day rows of the sessions history) and, for days without transcripts, the statistics cache’s daily total (no split); the hover text names the sources of a day. An outlined cell is a day no source covers (no data), unlike a zero day.',true)+'</div>';
   const C={windows:()=>usageTable('Usage per 5-hour window',USE.windows&&USE.windows.map(r=>Object.assign({},r,{key:r.key+' ('+r.kind+')'})),NOUSE),heatmap:()=>hm,
    readings:()=>latestCard(USE.quota),estimates:()=>estimateCard(USE.estimates),sessions:()=>sessionCards(USE.sessions),days:()=>usageTable('Usage per day',USE.days,NOUSE),quota:()=>quotaCard(USE.quota),
    projects:()=>projectsCard(),fit:()=>fitCard(USE.reconcile),
