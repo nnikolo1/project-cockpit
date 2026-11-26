@@ -1,4 +1,5 @@
 import plistlib
+import tempfile
 
 import pytest
 
@@ -118,7 +119,8 @@ def test_render_with_a_projects_file_writes_the_viewer_and_the_watch_from_the_re
     """PC-142: every service definition of production, the viewer included, comes from the renderer and starts from `current`."""
     monkeypatch.setenv("CP_HOME", str(tmp_path / "home"))
     out = tmp_path / "o"
-    L.render(["--queue", "--data-root", str(tmp_path / "q"), "--token-file", str(tmp_path / "tok"), "--release", "cockpit", "--out", str(out),
+    q = tempfile.mkdtemp(prefix="ckp-", dir="/tmp")   # short: the proxy socket path below it must stay under 104 bytes, which pytest's macOS temp folder exceeds
+    L.render(["--queue", "--data-root", q, "--token-file", str(tmp_path / "tok"), "--release", "cockpit", "--out", str(out),
               "--projects-file", str(tmp_path / "projects.json"), "--viewer-token-file", str(tmp_path / "vt"), "--viewer-port", "8800"])
     link = str(tmp_path / "home" / "releases" / "cockpit" / "current")
     got = {f.name: plistlib.loads(f.read_bytes()) for f in out.glob("*.plist")}
