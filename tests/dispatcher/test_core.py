@@ -207,7 +207,7 @@ def test_blocked_and_active_tasks_are_skipped():
 # --- starting ---
 def test_starts_one_worker_per_firing(tmp_path):
     w = World(tmp_path, [T("x-1"), T("x-2", priority=3)])
-    assert w.fire() == "started worker1 on x-1"
+    assert w.fire().startswith("started worker1 on x-1: ")
     assert w.runtime.launched == [("worker1", "x-1")]
     assert w.runtime.prepared[0][2].startswith("# title")
     assert w.worker()["launched"] == NOW and ("x-1", "launched") in w.plog.events and w.plog.workers == [("x-1", "worker1")]
@@ -219,7 +219,7 @@ def test_second_firing_uses_next_worker_and_task(tmp_path):
     w.fire()
     w.alive_pids = {4242}
     w.now += 30
-    assert w.fire() == "started worker2 on x-2"
+    assert w.fire().startswith("started worker2 on x-2: ")
 
 
 def test_no_free_worker_and_no_task(tmp_path):
@@ -264,8 +264,8 @@ def test_interval_bad_stored_time_never_skips(tmp_path):
 def test_skip_low_disk(tmp_path):
     w = World(tmp_path, [T("x-1")])
     w.free = 5 * core.GIB
-    assert w.fire().startswith("skipped: free disk below 10 GiB")
-    assert w.runtime.launched == [] and "skipped" in w.plog.beats[0]
+    assert w.fire() == "held: free disk 5 GiB below 10 GiB"
+    assert w.runtime.launched == [] and "held: free disk 5 GiB below 10 GiB" in w.plog.beats[0]
 
 
 def test_skip_when_container_cannot_start_or_times_out(tmp_path):
@@ -312,7 +312,7 @@ def test_task_with_an_existing_folder_is_not_selected_again(tmp_path, caplog):
     (tmp_path / "x-1").mkdir()
     w = World(tmp_path, [T("x-1", priority=1), T("x-2")])
     with caplog.at_level("INFO", logger="dispatcher.core"):
-        assert w.fire() == "started worker1 on x-2"
+        assert w.fire().startswith("started worker1 on x-2: ")
     assert "x-1 skipped" in caplog.text
     assert w.tasks.states == [] and w.plog.failures == []
 

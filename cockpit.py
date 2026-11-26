@@ -25,6 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlparse
 
 import logic as L
+from ckp.core import environments as core_environments
 from ckp.store import io as store_io, layout as store_layout
 from ckp.store.cache import DiskCache
 from dispatcher.core import DEFAULTS as SETTING_DEFAULTS, load_settings
@@ -698,30 +699,70 @@ def execute(ops, run=run_gh):
     return outs
 
 
+def queue_files(p):
+    """The Task Queue's files (settings, state, processing log), always from the layout module (dispatcher/layout.py, PC-138): the one
+    queue's data root once it holds a settings file (migrated, deployment.md 5a; the same queue and settings for every project, spec 3c, 6a),
+    else the project's own folder (before)."""
+    shared = store_layout.queue(QUEUE_ROOT)
+    return shared if shared["settings"].exists() else store_layout.per_project(DATA_DIR, p.get("name") or p["repo"].split("/")[-1])
+
+
 def queue_dir(p):
-    """The folder of the Task Queue's files (settings, state, processing log): the one queue's data root once it holds a settings file
-    (migrated, deployment.md 5a; the same queue and settings for every project, spec 3c, 6a), else the project's own folder (before)."""
-    return QUEUE_ROOT if (QUEUE_ROOT / "dispatcher-settings.json").exists() else DATA_DIR / (p.get("name") or p["repo"].split("/")[-1])
+    """The folder of the Task Queue's files (`queue_files`)."""
+    return queue_files(p)["dir"]
 
 
 def settings_path(p):
     """The Dispatcher's settings file (spec 6a): dispatcher-settings.json in `queue_dir`."""
-    return queue_dir(p) / "dispatcher-settings.json"
+    return queue_files(p)["settings"]
 
 
 def get_settings(p):
     """Current values (the defaults when the file is missing) with the cap on workers and the page's minimums."""
     f = settings_path(p)
-    return dict(values=load_settings(f) if f.exists() else dict(SETTING_DEFAULTS), defaults=SETTING_DEFAULTS, minimums=L.SETTING_MINIMUMS,
+    return dict(values=load_settings(f) if f.exists() else dict(SETTING_DEFAULTS), defaults=SETTING_DEFAULTS, minimums=L.SETTING_MINIMUMS, maximums=L.SETTING_MAXIMUMS,
                 workers_cap=RuntimeConfig.image_workers, steering=CFG["steer"])
 
 
 def get_queue(p):
     """The local part of the Task Queue tab (no GitHub): running Workers from the Dispatcher's state file, the processing log's newest lines,
     the Dispatcher settings and the last daily backup's status record (None when there is none). The token and quota files are read for the Token Usage tab (`/api/usage`), also local."""
-    d, o = queue_dir(p), DATA_DIR / (p.get("name") or p["repo"].split("/")[-1])   # the backup and compliance records stay per project
-    return dict(L.queue_local(_read_text(d / "dispatcher-state.json"), _read_text(d / PLOG_FILE)), settings=get_settings(p), asOf=time.time(),
+    f, o = queue_files(p), DATA_DIR / (p.get("name") or p["repo"].split("/")[-1])   # the backup and compliance records stay per project
+    settings = get_settings(p)
+    return dict(L.queue_local(_read_text(f["state"]), _read_text(f["plog"])), settings=settings, asOf=time.time(),
+                projects=L.listed_projects(settings["values"]),   # PC-138: empty with one project, so the single-project view stays as it is
                 backup=L.backup_status(_read_text(o / L.BACKUP_STATUS_FILE)), compliance=L.compliance_summary(_read_text(o / L.COMPLIANCE_REPORT_FILE)))
+
+
+def served_project(listed):
+    """The Cockpit's own project entry for a project the queue lists (same repository, else same name), or None when this Cockpit does
+    not serve it (then its tasks cannot be read: it has no manager or task configuration here)."""
+    ps = list((PROJECTS or {CFG.get("name", ""): CFG}).values())
+    return next((q for q in ps if q.get("repo", "").lower() == listed["repo"].lower()), None) or next((q for q in ps if q.get("name") == listed["short"]), None)
+
+
+def get_queue_all(p):
+    """PC-138: the one queue's tasks over every project the Dispatcher settings list (more than one; else None): each project's tasks from
+    its own repository's cached state (no forced GitHub call), with the live overlay, tagged with the project and ranked as the Dispatcher
+    ranks them (logic.queue_all). A project this Cockpit does not serve, or whose state cannot be read, is named with the reason."""
+    listed = L.listed_projects(get_settings(p)["values"])
+    if not listed:
+        return None
+    parts, status = [], []
+    for e in listed:
+        q, err, at = served_project(e), None, None
+        if q is None:
+            err = "not served by this Cockpit"
+        else:
+            try:
+                S = _served(q, live_state(q, get_state(p=q)))
+                parts.append(dict(short=e["short"], first=e["first"], tasks=S["tasks"]))
+                at = S["source"].get("fetchedAt")
+            except Exception as ex:
+                log.warning("queue of all projects: %s unreadable: %s", e["short"], str(ex)[:120])
+                err = str(ex)[:200]
+        status.append(dict(e, name=q.get("name") if q else None, fetchedAt=at, error=err))
+    return dict(projects=status, tasks=L.queue_all(parts))
 
 
 def card_settings_path(p):
@@ -785,6 +826,7 @@ def get_usage(p, data_dir=None, projects=None, today=None):
     rep = _usage_one(p, data_dir)
     d = (data_dir or DATA_DIR) / (p.get("name") or p["repo"].split("/")[-1])
     rep["sessions"] = L.transcript_report(_read_text(d / TRANSCRIPT_FILE), rep["quota"], _read_text(d / AGGREGATE_FILE))
+    rep["heatmap"] = L.heat_days(rep.get("days"), rep["sessions"])
     try:  # the plan start and the weak threshold live with the card settings (Settings > Module cards > Quota estimates)
         qs = json.loads(_read_text(d / "cockpit-settings.json") or "{}")
     except ValueError:
@@ -1063,6 +1105,9 @@ def _do_act(form, run, state, ctx):
             return 200, dict(ok=True, msg=save_card_settings(p, form))
         if form.get("action") == "compliance":  # starts the project's compliance check; same guard (the UI is the owner's alone)
             return 200, dict(ok=True, msg=start_compliance(p))
+        if form.get("action") == "deploy":  # starts `ckp deploy` detached (PC-142); the command does the checks, the page only asks
+            r = core_environments.start_deploy(p.get("name", ""), p.get("repo"), p.get("git"), str(form.get("env") or "production"), str(form.get("mode") or "check"))
+            return (200, dict(ok=True, msg=r["msg"])) if r["ok"] else (400, dict(error=r["error"]))
         why = steer_block(p)
         if why:  # owner: the write side refuses while GitHub cannot be read; nothing is queued for later
             log.warning("refused action %s on %s: %s", form.get("action"), p.get("name", ""), why)
@@ -1248,6 +1293,12 @@ def start_compliance(p):
     return f"compliance check of {name} started"
 
 
+def get_environments(p):
+    """The Environments view of a project (PC-142): what `ckp env show` prints, and whether the page may offer the deploy buttons."""
+    r = core_environments.view(p.get("name", ""))
+    return dict(r["data"] or {}, error=r["error"], steering=CFG["steer"], configured=bool(p.get("git")))
+
+
 def compliance_report_file(p):
     """The project's current report file, or None."""
     f = pathlib.Path(p["git"]).expanduser() / L.COMPLIANCE_REPORT if p.get("git") else None
@@ -1423,9 +1474,9 @@ def live_state(p, S, fresh=False):
     and, when the processing log has a state change newer than the cache, one background refresh at most every LIVE_REFRESH_S seconds."""
     if "tasks" not in S:
         return S
-    d = queue_dir(p)
+    f = queue_files(p)
     shorts = {s.lower() for s in (p.get("short"), p.get("name"), p["repo"].split("/")[-1]) if s}
-    events, k, now = L.live_events(_read_text(d / PLOG_FILE), shorts), pk(p, "state"), time.time()
+    events, k, now = L.live_events(_read_text(f["plog"]), shorts), pk(p, "state"), time.time()
     at = S.get("source", {}).get("fetchedAt", 0)
     if not fresh and L.live_refresh_due(events, at, _live_try.get(k, 0), now, gh_room(now)):
         _live_try[k] = now
@@ -1433,7 +1484,7 @@ def live_state(p, S, fresh=False):
         _expire(k)
         S = get_state(p=p)   # the old copy at once, the new one fetched in the background
         at = S.get("source", {}).get("fetchedAt", 0)
-    state_text = _read_text(d / "dispatcher-state.json")
+    state_text = _read_text(f["state"])
     held = {n for w in L.queue_local(state_text, None)["workers"] if (n := L.task_number(w["task"], shorts)) is not None}
     tasks = L.overlay_live(S["tasks"], at, events, held, state_text is not None)
     pick = L.pickable(tasks, dt.datetime.now(dt.timezone.utc), held)
@@ -1472,7 +1523,7 @@ def get_queue_poll(p, since=0, now=None):
         err = str(ex)[:200]
     at = S["source"].get("fetchedAt", 0) if S else 0
     out = dict(local=get_queue(p), ci=get_ci(p), every=every, interval=interval, slowed=slowed, fetchedAt=at or None,
-               nextAt=max(at + interval, now) if at else None, staleNote=stale_note(p), error=err)
+               nextAt=max(at + interval, now) if at else None, staleNote=stale_note(p), error=err, all=get_queue_all(p))
     if S and at != since:
         out["state"] = _served(p, live_state(p, S))
     return out
@@ -1827,12 +1878,16 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, get_card_settings(p))
             if u.path == "/api/queue":
                 return self.send(200, get_queue(p))
+            if u.path == "/api/queueall":
+                return self.send(200, get_queue_all(p) or dict(projects=[], tasks=[]))
             if u.path == "/api/queuepoll":
                 return self.send(200, get_queue_poll(p, since=_since(q)))
             if u.path == "/api/ci":
                 return self.send(200, get_ci(p))
             if u.path == "/api/usage":
                 return self.send(200, usage_served(p))
+            if u.path == "/api/environments":
+                return self.send(200, get_environments(p))
             if u.path == "/api/compliance":
                 return self.send(200, build_compliance())
             if u.path == "/api/actionlog":

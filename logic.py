@@ -1304,14 +1304,19 @@ def card_meta(texts, project=None, now=None):
 
 
 # ---------- Dispatcher settings (spec 3c, 3f, 3i, 3j, 4a, 6a) ----------
-SETTING_MINIMUMS = {"runaway_minutes": 30, "idle_minutes": 10, "start_minutes": 1}  # a rule of the page only; the Dispatcher does not enforce them
+# the page's narrower ranges (standing rule of 2026-11-24); the Dispatcher does not enforce them. PC-95: the free-disk floor keeps spec 3n's 10 GiB
+SETTING_MINIMUMS = {"runaway_minutes": 30, "idle_minutes": 10, "start_minutes": 1, "min_free_disk_gib": 10}
+SETTING_MAXIMUMS = {"hold_pressure_level": 4, "max_container_memory_percent": 100}
 SETTING_LABELS = {"enabled": "enabled", "interval_minutes": "interval", "retries": "retries", "workers": "workers",
-                  "runaway_minutes": "runaway limit", "idle_minutes": "no-activity limit", "start_minutes": "no-start limit"}
+                  "runaway_minutes": "runaway limit", "idle_minutes": "no-activity limit", "start_minutes": "no-start limit",
+                  "hold_pressure_level": "memory pressure level", "max_swap_gib": "swap limit", "min_free_memory_gib": "free memory floor",
+                  "min_free_disk_gib": "free disk floor", "max_container_memory_percent": "container memory limit"}
 
 
 def validate_settings(form, defaults, workers_cap):
-    """The seven Dispatcher settings from a form -> a dict of the same keys, or ValueError with a clear message.
-    `defaults` gives the keys and which are switches; whole numbers only, retries from 0, the rest from 1, workers up to the image's cap."""
+    """The Dispatcher settings from a form -> a dict of the same keys, or ValueError with a clear message.
+    `defaults` gives the keys and which are switches; whole numbers only, retries from 0, the rest from 1 (or SETTING_MINIMUMS), up to
+    SETTING_MAXIMUMS, workers up to the image's cap."""
     out = {}
     for k, default in defaults.items():
         v, name = form.get(k), SETTING_LABELS.get(k, k)
@@ -1327,6 +1332,8 @@ def validate_settings(form, defaults, workers_cap):
         low = SETTING_MINIMUMS.get(k, 0 if k == "retries" else 1)
         if v < low:
             raise ValueError(f"{name} must be at least {low}" + (" minutes" if k.endswith("_minutes") else ""))
+        if k in SETTING_MAXIMUMS and v > SETTING_MAXIMUMS[k]:
+            raise ValueError(f"{name} must be at most {SETTING_MAXIMUMS[k]}")
         if k == "workers" and v > workers_cap:
             raise ValueError(f"workers must be at most {workers_cap} (the worker users defined in the image)")
         out[k] = v
@@ -1677,7 +1684,9 @@ def transcript_report(text, quota=None, aggregate=None):
     aggregate: the text of stats-cache-usage.jsonl (its contract): its token totals per day count in a period's `total` and `aggregate`
     only (no split, no messages), never in sources or sessions; a day with per-message records ignores them (the exact data wins).
     aggregate_days: {day: tokens} of the aggregates used. Only records of kind interactive (record_kind) count in periods, sources and
-    sessions; headless: the graded rows of the headless records alike (no aggregates), [] when there are none."""
+    sessions; headless: the graded rows of the headless records alike (no aggregates), [] when there are none.
+    transcript_days: {day: tokens} of the interactive records of every day (the sums of the history's day rows, not cut at its range);
+    transcript_span: [first, last] day of any record, the days the transcripts cover (None without records)."""
     recs, agg = _json_lines(text), _json_lines(aggregate)
     if recs is None and agg is None:
         return None
@@ -1686,7 +1695,11 @@ def transcript_report(text, quota=None, aggregate=None):
         t = _epoch(rec.get("ts"))
         if t is not None:
             msgs.append((t, str(rec.get("source") or "?"), str(rec.get("session") or "?"), _message_counts(rec), record_kind(rec) == "headless"))
-    exact = {dt.datetime.fromtimestamp(m[0], dt.timezone.utc).date().isoformat() for m in msgs}
+    day = lambda t: dt.datetime.fromtimestamp(t, dt.timezone.utc).date().isoformat()
+    exact, tdays = {day(m[0]) for m in msgs}, {}
+    for m in msgs:
+        if not m[4]:
+            tdays[day(m[0])] = tdays.get(day(m[0]), 0) + m[3]["total"]
     days = {}
     for rec in agg or []:
         d, n = rec.get("day"), rec.get("tokens")
@@ -1727,7 +1740,34 @@ def transcript_report(text, quota=None, aggregate=None):
     top = sorted(sessions.items(), key=lambda kv: (-kv[1]["total"], kv[0]))[:SESSIONS_SHOWN]
     return dict(periods=_history(rows.values(), [m[0] for m in msgs if not m[4]] + [_epoch(f"{d}T00:00:00+00:00") for d in days]),
                 headless=_history(hrows.values(), [m[0] for m in msgs if m[4]]), sources=[dict(key=k, **v) for k, v in sorted(sources.items(), key=lambda kv: (-kv[1]["total"], kv[0]))],
-                sessions=[dict(v, key=k[1]) for k, v in top], aggregate_days=dict(sorted(days.items())))
+                sessions=[dict(v, key=k[1]) for k, v in top], aggregate_days=dict(sorted(days.items())),
+                transcript_days=dict(sorted(tdays.items())), transcript_span=[min(exact), max(exact)] if exact else None)
+
+
+def heat_days(proxy_days, sessions):
+    """The values of the heatmap "Tokens per day" (PC-106): {day: dict(total, sources={source: tokens})} from the proxy file's day rows
+    (`days` of usage_report), the interactive transcripts' day totals and the statistics cache's daily aggregates (transcript_report),
+    added up. Every day of the transcripts' span counts as covered (zero when no interactive record); a day no source covers is absent:
+    the page shows it as "no data", not as zero."""
+    s, out = sessions or {}, {}
+
+    def add(d, src, n):
+        e = out.setdefault(d, dict(total=0, sources={}))
+        e["sources"][src] = e["sources"].get(src, 0) + n
+        e["total"] += n
+    for r in proxy_days or []:
+        add(r["key"], "proxy", r["total"])
+    span = s.get("transcript_span")
+    if span:
+        d, last = dt.date.fromisoformat(span[0]), dt.date.fromisoformat(span[1])
+        while d <= last:
+            add(d.isoformat(), "transcripts", 0)
+            d += dt.timedelta(days=1)
+    for d, n in (s.get("transcript_days") or {}).items():
+        add(d, "transcripts", n)
+    for d, n in (s.get("aggregate_days") or {}).items():
+        add(d, "statistics cache", n)
+    return dict(sorted(out.items()))
 
 
 def _history(rows, times):
@@ -2447,13 +2487,68 @@ def queue_local(state_text, plog_text):
     workers = [dict(worker=u, task=w.get("task_id"), project=w.get("project") if isinstance(w.get("project"), str) else project_key(w.get("task_id")),
                     launched=_when(w.get("launched")), started=bool(w.get("started")))
                for u, w in sorted(ws.items()) if isinstance(w, dict)]
-    return dict(workers=workers, log=log_rows(plog_text))
+    return dict(workers=workers, log=log_rows(plog_text), capacity=capacity(st.get("capacity") if isinstance(st, dict) else None))
+
+
+def capacity(c):
+    """PC-95: the Dispatcher's last decision on the number of Workers from its state file -> dict(effective, ceiling, held, readings, at)
+    (held: the reasons, None when not held; at as `_when` gives it), or None when the state file has none or it is unusable."""
+    if not isinstance(c, dict) or not all(isinstance(c.get(k), int) and not isinstance(c.get(k), bool) for k in ("effective", "ceiling")):
+        return None
+    text = lambda v: v if isinstance(v, str) and v else None   # noqa: E731
+    return dict(effective=c["effective"], ceiling=c["ceiling"], held=text(c.get("held")), readings=text(c.get("readings")), at=_when(c.get("at")))
 
 
 def project_key(task_id):
     """The project key of a task id (spec 2d: `cockpit-44` -> `cockpit`); "" for anything else (PC-67: the queue's project column)."""
     m = re.fullmatch(r"(.+)-\d+", task_id) if isinstance(task_id, str) else None
     return m.group(1) if m else ""
+
+
+def listed_projects(values):
+    """PC-138: the projects the one queue serves, from the Dispatcher settings' `projects` list, the `first` ones leading (in listed order),
+    then the others: [{short, repo, first}]. Empty unless more than one usable project is listed (the single-project view stays as it is)."""
+    ps = [p for p in (values or {}).get("projects") or [] if isinstance(p, dict) and isinstance(p.get("short"), str) and isinstance(p.get("repo"), str)]
+    if len(ps) < 2:
+        return []
+    out = [dict(short=p["short"], repo=p["repo"], first=p.get("first") is True) for p in ps]
+    return [p for p in out if p["first"]] + [p for p in out if not p["first"]]
+
+
+def _due_chain(t, by_key):
+    """The task's own deadline, else its parent chain's (the Dispatcher's rank input, dispatcher.tasks._rank_inputs)."""
+    seen = set()
+    while t and t["key"] not in seen:
+        seen.add(t["key"])
+        if t.get("deadline"):
+            return t["deadline"]
+        t = by_key.get(t.get("parent"))
+    return None
+
+
+def queue_all(parts):
+    """PC-138: the tasks of every listed project in one list, each tagged with its `project`, and `rank` (1, 2, ...) on the tasks the
+    Dispatcher would pick (`pick`), ranked as it ranks them (dispatcher.core.choose_task): the `first` projects' tasks before all others, then
+    priority (none counts as P2), deadline (own, else the parent chain's), what it unblocks, must before nice; ties by listed order, number.
+    parts: [{short, first, tasks}] in listed order, each from its own project's state."""
+    keyed, out = [], []
+    for i, part in enumerate(parts):
+        ts = part.get("tasks") or []
+        by_key = {t["key"]: t for t in ts}
+        unblocks = {}
+        for t in ts:
+            if t["stage"] in ("embryo", "released", "wip"):
+                for b in t.get("blockedBy") or []:
+                    unblocks[b] = unblocks.get(b, 0) + 1
+        for t in ts:
+            row = dict(t, project=part["short"], rank=None)
+            out.append(row)
+            if t.get("pick"):
+                keyed.append(((not part.get("first"), t.get("prio") or 2, _due_chain(t, by_key) or "9999-99-99", -unblocks.get(t["key"], 0),
+                               t.get("cls") != "must", i, t.get("number") or 0), row))
+    for n, (_, row) in enumerate(sorted(keyed, key=lambda kr: kr[0]), 1):
+        row["rank"] = n
+    return out
 
 
 # ---------- the processing log as a table (PC-120) ----------

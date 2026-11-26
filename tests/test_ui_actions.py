@@ -16,14 +16,14 @@ STATE, VIEW = "state-changing", "view-only"
 # state-changing ones that go to the server; the review marks (rev, unrev, revall) never meet a refusal.
 KIND = {
     **{f"server:{a}": STATE for a in ("new", "moddl", "edit", "release", "change", "cancel", "block", "unblock", "accept", "dismiss", "take",
-                                      "complete", "settings", "cardsettings", "compliance")},
+                                      "complete", "settings", "cardsettings", "compliance", "deploy")},
     **{f"form:{a}": STATE for a in ("edit", "release", "change", "block", "settings", "cardsettings", "moddl", "new")},
     "form:alog": VIEW,   # the action log's filter (PC-132): a read of the log
     "form:qlog": VIEW,   # the processing log's task, Worker and limit selectors (PC-120)
     **{f"page:{a}": STATE for a in ("arm", "take", "complete", "unblock", "accept", "dismiss", "rev", "unrev", "revall", "retryact")},
     **{f"page:{a}": VIEW for a in ("go", "code", "codetab", "codem", "fit", "mod", "filter", "modf", "qproj", "tlm", "tlt", "rg", "setsec",
                                    "open", "close", "edit", "noedit", "new", "subtask", "followup", "hotspot", "refresh", "qtdefaults",
-                                   "toastx", "notex", "problems", "qlogbeats", "qlogrow")},
+                                   "toastx", "notex", "problems", "qlogbeats", "qlogrow", "qscope", "qtproj")},
 }
 LOCAL = {"page:rev", "page:unrev", "page:revall"}   # state-changing in the browser only: no server, so no refusal
 

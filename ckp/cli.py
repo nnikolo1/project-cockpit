@@ -1,12 +1,18 @@
 """The command line, `cockpit` and `ckp` (PC-140): thin; every command calls a function of the Cockpit and prints its Result as JSON.
 
     ckp env set --project P --env production --port 8800 --label com.example.job --data-dir DIR
-    ckp deploy --project P --repo OWNER/NAME --repo-dir DIR [--env production] [--tag vYYYY.MM.DD-N | --rollback] [--apply]
+    ckp env show --project P                       (the Environments view: environments, live and previous release, deploy log)
+    ckp deploy --project P --repo OWNER/NAME --repo-dir DIR [--env production] [--tag vYYYY.MM.DD-N | --rollback] [--from-release] [--apply]
+    ckp heartbeat set --job J --url PING_URL [--every-hours H]
+    ckp heartbeat run --job J -- COMMAND ...        (runs the command, then pings the job's check: success or fail by its exit code)
+    ckp watch [--project P ...]                     (a desktop notification for each missing heartbeat or failed or stale backup)
 
     ckp task list|show|file|comment --project P [--repo OWNER/NAME --short S] ...   (file makes embryos only)
 
 `deploy` is a dry run unless `--apply` is given; a rollback is a deploy of an installed (older) tag, `--rollback` names the previous one;
-every applied deploy writes a line to the deploy log (<home>/deploy-log.jsonl). Exit status: 0 ok, 1 the result is not ok, 2 usage.
+every applied deploy writes a line to the deploy log (<home>/deploy-log.jsonl) and pings the heartbeat job `deploy-<project>`. A new tag is
+published as a GitHub Release with the archive of the tagged tree; `--from-release` installs from that asset instead of the clone.
+Exit status: 0 ok, 1 the result is not ok, 2 usage (`heartbeat run`: the command's own exit status).
 """
 import argparse
 import datetime as dt
@@ -16,7 +22,10 @@ import sys
 
 from ckp.adapters import git as git_adapter
 from ckp.adapters.deploy import GitDeployAdapter
+from ckp.adapters import notify
 from ckp.core import deploy as core_deploy
+from ckp.core import environments as core_environments
+from ckp.core import monitor
 from ckp.core import projects as core_projects
 from ckp.core import tasks as core_tasks
 from ckp.store import env as store_env, io as store_io, layout, releases
@@ -49,7 +58,7 @@ def cmd_deploy(a, adapter=None, today=None):
         a.tag = releases.previous(a.project)
         if not a.tag:
             return _out({"ok": False, "error": f"no previous release of {a.project} to roll back to", "data": None})
-    ad = adapter or GitDeployAdapter(a.project, a.repo, a.repo_dir, a.env)
+    ad = adapter or GitDeployAdapter(a.project, a.repo, a.repo_dir, a.env, from_release=getattr(a, "from_release", False))
     tag = a.tag or git_adapter.next_tag(a.repo_dir, today or dt.date.today())
     try:
         if a.apply and not a.tag:
@@ -59,13 +68,43 @@ def cmd_deploy(a, adapter=None, today=None):
             git_adapter.tag(a.repo_dir, tag, "HEAD")
             try:
                 git_adapter.push_tag(a.repo_dir, tag)
+                log.info("release asset of %s published: %s", tag, ad.publish(tag))
             except Exception as e:  # noqa: BLE001 - a missing remote must not stop a local deploy; the record will say so
-                log.warning("tag %s not pushed: %s", tag, e)
+                log.warning("tag %s not pushed or its release asset not published: %s", tag, e)
         res = core_deploy.deploy(a.project, tag, envs[a.env], ad, dry_run=not a.apply)
     except Exception as e:  # noqa: BLE001 - a command prints its failure as a Result, never a traceback
         log.exception("deploy failed")
         res = {"ok": False, "error": f"{type(e).__name__}: {e}", "data": {"project": a.project, "tag": tag}, "dry_run": not a.apply}
+    if a.apply:
+        monitor.beat(f"deploy-{a.project}", res.get("ok"), ping=notify.ping)
     return _out(_logged(a, res) if a.apply else res)
+
+
+def cmd_env_show(a):
+    return _out(core_environments.view(a.project))
+
+
+def cmd_heartbeat_set(a):
+    return _out(monitor.set_check(a.job, a.url, a.every_hours))
+
+
+def cmd_heartbeat_run(a, call=None):
+    """Run the wrapped command, record and ping its outcome; the exit status is the command's."""
+    import subprocess
+    cmd = a.command[1:] if a.command[:1] == ["--"] else a.command
+    if not cmd:
+        return _out({"ok": False, "data": None, "error": "no command given after --"})
+    try:
+        code = (call or subprocess.call)(cmd)
+    except OSError as e:
+        log.error("%s could not be started: %s", cmd[0], e)
+        code = 127
+    _out(monitor.beat(a.job, code == 0, ping=notify.ping))
+    return code
+
+
+def cmd_watch(a):
+    return _out(monitor.watch(notify=lambda title, text: notify.desktop(title, text), projects=a.project or None))
 
 
 def _logged(a, res):
@@ -176,7 +215,10 @@ def _add_task_parsers(sub):
 def build_parser():
     p = argparse.ArgumentParser(prog="ckp", description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
-    e = sub.add_parser("env", help="environment records").add_subparsers(dest="sub", required=True).add_parser("set")
+    es = sub.add_parser("env", help="environment records").add_subparsers(dest="sub", required=True)
+    es.add_parser("show", help="the Environments view of a project").add_argument("--project", required=True)
+    es.choices["show"].set_defaults(func=cmd_env_show)
+    e = es.add_parser("set")
     e.add_argument("--project", required=True)
     e.add_argument("--env", required=True)
     e.add_argument("--port", type=int, required=True)
@@ -191,7 +233,21 @@ def build_parser():
     d.add_argument("--tag")
     d.add_argument("--apply", action="store_true")
     d.add_argument("--rollback", action="store_true", help="deploy the previous release again (no tag, no gate: it is installed)")
+    d.add_argument("--from-release", action="store_true", help="install the tree from the tag's GitHub Release asset instead of the clone")
     d.set_defaults(func=cmd_deploy)
+    hb = sub.add_parser("heartbeat", help="heartbeat pings to the monitoring service").add_subparsers(dest="sub", required=True)
+    h = hb.add_parser("set", help="record a job's ping URL")
+    h.add_argument("--job", required=True)
+    h.add_argument("--url", required=True)
+    h.add_argument("--every-hours", type=float, help="how often the job must run; without it a missing run is never reported")
+    h.set_defaults(func=cmd_heartbeat_set)
+    h = hb.add_parser("run", help="run a command and ping its outcome")
+    h.add_argument("--job", required=True)
+    h.add_argument("command", nargs=argparse.REMAINDER)
+    h.set_defaults(func=cmd_heartbeat_run)
+    w = sub.add_parser("watch", help="notify missing heartbeats and failed or stale backups")
+    w.add_argument("--project", action="append", default=[], help="a project whose backup is checked (default: every registered project)")
+    w.set_defaults(func=cmd_watch)
     _project_parser(sub)
     _add_task_parsers(sub)
     return p

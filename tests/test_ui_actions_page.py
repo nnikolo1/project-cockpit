@@ -96,6 +96,8 @@ def test_arm_needs_a_second_click_and_posts_release_cancel_or_compliance():
     assert ok["armed"] is None
     posted(twice % ("cancel", "#2", "cancel", "#2"), body(action="cancel", n=2), "#2 is merged")
     posted(twice % ("compliance", "proj", "compliance", "proj"), body(action="compliance"), "a compliance check of proj is already running")
+    posted(twice % ("deploy", "production:rollback", "deploy", "production:rollback"), body(action="deploy", env="production", mode="rollback"),
+           "a deploy of proj is already running (started 2026-11-26T10:00:00Z)")   # the Environments view (PC-142)
 
 
 @pytest.mark.ui_action("page:take", "page:take/refused", "page:complete", "page:complete/refused")
@@ -139,7 +141,8 @@ def test_module_deadline_form():
 
 @pytest.mark.ui_action("form:settings", "form:settings/refused")
 def test_dispatcher_settings_form_posts_every_row():
-    f = dict(enabled=True, interval_minutes="5", retries="1", workers="2", runaway_minutes="60", idle_minutes="15", start_minutes="5")
+    f = dict(enabled=True, interval_minutes="5", retries="1", workers="2", hold_pressure_level="2", max_swap_gib="8", min_free_memory_gib="2",
+             min_free_disk_gib="10", max_container_memory_percent="85", runaway_minutes="60", idle_minutes="15", start_minutes="5")
     posted("await __submit('settings',null,%s);" % json.dumps(f), body(action="settings", **f), "no-activity limit must be at least 10 minutes")
 
 

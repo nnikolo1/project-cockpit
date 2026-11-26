@@ -1,4 +1,5 @@
 import plistlib
+import tempfile
 
 import pytest
 
@@ -112,3 +113,29 @@ def test_production_refuses_a_working_clone_and_keeps_the_current_link(tmp_path,
     assert d["WorkingDirectory"] == str(rel_dir / "current")   # the link, not the tag it points to: a deploy switches it
     with pytest.raises(SystemExit):
         L.render(base + ["--cockpit-dir", str(rel_dir / "current"), "--env", "../x"])
+
+
+def test_render_with_a_projects_file_writes_the_viewer_and_the_watch_from_the_release_link(tmp_path, monkeypatch, capsys):
+    """PC-142: every service definition of production, the viewer included, comes from the renderer and starts from `current`."""
+    monkeypatch.setenv("CP_HOME", str(tmp_path / "home"))
+    out = tmp_path / "o"
+    q = tempfile.mkdtemp(prefix="ckp-", dir="/tmp")   # short: the proxy socket path below it must stay under 104 bytes, which pytest's macOS temp folder exceeds
+    L.render(["--queue", "--data-root", q, "--token-file", str(tmp_path / "tok"), "--release", "cockpit", "--out", str(out),
+              "--projects-file", str(tmp_path / "projects.json"), "--viewer-token-file", str(tmp_path / "vt"), "--viewer-port", "8800"])
+    link = str(tmp_path / "home" / "releases" / "cockpit" / "current")
+    got = {f.name: plistlib.loads(f.read_bytes()) for f in out.glob("*.plist")}
+    assert set(got) == {"com.project-cockpit.dispatcher.queue.plist", "com.project-cockpit.quota.queue.plist", "com.project-cockpit.viewer.plist",
+                        "com.project-cockpit.watch.plist"}
+    assert all(p["WorkingDirectory"] == link and p["EnvironmentVariables"]["PYTHONPATH"] == link for p in got.values())
+    v = got["com.project-cockpit.viewer.plist"]
+    assert v["ProgramArguments"][1:] == [link + "/cockpit.py", "--projects", str(tmp_path / "projects.json"), "--token-file", str(tmp_path / "vt"),
+                                         "--port", "8800"] and v["KeepAlive"] and v["RunAtLoad"]
+    w = got["com.project-cockpit.watch.plist"]
+    assert w["ProgramArguments"][1:] == ["-m", "ckp", "watch"] and w["StartInterval"] == 3600
+    assert capsys.readouterr().out.count("launchctl bootstrap") == 4
+
+
+def test_viewer_and_watch_labels_name_another_environment():
+    assert L.viewer_label() == "com.project-cockpit.viewer" and L.viewer_label("staging") == "com.project-cockpit.staging.viewer"
+    assert L.watch_plist("/l", env="staging")["Label"] == "com.project-cockpit.staging.watch"
+    assert "--port" not in L.viewer_plist("/p", "/t", "/l")["ProgramArguments"]
