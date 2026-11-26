@@ -23,7 +23,7 @@ KIND = {
     **{f"page:{a}": STATE for a in ("arm", "take", "complete", "unblock", "accept", "dismiss", "rev", "unrev", "revall", "retryact")},
     **{f"page:{a}": VIEW for a in ("go", "code", "codetab", "codem", "fit", "mod", "filter", "modf", "qproj", "tlm", "tlt", "rg", "setsec",
                                    "open", "close", "edit", "noedit", "new", "subtask", "followup", "hotspot", "refresh", "qtdefaults",
-                                   "toastx", "notex", "problems", "qlogbeats", "qlogrow")},
+                                   "toastx", "notex", "problems", "qlogbeats", "qlogrow", "qscope", "qtproj")},
 }
 LOCAL = {"page:rev", "page:unrev", "page:revall"}   # state-changing in the browser only: no server, so no refusal
 
