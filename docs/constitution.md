@@ -150,4 +150,4 @@ Never apply a label that the owner has not proposed himself: not a new label, no
 
 ## No underground scripts (standing rule, owner, 2026-11-27)
 
-Any helper script the assistant creates ad hoc becomes part of the git repository of the project it serves: no script lives only in a temporary or scratch folder (owner, 2026-11-27, standing rule; applies to all projects at all times). Occasion: the housekeeping scripts of a merge run existed only in /tmp, could not be reviewed or tested, and one of them closed three failed tasks as merged.
+Any helper script the assistant creates ad hoc becomes part of the git repository of the project it serves: no script lives only in a temporary or scratch folder; there are no throw-away scripts either: every script is recorded in the repository before it runs, even a one-off, and the usual rules apply to it (tests where it decides something, the code checklist, the module map) (owner, 2026-11-27, standing rule; applies to all projects at all times). Occasion: the housekeeping scripts of a merge run existed only in /tmp, could not be reviewed or tested, and one of them closed three failed tasks as merged.
