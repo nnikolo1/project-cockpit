@@ -301,7 +301,7 @@ def test_launch_command(tmp_path):
 
 
 def test_containerfile_settings_allowlist():
-    text = (pathlib.Path(rt.__file__).parent / "image" / "Containerfile").read_text()
+    text = (pathlib.Path(__file__).resolve().parents[2] / "dispatcher" / "image" / "Containerfile").read_text()
     raw = re.search(r"^ARG WORKER_SETTINGS='(.*)'$", text, re.M).group(1)
     s = json.loads(raw)
     assert s["skipWebFetchPreflight"] is True
