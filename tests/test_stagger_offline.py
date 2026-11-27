@@ -10,6 +10,7 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 import cockpit as C
+from ckp.api import cache as api_cache, context as api_context, state as api_state
 import logic as L
 
 
@@ -58,14 +59,14 @@ def test_new_work_only_from_state_up_to_an_hour_old():
 # ---------- the cache honours the slots ----------
 @pytest.fixture
 def disk(tmp_path, monkeypatch):
-    monkeypatch.setattr(C, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(api_context, "CACHE_DIR", tmp_path)
     C._cache.clear(), C._refreshing.clear(), C._failures.clear()
     yield tmp_path
     C._cache.clear(), C._refreshing.clear(), C._failures.clear()
 
 
 def test_restart_with_old_copies_does_not_refresh_before_the_slot(disk, monkeypatch):
-    monkeypatch.setattr(C, "_started", time.time())
+    monkeypatch.setattr(api_cache, "_started", time.time())
     monkeypatch.setitem(C._slots, "a:state", (600, 0))
     (disk / "a_state.json").write_text(json.dumps("old"))
     assert C.cached("a:state", lambda: pytest.fail("refreshed before its slot"), 3600, swr=True, persist=True, queue=True) == "old"
@@ -73,7 +74,7 @@ def test_restart_with_old_copies_does_not_refresh_before_the_slot(disk, monkeypa
 
 
 def test_slot_is_given_to_every_project_and_resource(monkeypatch):
-    monkeypatch.setattr(C, "PROJECTS", {"a": dict(name="a"), "b": dict(name="b")})
+    monkeypatch.setattr(api_context, "PROJECTS", {"a": dict(name="a"), "b": dict(name="b")})
     C._slot("a:state")
     assert {f"{n}:{r}" for n in "ab" for r in C.GH_RESOURCES} <= set(C._slots)
     assert len({o for o, _ in C._slots.values()}) == len(C._slots)
@@ -83,8 +84,8 @@ def test_slot_is_given_to_every_project_and_resource(monkeypatch):
 def test_actions_refused_and_not_queued_while_github_cannot_be_read(monkeypatch):
     p = dict(name="a", repo="o/a")
     monkeypatch.setitem(C.CFG, "steer", True)
-    monkeypatch.setattr(C, "_cache", {C.pk(p, "state"): (0, dict(source=dict(fetchedAt=time.time() - 7200)))})
-    monkeypatch.setattr(C, "_failures", {C.pk(p, "state"): dict(at=0, error="HTTP 401: Bad credentials", until=None, rate_limited=False)})
+    monkeypatch.setattr(api_cache, "_cache", {C.pk(p, "state"): (0, dict(source=dict(fetchedAt=time.time() - 7200)))})
+    monkeypatch.setattr(api_cache, "_failures", {C.pk(p, "state"): dict(at=0, error="HTTP 401: Bad credentials", until=None, rate_limited=False)})
     ran = []
     code, body = C.do_act(dict(action="take", n=1), run=ran.append, p=p)
     assert code == 503 and "token" in body["error"] and "not queued" in body["error"] and ran == []
@@ -99,10 +100,10 @@ def test_served_state_names_the_case_and_stops_new_work(monkeypatch):
     p = dict(name="a", repo="o/a")
     S = dict(tasks=[dict(key="A-1", pick=True)], source=dict(fetchedAt=time.time() - 7200, fetched="08:00:00"))
     monkeypatch.setitem(C.CFG, "steer", True)
-    monkeypatch.setattr(C, "get_state", lambda fresh=False, p=None: S)
-    monkeypatch.setattr(C, "live_state", lambda p, S, fresh: S)
-    monkeypatch.setattr(C, "_cache", {C.pk(p, "state"): (0, S)})
-    monkeypatch.setattr(C, "_failures", {C.pk(p, "state"): dict(at=0, error="error connecting to api.github.com", until=None, rate_limited=False)})
+    monkeypatch.setattr(api_state, "get_state", lambda fresh=False, p=None: S)
+    monkeypatch.setattr(api_state, "live_state", lambda p, S, fresh: S)
+    monkeypatch.setattr(api_cache, "_cache", {C.pk(p, "state"): (0, S)})
+    monkeypatch.setattr(api_cache, "_failures", {C.pk(p, "state"): dict(at=0, error="error connecting to api.github.com", until=None, rate_limited=False)})
     out = C.get_state_served(p)
     assert out["staleNote"]["kind"] == "unreachable" and out["staleNote"]["age_s"] >= 7200
     assert out["steerBlock"] == "GitHub is unreachable"

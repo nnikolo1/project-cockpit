@@ -2,6 +2,7 @@
 import sys, pathlib, json, re
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 import cockpit as C
+from ckp.api import fetch as api_fetch, gh as api_gh
 import logic as L
 
 P = dict(repo="o/r", manager="m")
@@ -71,7 +72,7 @@ def test_fetch_timelines_batches_per_ten_issues(monkeypatch):
         q = next(a for a in args if a.startswith("query="))
         queries.append(q)
         return json.dumps({"data": {"repository": {f"i{n}": {"number": n, "stateReason": None, "timelineItems": {"nodes": [LAB]}} for n in map(int, re.findall(r"i(\d+):issue", q))}}})
-    monkeypatch.setattr(C, "run_gh", fake)
+    monkeypatch.setattr(api_gh, "run_gh", fake)
     out = C.fetch_timelines(P, list(range(1, 26)))
     assert len(queries) == 3 and set(out) == set(range(1, 26)) and out[7][0]["actor"] == "m"
 
@@ -93,8 +94,8 @@ def test_fetch_issues_pages_and_repairs(monkeypatch):
         second = "after=c1" in args
         page = dict(pageInfo=dict(hasNextPage=not second, endCursor="c1"), nodes=[node(2, [LAB])] if second else [node(1, [])])  # issue 1: thinned
         return json.dumps({"data": {"repository": {"issues": page}}})
-    monkeypatch.setattr(C, "run_gh", fake)
-    monkeypatch.setattr(C, "_TL", {})
+    monkeypatch.setattr(api_gh, "run_gh", fake)
+    monkeypatch.setattr(api_fetch, "_TL", {})
     issues, events = C.fetch_issues(dict(repo="o/r", manager="m"))
     assert [i["number"] for i in issues] == [1, 2]
     assert all(not bad for _, bad in L.policy(issues, events, "m").values())  # nobody is flagged

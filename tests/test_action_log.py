@@ -14,6 +14,7 @@ ROOT = pathlib.Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 import cockpit as C  # noqa: E402
+from ckp.api import context as api_context, queue as api_queue
 import logic as L  # noqa: E402
 from test_actions import M, ev, iss, state  # noqa: E402
 
@@ -25,11 +26,11 @@ PLANTED = dict(text="PLANTED-TASK-TEXT-7f3a", token="PLANTED-TOKEN-91bd", gh="gh
 
 @pytest.fixture
 def steer(monkeypatch, tmp_path):
-    monkeypatch.setattr(C, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(api_context, "DATA_DIR", tmp_path)
     monkeypatch.setitem(C.CFG, "steer", True)
     monkeypatch.setitem(C.CFG, "simulate", False)
     monkeypatch.setattr(C.H, "token", PLANTED["token"])
-    monkeypatch.setattr(C, "_version", ["abc1234"])
+    monkeypatch.setattr(api_queue, "_version", ["abc1234"])
     return tmp_path / "proj" / "actions.jsonl"
 
 
@@ -70,8 +71,8 @@ def test_refused_and_failed_actions_are_logged_with_their_reason(steer, monkeypa
 
 
 def test_texts_and_secrets_never_reach_the_log(steer, monkeypatch):
-    monkeypatch.setattr(C, "PROJECTS", {"proj": P})
-    monkeypatch.setattr(C, "DEFAULT", "proj")
+    monkeypatch.setattr(api_context, "PROJECTS", {"proj": P})
+    monkeypatch.setattr(api_context, "DEFAULT", "proj")
     body = f"secret plan {PLANTED['text']} {PLANTED['token']}"
     act(dict(action="edit", n=1, title="New title", body=body, t=PLANTED["token"]))
     act(dict(action="new", title="A task", desc=PLANTED["text"], type="feature", cls="nice"))
@@ -89,8 +90,8 @@ def test_texts_and_secrets_never_reach_the_log(steer, monkeypatch):
 
 
 def test_a_page_event_is_appended_with_its_page_id(steer, monkeypatch):
-    monkeypatch.setattr(C, "PROJECTS", {"proj": P})
-    monkeypatch.setattr(C, "DEFAULT", "proj")
+    monkeypatch.setattr(api_context, "PROJECTS", {"proj": P})
+    monkeypatch.setattr(api_context, "DEFAULT", "proj")
     code, body = C.page_events(dict(project="proj", events=[
         dict(kind="network", page="pg-7", action="release", task="#1", msg="Failed to fetch", ms=12.4, at="2026-11-25T10:02:24Z"),
         dict(kind="script", page="pg-7", action="draw", task="Cockpit", msg="x is undefined"),
@@ -104,7 +105,7 @@ def test_a_page_event_is_appended_with_its_page_id(steer, monkeypatch):
 
 
 def test_rotation_keeps_five_files(steer, monkeypatch):
-    monkeypatch.setattr(C, "ACTION_LOG_MAX", 600)
+    monkeypatch.setattr(api_queue, "ACTION_LOG_MAX", 600)
     for i in range(60):
         C.log_action(P, dict(t=str(i), action="release", task=f"#{i}", outcome="ok", pad="x" * 100))
     files = sorted(p.name for p in steer.parent.iterdir())
@@ -116,7 +117,7 @@ def test_rotation_keeps_five_files(steer, monkeypatch):
 
 
 def test_an_offline_copy_writes_no_log(steer, monkeypatch):
-    monkeypatch.setattr(C, "OFFLINE", dict(root="/x", created=0))
+    monkeypatch.setattr(api_context, "OFFLINE", dict(root="/x", created=0))
     C.log_action(P, dict(action="x"))
     assert not steer.exists()
 
@@ -163,8 +164,8 @@ def test_page_keeps_events_while_the_server_is_unreachable():
 def test_endpoints_over_http(steer, monkeypatch):
     import threading
     import urllib.request
-    monkeypatch.setattr(C, "PROJECTS", {"proj": P})
-    monkeypatch.setattr(C, "DEFAULT", "proj")
+    monkeypatch.setattr(api_context, "PROJECTS", {"proj": P})
+    monkeypatch.setattr(api_context, "DEFAULT", "proj")
     srv = C.Server(("127.0.0.1", 0), C.H)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base, hdr = f"http://127.0.0.1:{srv.server_address[1]}", {"Cookie": "t=" + PLANTED["token"], "Content-Type": "application/json"}

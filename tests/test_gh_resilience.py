@@ -9,6 +9,8 @@ import types
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 import pytest
 import cockpit as C
+from ckp.core import rules as core_rules
+from ckp.api import actions as api_actions, context as api_context, gh as api_gh, state as api_state
 import logic as L
 
 P = dict(name="proj", repo="o/r", manager="m", project=None, git=None, code=None, modules=None, phases=None)
@@ -24,8 +26,8 @@ def clean(tmp_path, monkeypatch):
     C._failures.clear()
     C._gh_calls.clear()
     C._gh_pause.update(until=0.0)
-    monkeypatch.setattr(C, "CACHE_DIR", tmp_path / "cache")
-    monkeypatch.setattr(C, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(api_context, "CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(api_context, "DATA_DIR", tmp_path / "data")
     yield
     C._cache.clear()
 
@@ -67,7 +69,7 @@ def test_other_errors_do_not_pause(monkeypatch):
 
 
 def test_hourly_calls_are_counted_and_capped(monkeypatch):
-    monkeypatch.setattr(C, "GH_CALLS_PER_HOUR", 3)
+    monkeypatch.setattr(api_gh, "GH_CALLS_PER_HOUR", 3)
     for i in range(3):
         C._gh_gate(now=1000 + i)
     with pytest.raises(C.GitHubUnavailable) as e:
@@ -78,50 +80,50 @@ def test_hourly_calls_are_counted_and_capped(monkeypatch):
 
 def test_failed_refresh_serves_the_old_copy_with_age_reason_and_reset(monkeypatch):
     now = time.time()
-    monkeypatch.setattr(C, "build_state", lambda p: state(now - 600))
+    monkeypatch.setattr(api_state, "build_state", lambda p: state(now - 600))
     assert C.get_state_served(P)["staleNote"] is None
 
     def down(p):
         raise C.GitHubUnavailable("GitHub rate limit reached", now + 900)
-    monkeypatch.setattr(C, "build_state", down)
+    monkeypatch.setattr(api_state, "build_state", down)
     S = C.get_state_served(P, fresh=True)
     assert S["source"]["fetchedAt"] == now - 600  # the old data, not an error
     n = S["staleNote"]
     assert n["rate_limited"] and n["until"] == now + 900 and 590 <= n["age_s"] <= 620 and "rate limit" in n["error"]
-    monkeypatch.setattr(C, "build_state", lambda p: state(time.time()))
+    monkeypatch.setattr(api_state, "build_state", lambda p: state(time.time()))
     assert C.get_state_served(P, fresh=True)["staleNote"] is None  # a success removes the note
 
 
 def test_no_copy_at_all_raises_the_error(monkeypatch):
     def down(p):
         raise C.GitHubUnavailable("paused until 12:00", 1)
-    monkeypatch.setattr(C, "build_state", down)
+    monkeypatch.setattr(api_state, "build_state", down)
     with pytest.raises(C.GitHubUnavailable):
         C.get_state_served(P)
 
 
 def test_restart_with_a_recent_disk_copy_makes_no_call(monkeypatch):
     now = time.time()
-    monkeypatch.setattr(C, "build_state", lambda p: state(now))
+    monkeypatch.setattr(api_state, "build_state", lambda p: state(now))
     C.get_state(p=P)  # writes the disk copy
     C._cache.clear()  # a new process
 
     def boom(p):
         raise AssertionError("GitHub was called")
-    monkeypatch.setattr(C, "build_state", boom)
+    monkeypatch.setattr(api_state, "build_state", boom)
     assert C.get_state(p=P)["source"]["fetchedAt"] == now
     assert not C._refreshing
 
 
 def test_restart_with_an_old_disk_copy_serves_it_and_refreshes_behind(monkeypatch):
     now = time.time()
-    monkeypatch.setattr(C, "build_state", lambda p: state(now - 5000))
+    monkeypatch.setattr(api_state, "build_state", lambda p: state(now - 5000))
     C.get_state(p=P)
     f = next(C.CACHE_DIR.glob("*state*.json"))
     old = now - C.DISK_FRESH_S - 60
     os.utime(f, (old, old))
     C._cache.clear()
-    monkeypatch.setattr(C, "build_state", lambda p: state(now))
+    monkeypatch.setattr(api_state, "build_state", lambda p: state(now))
     assert C.get_state(p=P)["source"]["fetchedAt"] == now - 5000
     deadline = time.time() + 3
     while time.time() < deadline and C._cache[C.pk(P, "state")][1]["source"]["fetchedAt"] != now:
@@ -130,13 +132,13 @@ def test_restart_with_an_old_disk_copy_serves_it_and_refreshes_behind(monkeypatc
 
 
 def test_refresh_button_after_a_restart_keeps_the_disk_copy_when_github_fails(monkeypatch):
-    monkeypatch.setattr(C, "build_state", lambda p: state(123))
+    monkeypatch.setattr(api_state, "build_state", lambda p: state(123))
     C.get_state(p=P)
     C._cache.clear()
 
     def down(p):
         raise RuntimeError("API rate limit already exceeded")
-    monkeypatch.setattr(C, "build_state", down)
+    monkeypatch.setattr(api_state, "build_state", down)
     S = C.get_state_served(P, fresh=True)
     assert S["source"]["fetchedAt"] == 123 and S["staleNote"]["rate_limited"]
 
@@ -149,8 +151,8 @@ def test_task_queue_local_part_is_served_while_github_fails(monkeypatch):
 
     def down(*a, **k):
         raise AssertionError("the Task Queue's local part called GitHub")
-    monkeypatch.setattr(C, "run_gh", down)
-    monkeypatch.setattr(C, "build_state", down)
+    monkeypatch.setattr(api_gh, "run_gh", down)
+    monkeypatch.setattr(api_state, "build_state", down)
     q = C.get_queue(P)
     assert q["workers"] == [dict(worker="worker2", task="T-7", project="T", launched=1767261600, started=True)]
     assert q["log"][1]["kind"] == "launched" and q["log"][0]["kind"] == "other" and q["log"][1]["time"] == "2026-01-01T10:00:00+00:00" and "values" in q["settings"]
@@ -159,14 +161,14 @@ def test_task_queue_local_part_is_served_while_github_fails(monkeypatch):
 def test_task_queue_shows_the_last_ci_run_of_main_and_survives_github_failing(monkeypatch):
     calls = []
     run = [dict(status="completed", conclusion="failure", headSha="abc", createdAt="2026-11-24T08:00:00Z", url="https://x/runs/7")]
-    monkeypatch.setattr(C, "run_gh", lambda args: calls.append(args) or json.dumps(run))
+    monkeypatch.setattr(api_gh, "run_gh", lambda args: calls.append(args) or json.dumps(run))
     ci = C.get_ci(P)
     assert ci["state"] == "red" and ci["url"] == "https://x/runs/7"
     assert calls[0][:2] == ["run", "list"] and calls[0][calls[0].index("--branch") + 1] == "main"
 
     def down(args):
         raise RuntimeError("gh: no network")
-    monkeypatch.setattr(C, "run_gh", down)
+    monkeypatch.setattr(api_gh, "run_gh", down)
     assert C.get_ci(dict(P, name="other", repo="o/other"))["state"] == "unknown"  # no earlier copy: unknown, not an error page
     page = (pathlib.Path(C.__file__).parent / "web" / "index.html").read_text()
     assert "api('/api/ci')" in page and "+ciLine(CI)" in page and "CI on main: " in page
@@ -180,19 +182,19 @@ def test_task_queue_local_part_without_files_is_empty():
 
 def test_within_the_hour_no_call_and_the_page_gets_the_refresh_time(monkeypatch):
     now = time.time()
-    monkeypatch.setattr(C, "build_state", lambda p: state(now - 1800))
+    monkeypatch.setattr(api_state, "build_state", lambda p: state(now - 1800))
     C.get_state(p=P)
 
     def boom(p):
         raise AssertionError("GitHub was called")
-    monkeypatch.setattr(C, "build_state", boom)
+    monkeypatch.setattr(api_state, "build_state", boom)
     S = C.get_state_served(P)
     assert S["refreshAfter"] == now - 1800 + C.GH_REFRESH_S and not S["stale"]
 
 
 def test_older_than_the_hour_is_served_at_once_and_one_refresh_is_queued(monkeypatch):
     now = time.time()
-    monkeypatch.setattr(C, "build_state", lambda p: state(now - 7200))
+    monkeypatch.setattr(api_state, "build_state", lambda p: state(now - 7200))
     C.get_state(p=P)
     C._cache[C.pk(P, "state")] = (now - C.GH_REFRESH_S - 5, C._cache[C.pk(P, "state")][1])
     n, gate = [], threading.Event()
@@ -201,7 +203,7 @@ def test_older_than_the_hour_is_served_at_once_and_one_refresh_is_queued(monkeyp
         n.append(1)
         gate.wait(3)
         return state(now)
-    monkeypatch.setattr(C, "build_state", slow)
+    monkeypatch.setattr(api_state, "build_state", slow)
     for _ in range(3):
         assert C.get_state_served(P)["source"]["fetchedAt"] == now - 7200
     gate.set()
@@ -230,22 +232,22 @@ def test_refreshes_of_different_projects_never_run_in_parallel():
 
 def test_owner_refresh_still_fetches_inside_the_hour(monkeypatch):
     now = time.time()
-    monkeypatch.setattr(C, "build_state", lambda p: state(now - 60))
+    monkeypatch.setattr(api_state, "build_state", lambda p: state(now - 60))
     C.get_state(p=P)
-    monkeypatch.setattr(C, "build_state", lambda p: state(now))
+    monkeypatch.setattr(api_state, "build_state", lambda p: state(now))
     assert C.get_state_served(P, fresh=True)["source"]["fetchedAt"] == now
 
 
 @pytest.mark.parametrize("minutes,calls", [(59, 0), (61, 1)])
 def test_restart_uses_a_copy_up_to_an_hour_old_and_queues_one_refresh_for_an_older_one(monkeypatch, minutes, calls):
     now = time.time()
-    monkeypatch.setattr(C, "build_state", lambda p: state(now - minutes * 60))
+    monkeypatch.setattr(api_state, "build_state", lambda p: state(now - minutes * 60))
     C.get_state(p=P)
     f = next(C.CACHE_DIR.glob("*state*.json"))
     os.utime(f, (now - minutes * 60, now - minutes * 60))
     C._cache.clear()  # restart
     n = []
-    monkeypatch.setattr(C, "build_state", lambda p: n.append(1) or state(now))
+    monkeypatch.setattr(api_state, "build_state", lambda p: n.append(1) or state(now))
     assert C.get_state(p=P)["source"]["fetchedAt"] == now - minutes * 60  # served at once either way
     deadline = time.time() + 3
     while time.time() < deadline and (C._refreshing or (calls and not n)):
@@ -256,15 +258,15 @@ def test_restart_uses_a_copy_up_to_an_hour_old_and_queues_one_refresh_for_an_old
 def test_only_the_owners_pane_refresh_bypasses_the_hour_and_only_for_that_panes_request(monkeypatch):
     now = time.time()
     P2 = dict(P, phases=None)
-    monkeypatch.setattr(C, "build_state", lambda p: dict(state(now - 60), tasks=[], events=[], modules=[]))
+    monkeypatch.setattr(api_state, "build_state", lambda p: dict(state(now - 60), tasks=[], events=[], modules=[]))
     C.get_state(p=P2)
     calls = []
-    monkeypatch.setattr(C, "run_gh", lambda args: calls.append(args[:2]) or json.dumps([]))
-    monkeypatch.setattr(C, "load_modules", lambda p: None)
+    monkeypatch.setattr(api_gh, "run_gh", lambda args: calls.append(args[:2]) or json.dumps([]))
+    monkeypatch.setattr(api_context, "load_modules", lambda p: None)
 
     def no_state(p):
         raise AssertionError("the state was fetched")
-    monkeypatch.setattr(C, "build_state", no_state)
+    monkeypatch.setattr(api_state, "build_state", no_state)
     C.get_timeline(P2)  # first build: no commits copy yet, one call is unavoidable
     calls.clear()
     C.get_timeline(P2)
@@ -277,11 +279,11 @@ def test_only_the_owners_pane_refresh_bypasses_the_hour_and_only_for_that_panes_
 
 def test_an_action_does_not_fetch_or_drop_the_state(monkeypatch):
     now = time.time()
-    monkeypatch.setattr(C, "build_state", lambda p: state(now - 60))
+    monkeypatch.setattr(api_state, "build_state", lambda p: state(now - 60))
     C.get_state(p=P)
-    monkeypatch.setattr(C, "build_state", lambda p: (_ for _ in ()).throw(AssertionError("fetched")))
+    monkeypatch.setattr(api_state, "build_state", lambda p: (_ for _ in ()).throw(AssertionError("fetched")))
     monkeypatch.setitem(C.CFG, "steer", True)
-    monkeypatch.setattr(C, "plan_action", lambda *a: ([], "done"))
+    monkeypatch.setattr(api_actions, "plan_action", lambda *a: ([], "done"))
     assert C.do_act(dict(action="x"), run=lambda a: "", p=P)[0] == 200
     assert C.get_state(p=P)["source"]["fetchedAt"] == now - 60
 
@@ -291,8 +293,8 @@ def no_github(request, monkeypatch):
     """Every gh call fails the test; in the second mode the Cockpit is also inside a rate-limit pause."""
     def boom(*a, **k):
         raise AssertionError("a local request called GitHub")
-    monkeypatch.setattr(C, "run_gh", boom)
-    monkeypatch.setattr(C, "build_state", boom)
+    monkeypatch.setattr(api_gh, "run_gh", boom)
+    monkeypatch.setattr(api_state, "build_state", boom)
     monkeypatch.setattr(C.subprocess, "run", boom)
     if request.param == "rate-limit-pause":
         C._gh_pause.update(until=time.time() + 600)
@@ -331,18 +333,18 @@ def test_code_tab_modules_come_from_the_local_map_with_github_down(no_github, tm
 
 
 def test_pull_request_list_fails_alone_and_is_cached_by_the_hour(monkeypatch):
-    monkeypatch.setattr(C, "load_modules", lambda p: {})
-    monkeypatch.setattr(L, "rules_config", lambda m: dict(groups=[], managers=[], bots=[]))
+    monkeypatch.setattr(api_context, "load_modules", lambda p: {})
+    monkeypatch.setattr(core_rules, "rules_config", lambda m: dict(groups=[], managers=[], bots=[]))
     Pg = dict(P, git="/x")
     n = []
 
     def down(args):
         n.append(1)
         raise RuntimeError("API rate limit already exceeded")
-    monkeypatch.setattr(C, "run_gh", down)
+    monkeypatch.setattr(api_gh, "run_gh", down)
     r = C.get_rule_prs(Pg)
     assert r["configured"] and not r["available"] and "rate limit" in r["error"] and r["pending"] == []  # this list alone is 'not available'
-    monkeypatch.setattr(C, "run_gh", lambda args: n.append(1) or "[]")
+    monkeypatch.setattr(api_gh, "run_gh", lambda args: n.append(1) or "[]")
     n.clear()
     assert C.get_rule_prs(Pg, fresh=True)["available"] and len(n) == 1  # the pane's Refresh click
     n.clear()

@@ -7,12 +7,13 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 import cockpit as C
+from ckp.api import cache as api_cache, context as api_context
 
 
 @pytest.fixture(autouse=True)
 def no_stagger(monkeypatch):
-    monkeypatch.setattr(C, "STAGGER_JITTER_S", 0)
-    monkeypatch.setattr(C, "_started", 0)
+    monkeypatch.setattr(api_cache, "STAGGER_JITTER_S", 0)
+    monkeypatch.setattr(api_cache, "_started", 0)
     C._slots.clear()
     yield
     C._slots.clear()
@@ -22,8 +23,8 @@ def no_stagger(monkeypatch):
 def _private_data_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("CP_HOME", str(tmp_path / "cp-home"))   # ckp's home: deploy log, heartbeat state (PC-142) never the owner's
     if "cockpit" in sys.modules:
-        monkeypatch.setattr(sys.modules["cockpit"], "DATA_DIR", tmp_path / "cockpit-data")
-        monkeypatch.setattr(sys.modules["cockpit"], "QUEUE_ROOT", tmp_path / "queue-root")   # not migrated unless a test makes it so (PC-67)
+        monkeypatch.setattr(api_context, "DATA_DIR", tmp_path / "cockpit-data")
+        monkeypatch.setattr(api_context, "QUEUE_ROOT", tmp_path / "queue-root")   # not migrated unless a test makes it so (PC-67)
 
 
 def pytest_configure(config):

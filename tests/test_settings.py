@@ -4,6 +4,7 @@ import json
 import stat
 import pytest
 import cockpit as C
+from ckp.api import context as api_context
 import logic as L
 from dispatcher.core import DEFAULTS, load_settings
 
@@ -33,7 +34,7 @@ def test_validate_missing_key_is_refused():
 
 @pytest.mark.ui_action("server:settings")
 def test_missing_file_shows_defaults_and_save_creates_it_private(tmp_path, monkeypatch):
-    monkeypatch.setattr(C, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(api_context, "DATA_DIR", tmp_path)
     monkeypatch.setitem(C.CFG, "steer", True)
     assert C.get_settings(P)["values"] == DEFAULTS
     code, body = C.do_act(dict(action="settings", **{**OK, "workers": 2, "runaway_minutes": 50}), p=P)
@@ -45,14 +46,14 @@ def test_missing_file_shows_defaults_and_save_creates_it_private(tmp_path, monke
 
 @pytest.mark.ui_action("server:settings/refused")
 def test_refused_value_is_400_and_writes_nothing(tmp_path, monkeypatch):
-    monkeypatch.setattr(C, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(api_context, "DATA_DIR", tmp_path)
     monkeypatch.setitem(C.CFG, "steer", True)
     assert C.do_act(dict(action="settings", **{**OK, "idle_minutes": 5}), p=P) == (400, dict(error="no-activity limit must be at least 10 minutes"))
     assert not C.settings_path(P).exists()
 
 
 def test_read_only_refuses_save_with_403(tmp_path, monkeypatch):
-    monkeypatch.setattr(C, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(api_context, "DATA_DIR", tmp_path)
     monkeypatch.setitem(C.CFG, "steer", False)
     assert C.do_act(dict(action="settings", **OK), p=P)[0] == 403
     assert not C.settings_path(P).exists() and C.get_settings(P)["steering"] is False
@@ -68,7 +69,7 @@ def test_card_settings_validation():
 
 @pytest.mark.ui_action("server:cardsettings", "server:cardsettings/refused")
 def test_card_settings_default_save_and_read_only(tmp_path, monkeypatch):
-    monkeypatch.setattr(C, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(api_context, "DATA_DIR", tmp_path)
     monkeypatch.setitem(C.CFG, "steer", True)
     assert C.get_card_settings(P)["values"] == L.CARD_SETTING_DEFAULTS
     code, body = C.do_act(dict(action="cardsettings", churn_colour="absolute"), p=P)
@@ -86,7 +87,7 @@ def test_card_settings_default_save_and_read_only(tmp_path, monkeypatch):
 
 
 def test_thresholds_roundtrip_and_validation(tmp_path, monkeypatch):
-    monkeypatch.setattr(C, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(api_context, "DATA_DIR", tmp_path)
     monkeypatch.setitem(C.CFG, "steer", True)
     custom = {"coverage": dict(direction="high", ok=90, warn=70)}
     assert C.do_act(dict(action="cardsettings", churn_colour="size", quality_thresholds=custom), p=P)[0] == 200
@@ -103,7 +104,7 @@ def test_thresholds_roundtrip_and_validation(tmp_path, monkeypatch):
 
 
 def test_invalid_stored_threshold_falls_back_to_its_default(tmp_path, monkeypatch):
-    monkeypatch.setattr(C, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(api_context, "DATA_DIR", tmp_path)
     f = C.card_settings_path(P)
     f.parent.mkdir(parents=True)
     f.write_text(json.dumps(dict(churn_colour="size", quality_thresholds=dict(

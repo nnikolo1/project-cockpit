@@ -160,8 +160,9 @@ def test_biggest_files_takes_code_first_then_tests_then_other():
 
 def test_biggest_by_module_gives_github_links(tmp_path, monkeypatch):
     import cockpit as C
+    from ckp.api import context as api_context, gh as api_gh
     (tmp_path / "a b.py").write_text("x\ny\n")
-    monkeypatch.setattr(C, "run_git", lambda p, a: "a b.py\0")
-    monkeypatch.setattr(C, "load_modules", lambda p: {"assign": [{"path": "a b.py", "module": "m"}]})
+    monkeypatch.setattr(api_gh, "run_git", lambda p, a: "a b.py\0")
+    monkeypatch.setattr(api_context, "load_modules", lambda p: {"assign": [{"path": "a b.py", "module": "m"}]})
     r = C.biggest_by_module(dict(git=str(tmp_path), repo="o/r"), ["m"])
     assert r["m"] == [dict(path="a b.py", lines=2, kind="code", url="https://github.com/o/r/blob/main/a%20b.py")]

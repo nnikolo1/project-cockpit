@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "tests"))
 import backup_restore as R  # noqa: E402
 import cockpit as C  # noqa: E402
+from ckp.api import context as api_context
 import logic as L  # noqa: E402
 import project_backup as B  # noqa: E402
 import test_offline as O  # noqa: E402
@@ -167,7 +168,7 @@ def test_the_gap_checker_reports_kind_backup():
 
 
 def test_the_task_queue_payload_carries_the_last_backup(tmp_path, monkeypatch):
-    monkeypatch.setattr(C, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(api_context, "DATA_DIR", tmp_path)
     (tmp_path / "p").mkdir()
     assert C.get_queue(dict(name="p", repo="o/p"))["backup"] is None
     (tmp_path / "p" / L.BACKUP_STATUS_FILE).write_text(rec(ok=False, reason="r"))

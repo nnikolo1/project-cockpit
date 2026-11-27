@@ -45,11 +45,12 @@ def test_snapshot_lines_leave_tests_out():
 
 def test_every_list_gets_the_same_order_from_the_clone(tmp_path, monkeypatch):
     import cockpit as C
+    from ckp.api import gh as api_gh
     for f, n in FILES.items():
         (tmp_path / f).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / f).write_text("x\n" * n)
     (tmp_path / "map.json").write_text(json.dumps(MAP))
-    monkeypatch.setattr(C, "run_git", lambda p, a: "\0".join(FILES))
+    monkeypatch.setattr(api_gh, "run_git", lambda p, a: "\0".join(FILES))
     p = dict(name="pc89-order", repo="o/r", git=str(tmp_path), modules=str(tmp_path / "map.json"))
     code_tab = C.local_modules_of(p)  # the Code tab's list (local map)
     _, state_mods = L.derive([], [], {}, "boss", MAP["modules"], grow=False)  # the overview, task and timeline lists (GitHub state)

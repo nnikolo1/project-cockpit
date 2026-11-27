@@ -13,6 +13,7 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "tools"))
 import cockpit as C
+from ckp.api import context as api_context
 import logic as L
 import backup_restore as R
 
@@ -50,7 +51,7 @@ def pack(folder, archive):
 
 @pytest.fixture
 def offline(monkeypatch):
-    monkeypatch.setattr(C, "OFFLINE", dict(root="x", created=CREATED, gh_attempts=0))
+    monkeypatch.setattr(api_context, "OFFLINE", dict(root="x", created=CREATED, gh_attempts=0))
     C._cache.clear()
     yield C.OFFLINE
     C._cache.clear()
@@ -97,7 +98,7 @@ def test_offline_serves_an_old_copy_as_is(offline):
 
 
 def test_offline_never_writes_the_backup(offline, tmp_path, monkeypatch):
-    monkeypatch.setattr(C, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(api_context, "CACHE_DIR", tmp_path)
     C._disk_save("k", 1)
     assert list(tmp_path.iterdir()) == []
 
@@ -110,7 +111,7 @@ def test_offline_actions_are_refused(offline, monkeypatch):
 
 def test_offline_state_has_steering_off(offline, tmp_path, monkeypatch):
     root = make_backup(tmp_path / "b")
-    monkeypatch.setattr(C, "CACHE_DIR", root / "cache")
+    monkeypatch.setattr(api_context, "CACHE_DIR", root / "cache")
     p, created = C.open_backup(root)
     assert created == CREATED and p["code"] == str((root / "files" / "code").resolve())
     assert C.get_state_served(p)["source"]["steering"] is False

@@ -26,7 +26,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 REFUSED = "/refused"
 POLICY = "Every action the UI offers is covered by a test (owner, 2026-11-25)"
 # This project's registry entry: where the actions and the tests are.
-CONFIG = dict(server="cockpit.py", dispatch=["_plan", "do_act", "_do_act"], var="a", page="web/index.html", click="function act(a,ds){",
+CONFIG = dict(server="ckp/api/actions.py", dispatch=["_plan", "do_act", "_do_act"], var="a", page="web/index.html", click="function act(a,ds){",
               submit="document.addEventListener('submit'", tests=["tests"])
 
 

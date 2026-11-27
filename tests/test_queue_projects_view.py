@@ -13,6 +13,7 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import cockpit as C  # noqa: E402
+from ckp.api import context as api_context, state as api_state
 import logic as L  # noqa: E402
 from dispatcher.core import DEFAULTS, load_settings  # noqa: E402
 
@@ -150,10 +151,10 @@ def test_queue_of_all_projects_reads_each_project_from_its_own_state(monkeypatch
     served = {"proj": dict(name="proj", repo="o/proj"), "alpha": dict(name="alpha-cockpit", repo="O/Alpha")}
     states = {"proj": [t(1, prio=3)], "alpha-cockpit": [t(1, prio=1), t(2, "merged")]}
     asked = []
-    monkeypatch.setattr(C, "PROJECTS", {q["name"]: q for q in served.values()})
-    monkeypatch.setattr(C, "get_state", lambda fresh=False, p=None: asked.append(p["name"]) or dict(tasks=states[p["name"]], source=dict(fetchedAt=7)))
-    monkeypatch.setattr(C, "live_state", lambda q, S, fresh=False: S)
-    monkeypatch.setattr(C, "_served", lambda q, S: S)
+    monkeypatch.setattr(api_context, "PROJECTS", {q["name"]: q for q in served.values()})
+    monkeypatch.setattr(api_state, "get_state", lambda fresh=False, p=None: asked.append(p["name"]) or dict(tasks=states[p["name"]], source=dict(fetchedAt=7)))
+    monkeypatch.setattr(api_state, "live_state", lambda q, S, fresh=False: S)
+    monkeypatch.setattr(api_state, "_served", lambda q, S: S)
     assert [p["short"] for p in C.get_queue(P)["projects"]] == ["proj", "alpha", "gone"]
     a = C.get_queue_all(P)
     assert asked == ["proj", "alpha-cockpit"]   # each listed project from its own repository's state; never the selected one's for all

@@ -4,6 +4,8 @@ import io
 import json
 import pytest
 import cockpit as C
+from ckp.core import rules as core_rules
+from ckp.api import cache as api_cache, code as api_code, context as api_context, state as api_state, usage as api_usage
 
 FILE = {"default": "beta", "projects": [
     {"name": "alpha", "repo": "acme/widgets", "project": 3, "manager": "alice", "modules": "~/m.json", "git": "/src/w", "code": "/snap/w"},
@@ -14,8 +16,8 @@ FILE = {"default": "beta", "projects": [
 def two(monkeypatch):
     """Register two projects for a test and restore the module state afterwards."""
     projects, default = C.projects_from_file(FILE)
-    monkeypatch.setattr(C, "PROJECTS", {})
-    monkeypatch.setattr(C, "DEFAULT", None)
+    monkeypatch.setattr(api_context, "PROJECTS", {})
+    monkeypatch.setattr(api_context, "DEFAULT", None)
     C.register(projects, default)
     monkeypatch.setitem(C.CFG, "steer", True)
     monkeypatch.setitem(C.CFG, "simulate", False)
@@ -102,7 +104,7 @@ def test_cache_keys_isolate_projects(two):
 
 def test_state_is_built_and_cached_per_project(two, monkeypatch):
     built = []
-    monkeypatch.setattr(C, "build_state", lambda p: built.append(p["name"]) or dict(of=p["name"]))
+    monkeypatch.setattr(api_state, "build_state", lambda p: built.append(p["name"]) or dict(of=p["name"]))
     assert C.get_state(p=C.proj("alpha")) == dict(of="alpha") and C.get_state(p=C.proj("beta")) == dict(of="beta")
     C.get_state(p=C.proj("alpha"))
     assert built == ["alpha", "beta"]
@@ -151,7 +153,7 @@ def test_path_helpers_use_the_projects_own_paths(two, tmp_path):
     assert C.code_snapshot(C.proj("alpha")).get("wired") is not None
     cs = C.code_snapshot(C.proj("beta"))
     assert (cs["wired"], cs["modules"], cs["diagrams"]) == (False, {}, [])  # beta has no snapshot dir
-    assert C.L.report_file(C.proj("alpha")["code"], "x.html") and C.proj("beta")["code"] is None
+    assert core_rules.report_file(C.proj("alpha")["code"], "x.html") and C.proj("beta")["code"] is None
     assert C.build_rules(C.proj("beta")) == dict(configured=False)
 
 
@@ -184,7 +186,7 @@ def test_api_unknown_project_is_404_with_a_clear_error(two):
 
 
 def test_api_picks_the_project_from_the_query(two, monkeypatch):
-    monkeypatch.setattr(C, "build_state", lambda p: dict(of=p["name"]))
+    monkeypatch.setattr(api_state, "build_state", lambda p: dict(of=p["name"]))
     assert get("/api/state?project=alpha") == (200, dict(of="alpha", stale=False, staleNote=None, refreshAfter=3600, steerBlock=None, newWork=False, warming=False)) and get("/api/state") == (200, dict(of="beta", stale=False, staleNote=None, refreshAfter=3600, steerBlock=None, newWork=False, warming=False))
 
 
@@ -197,12 +199,12 @@ def test_report_without_a_query_follows_the_referer(two, tmp_path):
 
 
 def test_timeline_is_rebuilt_when_the_state_it_came_from_was_replaced(two, monkeypatch, tmp_path):
-    monkeypatch.setattr(C, "CACHE_DIR", None)
+    monkeypatch.setattr(api_context, "CACHE_DIR", None)
     p = C.proj("alpha")
     built = []
-    monkeypatch.setattr(C, "build_timeline", lambda S, p=None, fresh=False: built.append(S["source"]["fetchedAt"]) or dict(entries=[]))
+    monkeypatch.setattr(api_state, "build_timeline", lambda S, p=None, fresh=False: built.append(S["source"]["fetchedAt"]) or dict(entries=[]))
     state = dict(source=dict(fetchedAt=1))
-    monkeypatch.setattr(C, "get_state", lambda fresh=False, p=None: state)
+    monkeypatch.setattr(api_state, "get_state", lambda fresh=False, p=None: state)
     assert C.get_timeline(p)["stateAt"] == 1
     assert C.get_timeline(p)["stateAt"] == 1 and built == [1]  # same state: served from the cache
     state = dict(source=dict(fetchedAt=2))
@@ -211,14 +213,14 @@ def test_timeline_is_rebuilt_when_the_state_it_came_from_was_replaced(two, monke
 
 def test_served_state_says_when_a_newer_copy_is_being_fetched(two, monkeypatch):
     p = C.proj("alpha")
-    monkeypatch.setattr(C, "get_state", lambda fresh=False, p=None: dict(tasks=[]))
+    monkeypatch.setattr(api_state, "get_state", lambda fresh=False, p=None: dict(tasks=[]))
     assert C.get_state_served(p)["stale"] is False
-    monkeypatch.setattr(C, "_refreshing", {C.pk(p, "state")})
+    monkeypatch.setattr(api_cache, "_refreshing", {C.pk(p, "state")})
     assert C.get_state_served(p)["stale"] is True
 
 
 def test_warm_up_survives_a_failing_part(two, monkeypatch):
-    monkeypatch.setattr(C, "get_state", lambda p=None, fresh=False: 1 / 0)
-    for n in ("get_rules", "get_timeline", "code_snapshot", "usage_served", "warm_module_pages"):
-        monkeypatch.setattr(C, n, lambda p=None: None)
+    monkeypatch.setattr(api_state, "get_state", lambda p=None, fresh=False: 1 / 0)
+    for mod, n in ((api_code, "get_rules"), (api_state, "get_timeline"), (api_code, "code_snapshot"), (api_usage, "usage_served"), (api_code, "warm_module_pages")):
+        monkeypatch.setattr(mod, n, lambda p=None: None)
     C.warm()  # logs the failure, does not raise
