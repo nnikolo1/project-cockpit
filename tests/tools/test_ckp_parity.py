@@ -235,3 +235,37 @@ def test_main_check_exit_codes(tmp_path, capsys):
 
 def test_the_committed_mapping_covers_this_repository():
     assert P.check(P.ROOT) == []
+
+
+ROUTES_TABLE = 'ROUTES = {("GET", "/health"): 1, ("GET", "/code/"): 2}\n'
+
+
+def _moved_routes(tmp_path, api_src, mapping):
+    r = tree(tmp_path, mapping=mapping, files={"ckp/server/routes.py": ROUTES_TABLE, "ckp/api/g.py": api_src})
+    (r / "cockpit.py").write_text("class H:\n    def do_GET(self):\n        pass\n")     # the old server routes nothing any more
+    return r
+
+
+def test_moved_route_is_ported_when_the_table_has_the_path_and_the_api_function_is_callable(tmp_path):
+    r = _moved_routes(tmp_path, "def health():\n    pass\n\ndef diagram():\n    pass\n",
+                      {"route:GET /health": {**ent("ckp/api/g"), "as": "health"}, "route:GET /code/*": {**ent("ckp/api/g"), "as": "diagram"}})
+    assert {"route:GET /health", "route:GET /code/*"} <= P.evaluate(r, CFG)[4]
+    assert P.check(r, CFG) == [f"{i}: no mapping entry" for i in sorted(set(P.inventory(r, CFG)) - {"route:GET /health", "route:GET /code/*"})]
+
+
+def test_moved_route_fails_when_function_missing_or_path_not_in_the_table(tmp_path):
+    r = _moved_routes(tmp_path, "def other():\n    pass\n",
+                      {"route:GET /health": {**ent("ckp/api/g"), "as": "health"}, "route:GET /nowhere": {**ent("ckp/api/g"), "as": "other"}})
+    assert not {"route:GET /health", "route:GET /nowhere"} & P.evaluate(r, CFG)[4]
+    bad = P.check(r, CFG)
+    assert any(b.startswith("route:GET /health:") for b in bad) and any(b.startswith("route:GET /nowhere:") for b in bad)
+
+
+def test_server_action_ported_when_dispatched_in_its_own_target_and_fails_when_not(tmp_path):
+    r = tree(tmp_path, mapping={"action:server:take": ent("ckp/api/actions"), "action:server:gone": ent("ckp/api/actions")},
+             files={"ckp/api/actions.py": SERVER})
+    cfg = {**CFG, "ui": {**CFG["ui"], "server": "ckp/api/actions.py"}}
+    (r / "cockpit.py").write_text("")
+    ported = P.evaluate(r, cfg)[4]
+    assert "action:server:take" in ported and "action:server:gone" not in ported
+    assert any(b.startswith("action:server:gone:") for b in P.check(r, cfg))

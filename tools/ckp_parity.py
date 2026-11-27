@@ -14,7 +14,10 @@ gone (so the counts do not shrink as code moves). An item is ported when its tar
 - logic:   the target module imports (importlib, in a subprocess with the root on the path) and exposes the name (`as` if given) as a callable
            or class, and logic.py no longer defines it with def or class; placed is not ported;
 - dispatcher: the target module exists and the old module defines nothing (only imports) or is gone;
-- route, action:server: the target module names the path or action and the old server file no longer routes it;
+- route:   the path string appears in the routing table (cfg "routes", ckp/server/routes.py; the target module when there is none), the named
+           function (`as`) exists and is callable in the target module, and the old server file no longer routes it;
+- action:server: the action is dispatched in the target module itself (the server file of the UI config is that module), or, while the old
+           server file is separate, the target module names it and the old file no longer dispatches it;
 - action:page, action:form: the page stays in place; the target (an API function's module or a command) exists;
 - command: the command exists (it is already on the new structure).
 A DECISION marker at the start of a basis flags a placement that is a real design choice; --report counts those.
@@ -37,9 +40,9 @@ import ui_actions  # noqa: E402
 
 log = logging.getLogger("ckp_parity")
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-CONFIG = dict(logic=["logic.py"], server="cockpit.py", handlers=["do_GET", "do_POST"], dispatcher="dispatcher", cli="ckp/cli.py",
+CONFIG = dict(logic=["logic.py"], server="cockpit.py", handlers=["do_GET", "do_POST"], dispatcher="dispatcher", cli="ckp/cli.py", routes="ckp/server/routes.py",
               cli_builder="build_parser", map="docs/ckp-parity-map.json", ui=ui_actions.CONFIG)
-TARGET_PREFIXES = ("ckp/core/", "ckp/queue/", "ckp/server/", "ckp/adapters/", "ckp/store/")
+TARGET_PREFIXES = ("ckp/core/", "ckp/queue/", "ckp/api/", "ckp/server/", "ckp/adapters/", "ckp/store/")
 DECISION = "DECISION"
 KINDS = {"logic": "logic", "route": "route", "action": "action", "dispatcher": "dispatcher", "command": "command"}
 PROBE = """
@@ -245,11 +248,14 @@ def status(item, kind, entry, root, cfg, cmds, avail):
         return not old.is_file() or not defined(_tree(old))
     if kind == "route":
         path = name.split(" ", 1)[1].removesuffix("*")
-        return path in _names(tree) and item.split(":", 1)[1] not in routes(_tree(root / cfg["server"]), set(cfg["handlers"]))
+        table = _tree(root / cfg["routes"]) if cfg.get("routes") and (root / cfg["routes"]).is_file() else tree
+        return (path in _names(table) and ("as" not in entry or entry["as"] in (avail.get(t) or ()))
+                and name not in routes(_tree(root / cfg["server"]), set(cfg["handlers"])))
     if item.startswith("action:server:"):
         act = name.removeprefix("server:")
-        return act in _names(tree) and f"server:{act}" not in {f"server:{a}" for a in
-                                                               ui_actions.server_actions((root / cfg["ui"]["server"]).read_text(), cfg["ui"]["dispatch"], cfg["ui"].get("var", "a"))}
+        srv = root / cfg["ui"]["server"]
+        dispatched = {a for a in ui_actions.server_actions(srv.read_text(), cfg["ui"]["dispatch"], cfg["ui"].get("var", "a"))} if srv.is_file() else set()
+        return act in dispatched if srv == mod else act in _names(tree) and act not in dispatched
     return True   # page and form actions: the page stays; the target module exists
 
 
@@ -262,7 +268,7 @@ def evaluate(root, cfg=CONFIG):
     unmapped = sorted(i for i in old if i not in mapping)
     problems = [p for i, e in sorted(mapping.items()) for p in entry_problems(i, e)]
     good = {i: e for i, e in mapping.items() if not entry_problems(i, e)}
-    avail = exposed(root, {e["target"] for i, e in good.items() if items[i] == "logic" and e["target"].startswith(TARGET_PREFIXES)})
+    avail = exposed(root, {e["target"] for i, e in good.items() if items[i] in ("logic", "route") and e["target"].startswith(TARGET_PREFIXES)})
     ported = {i for i, e in good.items() if status(i, items[i], e, root, cfg, cmds, avail)}
     elsewhere = _defined_in_ckp(root) if any(i not in old and i not in ported and items[i] == "logic" for i in good) else {}
     for i, e in sorted(good.items()):

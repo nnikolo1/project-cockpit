@@ -2,267 +2,267 @@
  "_comment": "Hand-decided mapping of every old item of tools/ckp_parity.py to its target on the ckp structure (docs/contracts/ckp-architecture.md). Status is computed by the tool, never typed here. A basis starting with DECISION marks a placement that is a real design choice.",
  "items": {
   "action:form:alog": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:form:block": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
   },
   "action:form:cardsettings": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
   },
   "action:form:change": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
   },
   "action:form:edit": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
   },
   "action:form:moddl": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
   },
   "action:form:new": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
   },
   "action:form:qlog": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:form:release": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
   },
   "action:form:settings": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
   },
   "action:page:accept": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
   },
   "action:page:arm": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
   },
   "action:page:close": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:code": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:codem": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:codetab": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:complete": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
   },
   "action:page:dismiss": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
   },
   "action:page:edit": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:filter": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:fit": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:followup": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:go": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:hotspot": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:mod": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:modf": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:new": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:noedit": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:notex": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:open": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:problems": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:qlogbeats": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:qlogrow": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:qproj": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:qscope": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:qtdefaults": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:qtproj": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:refresh": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:retryact": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
   },
   "action:page:rev": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "review mark kept in the browser's storage only: the page stays in web/, no server function"
   },
   "action:page:revall": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "review mark kept in the browser's storage only: the page stays in web/, no server function"
   },
   "action:page:rg": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:setsec": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:subtask": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:take": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
   },
   "action:page:tlm": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:tlt": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:toastx": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
   },
   "action:page:unblock": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
   },
   "action:page:unrev": {
-   "target": "ckp/server/pages",
+   "target": "ckp/api/pages",
    "basis": "review mark kept in the browser's storage only: the page stays in web/, no server function"
   },
   "action:server:accept": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
   },
   "action:server:block": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
   },
   "action:server:cancel": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
   },
   "action:server:cardsettings": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
   },
   "action:server:change": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
   },
   "action:server:complete": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
   },
   "action:server:compliance": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
   },
   "action:server:deploy": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
   },
   "action:server:dismiss": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
   },
   "action:server:edit": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
   },
   "action:server:moddl": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
   },
   "action:server:new": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
   },
   "action:server:release": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
   },
   "action:server:settings": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
   },
   "action:server:take": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
   },
   "action:server:unblock": {
-   "target": "ckp/server/actions",
+   "target": "ckp/api/actions",
    "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
   },
   "command:ckp deploy": {
@@ -990,116 +990,144 @@
    "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
   },
   "route:GET /": {
-   "target": "ckp/server/pages",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/pages); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/pages",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/pages); thin: it calls the core function and returns its Result",
+   "as": "index"
   },
   "route:GET /api/actionlog": {
-   "target": "ckp/server/queue",
-   "basis": "DECISION: the action log read: ckp/server/queue (next to the Task Queue pane that shows it) or ckp/server/health; chosen: queue"
+   "target": "ckp/api/queue",
+   "basis": "settled by the split: the action log read: ckp/server/queue (next to the Task Queue pane that shows it) or ckp/server/health; served by ckp/api/queue.action_log",
+   "as": "action_log"
   },
   "route:GET /api/cardmeta": {
-   "target": "ckp/server/code",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/code); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/code",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/code); thin: it calls the core function and returns its Result",
+   "as": "cardmeta"
   },
   "route:GET /api/cardsettings": {
-   "target": "ckp/server/settings",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/settings); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/settings",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/settings); thin: it calls the core function and returns its Result",
+   "as": "cardsettings"
   },
   "route:GET /api/ci": {
-   "target": "ckp/server/health",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/health); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/health",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/health); thin: it calls the core function and returns its Result",
+   "as": "ci"
   },
   "route:GET /api/code": {
-   "target": "ckp/server/code",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/code); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/code",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/code); thin: it calls the core function and returns its Result",
+   "as": "code"
   },
   "route:GET /api/compliance": {
-   "target": "ckp/server/health",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/health); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/health",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/health); thin: it calls the core function and returns its Result",
+   "as": "compliance"
   },
   "route:GET /api/environments": {
-   "target": "ckp/server/health",
-   "basis": "DECISION: the Environments view already has core functions (ckp/core/environments): health group or its own ckp/server/environments; chosen: health"
+   "target": "ckp/api/health",
+   "basis": "settled by the split: the Environments view already has core functions (ckp/core/environments): health group or its own ckp/server/environments; served by ckp/api/health.environments",
+   "as": "environments"
   },
   "route:GET /api/moduledoc": {
-   "target": "ckp/server/code",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/code); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/code",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/code); thin: it calls the core function and returns its Result",
+   "as": "moduledoc"
   },
   "route:GET /api/projects": {
-   "target": "ckp/server/pages",
-   "basis": "DECISION: the project list is the registry (`ckp project list`): server module pages, or a thin call of the registry function; chosen: pages"
+   "target": "ckp/api/pages",
+   "basis": "settled by the split: the project list is the registry (`ckp project list`): server module pages, or a thin call of the registry function; served by ckp/api/pages.projects",
+   "as": "projects"
   },
   "route:GET /api/questions": {
-   "target": "ckp/server/state",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/state); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/state",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/state); thin: it calls the core function and returns its Result",
+   "as": "questions"
   },
   "route:GET /api/queue": {
-   "target": "ckp/server/queue",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/queue); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/queue",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/queue); thin: it calls the core function and returns its Result",
+   "as": "queue"
   },
   "route:GET /api/queueall": {
-   "target": "ckp/server/queue",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/queue); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/queue",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/queue); thin: it calls the core function and returns its Result",
+   "as": "queue_all"
   },
   "route:GET /api/queuepoll": {
-   "target": "ckp/server/queue",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/queue); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/queue",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/queue); thin: it calls the core function and returns its Result",
+   "as": "queue_poll"
   },
   "route:GET /api/rules": {
-   "target": "ckp/server/code",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/code); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/code",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/code); thin: it calls the core function and returns its Result",
+   "as": "rules"
   },
   "route:GET /api/rulesprs": {
-   "target": "ckp/server/code",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/code); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/code",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/code); thin: it calls the core function and returns its Result",
+   "as": "rule_prs"
   },
   "route:GET /api/settings": {
-   "target": "ckp/server/settings",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/settings); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/settings",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/settings); thin: it calls the core function and returns its Result",
+   "as": "settings"
   },
   "route:GET /api/state": {
-   "target": "ckp/server/state",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/state); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/state",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/state); thin: it calls the core function and returns its Result",
+   "as": "state"
   },
   "route:GET /api/task": {
-   "target": "ckp/server/state",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/state); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/state",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/state); thin: it calls the core function and returns its Result",
+   "as": "task"
   },
   "route:GET /api/timeline": {
-   "target": "ckp/server/state",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/state); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/state",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/state); thin: it calls the core function and returns its Result",
+   "as": "timeline"
   },
   "route:GET /api/usage": {
-   "target": "ckp/server/usage",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/usage); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/usage",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/usage); thin: it calls the core function and returns its Result",
+   "as": "usage"
   },
   "route:GET /code/*": {
-   "target": "ckp/server/code",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/code); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/code",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/code); thin: it calls the core function and returns its Result",
+   "as": "diagram"
   },
   "route:GET /compliance-report": {
-   "target": "ckp/server/health",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/health); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/health",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/health); thin: it calls the core function and returns its Result",
+   "as": "compliance_report"
   },
   "route:GET /health": {
-   "target": "ckp/server/health",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/health); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/health",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/health); thin: it calls the core function and returns its Result",
+   "as": "health"
   },
   "route:GET /index.html": {
-   "target": "ckp/server/pages",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/pages); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/pages",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/pages); thin: it calls the core function and returns its Result",
+   "as": "index"
   },
   "route:GET /report/*": {
-   "target": "ckp/server/code",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/code); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/code",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/code); thin: it calls the core function and returns its Result",
+   "as": "report"
   },
   "route:POST /api/act": {
-   "target": "ckp/server/actions",
-   "basis": "GET/POST handler grouped by what it serves (ckp/server/actions); thin: it calls the core function and returns its Result"
+   "target": "ckp/api/actions",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/actions); thin: it calls the core function and returns its Result",
+   "as": "act"
   },
   "route:POST /api/event": {
-   "target": "ckp/server/actions",
-   "basis": "DECISION: page failure reports: ckp/server/actions (with /api/act) or ckp/server/health; chosen: actions"
+   "target": "ckp/api/actions",
+   "basis": "settled by the split: page failure reports: ckp/server/actions (with /api/act) or ckp/server/health; served by ckp/api/actions.event",
+   "as": "event"
   }
  }
 }
