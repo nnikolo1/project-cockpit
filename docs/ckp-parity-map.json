@@ -1,0 +1,1105 @@
+{
+ "_comment": "Hand-decided mapping of every old item of tools/ckp_parity.py to its target on the ckp structure (docs/contracts/ckp-architecture.md). Status is computed by the tool, never typed here. A basis starting with DECISION marks a placement that is a real design choice.",
+ "items": {
+  "action:form:alog": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:form:block": {
+   "target": "ckp/server/actions",
+   "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
+  },
+  "action:form:cardsettings": {
+   "target": "ckp/server/actions",
+   "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
+  },
+  "action:form:change": {
+   "target": "ckp/server/actions",
+   "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
+  },
+  "action:form:edit": {
+   "target": "ckp/server/actions",
+   "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
+  },
+  "action:form:moddl": {
+   "target": "ckp/server/actions",
+   "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
+  },
+  "action:form:new": {
+   "target": "ckp/server/actions",
+   "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
+  },
+  "action:form:qlog": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:form:release": {
+   "target": "ckp/server/actions",
+   "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
+  },
+  "action:form:settings": {
+   "target": "ckp/server/actions",
+   "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
+  },
+  "action:page:accept": {
+   "target": "ckp/server/actions",
+   "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
+  },
+  "action:page:arm": {
+   "target": "ckp/server/actions",
+   "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
+  },
+  "action:page:close": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:code": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:codem": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:codetab": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:complete": {
+   "target": "ckp/server/actions",
+   "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
+  },
+  "action:page:dismiss": {
+   "target": "ckp/server/actions",
+   "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
+  },
+  "action:page:edit": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:filter": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:fit": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:followup": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:go": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:hotspot": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:mod": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:modf": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:new": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:noedit": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:notex": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:open": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:problems": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:qlogbeats": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:qlogrow": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:qproj": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:qscope": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:qtdefaults": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:qtproj": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:refresh": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:retryact": {
+   "target": "ckp/server/actions",
+   "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
+  },
+  "action:page:rev": {
+   "target": "ckp/server/pages",
+   "basis": "review mark kept in the browser's storage only: the page stays in web/, no server function"
+  },
+  "action:page:revall": {
+   "target": "ckp/server/pages",
+   "basis": "review mark kept in the browser's storage only: the page stays in web/, no server function"
+  },
+  "action:page:rg": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:setsec": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:subtask": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:take": {
+   "target": "ckp/server/actions",
+   "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
+  },
+  "action:page:tlm": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:tlt": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:toastx": {
+   "target": "ckp/server/pages",
+   "basis": "page action that only changes what the page shows: the page stays in web/, it needs no API function"
+  },
+  "action:page:unblock": {
+   "target": "ckp/server/actions",
+   "basis": "page or form action that leads to a server change: its API function is the server action it posts (ckp/server/actions)"
+  },
+  "action:page:unrev": {
+   "target": "ckp/server/pages",
+   "basis": "review mark kept in the browser's storage only: the page stays in web/, no server function"
+  },
+  "action:server:accept": {
+   "target": "ckp/server/actions",
+   "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
+  },
+  "action:server:block": {
+   "target": "ckp/server/actions",
+   "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
+  },
+  "action:server:cancel": {
+   "target": "ckp/server/actions",
+   "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
+  },
+  "action:server:cardsettings": {
+   "target": "ckp/server/actions",
+   "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
+  },
+  "action:server:change": {
+   "target": "ckp/server/actions",
+   "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
+  },
+  "action:server:complete": {
+   "target": "ckp/server/actions",
+   "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
+  },
+  "action:server:compliance": {
+   "target": "ckp/server/actions",
+   "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
+  },
+  "action:server:deploy": {
+   "target": "ckp/server/actions",
+   "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
+  },
+  "action:server:dismiss": {
+   "target": "ckp/server/actions",
+   "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
+  },
+  "action:server:edit": {
+   "target": "ckp/server/actions",
+   "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
+  },
+  "action:server:moddl": {
+   "target": "ckp/server/actions",
+   "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
+  },
+  "action:server:new": {
+   "target": "ckp/server/actions",
+   "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
+  },
+  "action:server:release": {
+   "target": "ckp/server/actions",
+   "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
+  },
+  "action:server:settings": {
+   "target": "ckp/server/actions",
+   "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
+  },
+  "action:server:take": {
+   "target": "ckp/server/actions",
+   "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
+  },
+  "action:server:unblock": {
+   "target": "ckp/server/actions",
+   "basis": "state-changing server action (spec: the endpoint and the command call the same function); handler thin, the effect in ckp/core"
+  },
+  "command:ckp deploy": {
+   "target": "ckp deploy",
+   "basis": "already on the new structure"
+  },
+  "command:ckp env set": {
+   "target": "ckp env set",
+   "basis": "already on the new structure"
+  },
+  "command:ckp env show": {
+   "target": "ckp env show",
+   "basis": "already on the new structure"
+  },
+  "command:ckp heartbeat run": {
+   "target": "ckp heartbeat run",
+   "basis": "already on the new structure"
+  },
+  "command:ckp heartbeat set": {
+   "target": "ckp heartbeat set",
+   "basis": "already on the new structure"
+  },
+  "command:ckp project add": {
+   "target": "ckp project add",
+   "basis": "already on the new structure"
+  },
+  "command:ckp project list": {
+   "target": "ckp project list",
+   "basis": "already on the new structure"
+  },
+  "command:ckp project remove": {
+   "target": "ckp project remove",
+   "basis": "already on the new structure"
+  },
+  "command:ckp project show": {
+   "target": "ckp project show",
+   "basis": "already on the new structure"
+  },
+  "command:ckp task comment": {
+   "target": "ckp task comment",
+   "basis": "already on the new structure"
+  },
+  "command:ckp task file": {
+   "target": "ckp task file",
+   "basis": "already on the new structure"
+  },
+  "command:ckp task list": {
+   "target": "ckp task list",
+   "basis": "already on the new structure"
+  },
+  "command:ckp task show": {
+   "target": "ckp task show",
+   "basis": "already on the new structure"
+  },
+  "command:ckp watch": {
+   "target": "ckp watch",
+   "basis": "already on the new structure"
+  },
+  "dispatcher:agent": {
+   "target": "ckp/queue/agent",
+   "basis": "the Dispatcher package moves over as it is (contract: ckp/queue/)"
+  },
+  "dispatcher:core": {
+   "target": "ckp/queue/core",
+   "basis": "the Dispatcher package moves over as it is (contract: ckp/queue/)"
+  },
+  "dispatcher:host": {
+   "target": "ckp/queue/host",
+   "basis": "the Dispatcher package moves over as it is (contract: ckp/queue/)"
+  },
+  "dispatcher:launchd": {
+   "target": "ckp/queue/launchd",
+   "basis": "the Dispatcher package moves over as it is (contract: ckp/queue/)"
+  },
+  "dispatcher:layout": {
+   "target": "ckp/store/layout",
+   "basis": "already a shim: the layout moved to ckp.store.layout (PC-140 slice 1)"
+  },
+  "dispatcher:note": {
+   "target": "ckp/queue/note",
+   "basis": "the Dispatcher package moves over as it is (contract: ckp/queue/)"
+  },
+  "dispatcher:plog": {
+   "target": "ckp/queue/plog",
+   "basis": "the Dispatcher package moves over as it is (contract: ckp/queue/)"
+  },
+  "dispatcher:proxy": {
+   "target": "ckp/queue/proxy",
+   "basis": "the Dispatcher package moves over as it is (contract: ckp/queue/)"
+  },
+  "dispatcher:quota": {
+   "target": "ckp/queue/quota",
+   "basis": "the Dispatcher package moves over as it is (contract: ckp/queue/)"
+  },
+  "dispatcher:relay": {
+   "target": "ckp/queue/relay",
+   "basis": "the Dispatcher package moves over as it is (contract: ckp/queue/)"
+  },
+  "dispatcher:runtime": {
+   "target": "ckp/queue/runtime",
+   "basis": "the Dispatcher package moves over as it is (contract: ckp/queue/)"
+  },
+  "dispatcher:tasks": {
+   "target": "ckp/queue/tasks",
+   "basis": "the Dispatcher package moves over as it is (contract: ckp/queue/)"
+  },
+  "logic:action_applied": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:action_record": {
+   "target": "ckp/core/health",
+   "basis": "DECISION: the action log has no theme in the contract: ckp/core/health or its own ckp/core/actionlog; chosen: health"
+  },
+  "logic:activity_days": {
+   "target": "ckp/core/commits",
+   "basis": "DECISION: task activity for the Timeline heatmap: ckp/core/commits (the feed) or ckp/core/tasks_model (it counts tasks); chosen: commits"
+  },
+  "logic:add_tree": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:age_days": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:ambiguity_view": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:analysis_state": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:apply_ops": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:backup_gaps": {
+   "target": "ckp/core/health",
+   "basis": "DECISION: offline-copy completeness: ckp/core/health or ckp/core/offline; chosen: health"
+  },
+  "logic:backup_status": {
+   "target": "ckp/core/health",
+   "basis": "theme health: gaps, backup, CI, compliance and the action log (contract layout)"
+  },
+  "logic:backup_status_gaps": {
+   "target": "ckp/core/health",
+   "basis": "theme health: gaps, backup, CI, compliance and the action log (contract layout)"
+  },
+  "logic:band_of": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:biggest_files": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:capacity": {
+   "target": "ckp/core/queue_view",
+   "basis": "theme queue_view: Task Queue state, capacity, processing-log rows and the live overlay (contract layout)"
+  },
+  "logic:card_meta": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:chain": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:changes_view": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:churn_view": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:ci_latest": {
+   "target": "ckp/core/health",
+   "basis": "theme health: gaps, backup, CI, compliance and the action log (contract layout)"
+  },
+  "logic:ci_run": {
+   "target": "ckp/core/health",
+   "basis": "theme health: gaps, backup, CI, compliance and the action log (contract layout)"
+  },
+  "logic:code_lines": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:code_view": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:collect_command": {
+   "target": "ckp/core/modules",
+   "basis": "DECISION: the collector command of a project setting: ckp/core/modules (snapshot refresh) or ckp/core/health (compliance); chosen: modules"
+  },
+  "logic:commit_lanes": {
+   "target": "ckp/core/commits",
+   "basis": "theme commits: git log parsing, lanes and the timeline feed (contract layout)"
+  },
+  "logic:compliance_run_state": {
+   "target": "ckp/core/health",
+   "basis": "theme health: gaps, backup, CI, compliance and the action log (contract layout)"
+  },
+  "logic:compliance_summary": {
+   "target": "ckp/core/health",
+   "basis": "theme health: gaps, backup, CI, compliance and the action log (contract layout)"
+  },
+  "logic:container_reading": {
+   "target": "ckp/core/queue_view",
+   "basis": "theme queue_view: Task Queue state, capacity, processing-log rows and the live overlay (contract layout)"
+  },
+  "logic:derive": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:diff_excerpt": {
+   "target": "ckp/core/rules",
+   "basis": "theme rules: rule files, rule groups and rule-change parsing (contract layout)"
+  },
+  "logic:dispatchable": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:doc_modules": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:doc_title": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:estimate_percent": {
+   "target": "ckp/core/usage",
+   "basis": "theme usage: token usage report, transcripts, vendor quota windows and estimates (contract layout)"
+  },
+  "logic:event_text": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:file_kind": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:file_location": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:filter_events": {
+   "target": "ckp/core/health",
+   "basis": "DECISION: the action log has no theme in the contract: ckp/core/health or its own ckp/core/actionlog; chosen: health"
+  },
+  "logic:filter_feed": {
+   "target": "ckp/core/commits",
+   "basis": "theme commits: git log parsing, lanes and the timeline feed (contract layout)"
+  },
+  "logic:footprint_view": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:gate_result": {
+   "target": "ckp/core/health",
+   "basis": "theme health: gaps, backup, CI, compliance and the action log (contract layout)"
+  },
+  "logic:glob_re": {
+   "target": "ckp/core/rules",
+   "basis": "theme rules: rule files, rule groups and rule-change parsing (contract layout)"
+  },
+  "logic:group_commits": {
+   "target": "ckp/core/commits",
+   "basis": "theme commits: git log parsing, lanes and the timeline feed (contract layout)"
+  },
+  "logic:group_files": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:group_questions": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:heat_days": {
+   "target": "ckp/core/usage",
+   "basis": "theme usage: token usage report, transcripts, vendor quota windows and estimates (contract layout)"
+  },
+  "logic:hl_ids": {
+   "target": "ckp/core/modules",
+   "basis": "DECISION: the Workflow highlight file reader: ckp/core/modules (module content files) or a separate theme; chosen: modules"
+  },
+  "logic:import_edges": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:is_agent_assisted": {
+   "target": "ckp/core/rules",
+   "basis": "theme rules: rule files, rule groups and rule-change parsing (contract layout)"
+  },
+  "logic:is_blocked": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:is_date": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:is_finding": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:is_manager": {
+   "target": "ckp/core/rules",
+   "basis": "DECISION: rule-change authorship: ckp/core/rules or ckp/core/tasks_model (protected labels); chosen: rules"
+  },
+  "logic:is_protected": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:is_rate_limited": {
+   "target": "ckp/core/offline",
+   "basis": "DECISION: offline behaviour has no theme in the contract: new ckp/core/offline, or ckp/store/cache; chosen: ckp/core/offline (pure rules)"
+  },
+  "logic:is_running": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:issue_entries": {
+   "target": "ckp/core/commits",
+   "basis": "DECISION: issue entries of the Timeline feed: ckp/core/commits (the feed) or ckp/core/tasks_model; chosen: commits"
+  },
+  "logic:issues_needing_timeline": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:join_text": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:listed_projects": {
+   "target": "ckp/core/queue_view",
+   "basis": "DECISION: the projects the one queue serves: ckp/core/queue_view or ckp/core/projects (PC-140); chosen: queue_view"
+  },
+  "logic:live_events": {
+   "target": "ckp/core/queue_view",
+   "basis": "theme queue_view: Task Queue state, capacity, processing-log rows and the live overlay (contract layout)"
+  },
+  "logic:live_refresh_due": {
+   "target": "ckp/core/queue_view",
+   "basis": "theme queue_view: Task Queue state, capacity, processing-log rows and the live overlay (contract layout)"
+  },
+  "logic:local_modules": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:log_rows": {
+   "target": "ckp/core/queue_view",
+   "basis": "theme queue_view: Task Queue state, capacity, processing-log rows and the live overlay (contract layout)"
+  },
+  "logic:map_entry": {
+   "target": "ckp/core/modules",
+   "basis": "DECISION: a module-map lookup used by the gap checks: ckp/core/modules or ckp/core/health; chosen: modules"
+  },
+  "logic:map_path": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:may_start_new": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:merge_questions": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:metadata_gaps": {
+   "target": "ckp/core/health",
+   "basis": "theme health: gaps, backup, CI, compliance and the action log (contract layout)"
+  },
+  "logic:module_bands": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:module_deadline": {
+   "target": "ckp/core/modules",
+   "basis": "DECISION: a module's deadline from the task side: ckp/core/modules or ckp/core/tasks_model; chosen: modules"
+  },
+  "logic:module_dir": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:module_docs": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:module_files": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:module_paragraphs": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:module_relations": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:module_stem": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:monthly_by_project": {
+   "target": "ckp/core/usage",
+   "basis": "theme usage: token usage report, transcripts, vendor quota windows and estimates (contract layout)"
+  },
+  "logic:norm_events": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:norm_issue": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:offline_kind": {
+   "target": "ckp/core/offline",
+   "basis": "DECISION: offline behaviour has no theme in the contract: new ckp/core/offline, or ckp/store/cache; chosen: ckp/core/offline (pure rules)"
+  },
+  "logic:offline_reason": {
+   "target": "ckp/core/offline",
+   "basis": "DECISION: offline behaviour has no theme in the contract: new ckp/core/offline, or ckp/store/cache; chosen: ckp/core/offline (pure rules)"
+  },
+  "logic:open_counts": {
+   "target": "ckp/core/tasks_model",
+   "basis": "DECISION: counts tasks per module for the chips: ckp/core/tasks_model or ckp/core/modules; chosen: tasks_model"
+  },
+  "logic:open_kind": {
+   "target": "ckp/core/tasks_model",
+   "basis": "DECISION: counts tasks per module for the chips: ckp/core/tasks_model or ckp/core/modules; chosen: tasks_model"
+  },
+  "logic:open_tip": {
+   "target": "ckp/core/tasks_model",
+   "basis": "DECISION: counts tasks per module for the chips: ckp/core/tasks_model or ckp/core/modules; chosen: tasks_model"
+  },
+  "logic:order_modules": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:overlay_live": {
+   "target": "ckp/core/queue_view",
+   "basis": "theme queue_view: Task Queue state, capacity, processing-log rows and the live overlay (contract layout)"
+  },
+  "logic:page_record": {
+   "target": "ckp/core/health",
+   "basis": "DECISION: the action log has no theme in the contract: ckp/core/health or its own ckp/core/actionlog; chosen: health"
+  },
+  "logic:pane_problem": {
+   "target": "ckp/core/health",
+   "basis": "DECISION: why an offline copy has no data: ckp/core/health or ckp/core/offline; chosen: health"
+  },
+  "logic:parent_id": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:parse_card": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:parse_compliance": {
+   "target": "ckp/core/health",
+   "basis": "theme health: gaps, backup, CI, compliance and the action log (contract layout)"
+  },
+  "logic:parse_due": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:parse_filed_by": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:parse_git_full": {
+   "target": "ckp/core/commits",
+   "basis": "theme commits: git log parsing, lanes and the timeline feed (contract layout)"
+  },
+  "logic:parse_heartbeat": {
+   "target": "ckp/core/queue_view",
+   "basis": "DECISION: a Dispatcher heartbeat line: ckp/core/queue_view (the log rows) or ckp/queue/plog (the writer of the log); chosen: queue_view"
+  },
+  "logic:parse_last_changes": {
+   "target": "ckp/core/rules",
+   "basis": "theme rules: rule files, rule groups and rule-change parsing (contract layout)"
+  },
+  "logic:parse_module_deadlines": {
+   "target": "ckp/core/tasks_model",
+   "basis": "DECISION: module deadlines belong to ckp/core/modules or tasks_model (parse_due); chosen: tasks_model with parse_due"
+  },
+  "logic:parse_numstat": {
+   "target": "ckp/core/rules",
+   "basis": "theme rules: rule files, rule groups and rule-change parsing (contract layout)"
+  },
+  "logic:parse_project": {
+   "target": "ckp/core/tasks_model",
+   "basis": "DECISION: the Project-board field parser: ckp/core/tasks_model or a GitHub-facing module in ckp/adapters; chosen: tasks_model (pure parsing)"
+  },
+  "logic:parse_proposals": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:parse_questions": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:parse_recommendation": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:parse_rule_changes": {
+   "target": "ckp/core/rules",
+   "basis": "theme rules: rule files, rule groups and rule-change parsing (contract layout)"
+  },
+  "logic:pending_rule_prs": {
+   "target": "ckp/core/rules",
+   "basis": "theme rules: rule files, rule groups and rule-change parsing (contract layout)"
+  },
+  "logic:pickable": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:policy": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:policy_text": {
+   "target": "ckp/core/modules",
+   "basis": "DECISION: footprint backup policy text: ckp/core/modules (footprint) or ckp/core/health (backup); chosen: modules"
+  },
+  "logic:project_key": {
+   "target": "ckp/core/queue_view",
+   "basis": "DECISION: project of a Dispatcher task id: ckp/core/queue_view or ckp/core/projects (PC-140); chosen: queue_view"
+  },
+  "logic:queue_all": {
+   "target": "ckp/core/queue_view",
+   "basis": "theme queue_view: Task Queue state, capacity, processing-log rows and the live overlay (contract layout)"
+  },
+  "logic:queue_interval": {
+   "target": "ckp/core/settings",
+   "basis": "theme settings: validation of the settings forms and the settings the page may narrow (contract layout)"
+  },
+  "logic:queue_local": {
+   "target": "ckp/core/queue_view",
+   "basis": "theme queue_view: Task Queue state, capacity, processing-log rows and the live overlay (contract layout)"
+  },
+  "logic:quota_estimates": {
+   "target": "ckp/core/usage",
+   "basis": "theme usage: token usage report, transcripts, vendor quota windows and estimates (contract layout)"
+  },
+  "logic:rank_bands": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:rate_limit_reset": {
+   "target": "ckp/core/offline",
+   "basis": "DECISION: offline behaviour has no theme in the contract: new ckp/core/offline, or ckp/store/cache; chosen: ckp/core/offline (pure rules)"
+  },
+  "logic:record_kind": {
+   "target": "ckp/core/usage",
+   "basis": "theme usage: token usage report, transcripts, vendor quota windows and estimates (contract layout)"
+  },
+  "logic:red_main_body": {
+   "target": "ckp/core/health",
+   "basis": "theme health: gaps, backup, CI, compliance and the action log (contract layout)"
+  },
+  "logic:ref_link": {
+   "target": "ckp/core/commits",
+   "basis": "theme commits: git log parsing, lanes and the timeline feed (contract layout)"
+  },
+  "logic:refresh_due": {
+   "target": "ckp/core/offline",
+   "basis": "DECISION: the refresh schedule of GitHub resources: ckp/core/offline or ckp/store/cache; chosen: ckp/core/offline"
+  },
+  "logic:refresh_outcome": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:replace_issues": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:report_file": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:resolve_module": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:rule_feed": {
+   "target": "ckp/core/commits",
+   "basis": "DECISION: builds timeline entries from rule changes: ckp/core/commits (the feed) or ckp/core/rules (the rule data); chosen: commits, as the feed"
+  },
+  "logic:rule_files": {
+   "target": "ckp/core/rules",
+   "basis": "theme rules: rule files, rule groups and rule-change parsing (contract layout)"
+  },
+  "logic:rule_group": {
+   "target": "ckp/core/rules",
+   "basis": "theme rules: rule files, rule groups and rule-change parsing (contract layout)"
+  },
+  "logic:rule_pathspecs": {
+   "target": "ckp/core/rules",
+   "basis": "theme rules: rule files, rule groups and rule-change parsing (contract layout)"
+  },
+  "logic:rules_config": {
+   "target": "ckp/core/rules",
+   "basis": "theme rules: rule files, rule groups and rule-change parsing (contract layout)"
+  },
+  "logic:sanitise_svg": {
+   "target": "ckp/core/modules",
+   "basis": "DECISION: sanitises the Workflow drawing: ckp/core/modules (module content files) or a separate theme; chosen: modules"
+  },
+  "logic:scrub": {
+   "target": "ckp/core/health",
+   "basis": "DECISION: the action log's secret scrubbing: ckp/core/health or a security theme; chosen: health with the action log"
+  },
+  "logic:shade_level": {
+   "target": "ckp/core/commits",
+   "basis": "theme commits: git log parsing, lanes and the timeline feed (contract layout)"
+  },
+  "logic:short_name": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:snapshot_age": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:snapshot_lines": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:source_project": {
+   "target": "ckp/core/usage",
+   "basis": "theme usage: token usage report, transcripts, vendor quota windows and estimates (contract layout)"
+  },
+  "logic:split_text": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:split_title": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:stage": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:stagger_plan": {
+   "target": "ckp/core/offline",
+   "basis": "DECISION: the refresh schedule of GitHub resources: ckp/core/offline or ckp/store/cache; chosen: ckp/core/offline"
+  },
+  "logic:static_entries": {
+   "target": "ckp/core/commits",
+   "basis": "theme commits: git log parsing, lanes and the timeline feed (contract layout)"
+  },
+  "logic:swap_priority": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:task_events": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:task_lookup": {
+   "target": "ckp/core/tasks_model",
+   "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
+  },
+  "logic:task_module": {
+   "target": "ckp/core/modules",
+   "basis": "DECISION: joins a task to a module: ckp/core/modules or ckp/core/tasks_model; chosen: modules"
+  },
+  "logic:task_number": {
+   "target": "ckp/core/queue_view",
+   "basis": "DECISION: Dispatcher task id to issue number: ckp/core/queue_view or ckp/core/tasks_model; chosen: queue_view"
+  },
+  "logic:top_id": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "logic:transcript_report": {
+   "target": "ckp/core/usage",
+   "basis": "theme usage: token usage report, transcripts, vendor quota windows and estimates (contract layout)"
+  },
+  "logic:transcript_retention_gaps": {
+   "target": "ckp/core/health",
+   "basis": "theme health: gaps, backup, CI, compliance and the action log (contract layout)"
+  },
+  "logic:usage_report": {
+   "target": "ckp/core/usage",
+   "basis": "theme usage: token usage report, transcripts, vendor quota windows and estimates (contract layout)"
+  },
+  "logic:validate_card_settings": {
+   "target": "ckp/core/settings",
+   "basis": "theme settings: validation of the settings forms and the settings the page may narrow (contract layout)"
+  },
+  "logic:validate_queue_refresh": {
+   "target": "ckp/core/settings",
+   "basis": "theme settings: validation of the settings forms and the settings the page may narrow (contract layout)"
+  },
+  "logic:validate_quota_settings": {
+   "target": "ckp/core/settings",
+   "basis": "theme settings: validation of the settings forms and the settings the page may narrow (contract layout)"
+  },
+  "logic:validate_settings": {
+   "target": "ckp/core/settings",
+   "basis": "theme settings: validation of the settings forms and the settings the page may narrow (contract layout)"
+  },
+  "logic:validate_thresholds": {
+   "target": "ckp/core/settings",
+   "basis": "theme settings: validation of the settings forms and the settings the page may narrow (contract layout)"
+  },
+  "logic:vendor_windows": {
+   "target": "ckp/core/usage",
+   "basis": "theme usage: token usage report, transcripts, vendor quota windows and estimates (contract layout)"
+  },
+  "logic:with_parents": {
+   "target": "ckp/core/modules",
+   "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
+  },
+  "route:GET /": {
+   "target": "ckp/server/pages",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/pages); thin: it calls the core function and returns its Result"
+  },
+  "route:GET /api/actionlog": {
+   "target": "ckp/server/queue",
+   "basis": "DECISION: the action log read: ckp/server/queue (next to the Task Queue pane that shows it) or ckp/server/health; chosen: queue"
+  },
+  "route:GET /api/cardmeta": {
+   "target": "ckp/server/code",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/code); thin: it calls the core function and returns its Result"
+  },
+  "route:GET /api/cardsettings": {
+   "target": "ckp/server/settings",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/settings); thin: it calls the core function and returns its Result"
+  },
+  "route:GET /api/ci": {
+   "target": "ckp/server/health",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/health); thin: it calls the core function and returns its Result"
+  },
+  "route:GET /api/code": {
+   "target": "ckp/server/code",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/code); thin: it calls the core function and returns its Result"
+  },
+  "route:GET /api/compliance": {
+   "target": "ckp/server/health",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/health); thin: it calls the core function and returns its Result"
+  },
+  "route:GET /api/environments": {
+   "target": "ckp/server/health",
+   "basis": "DECISION: the Environments view already has core functions (ckp/core/environments): health group or its own ckp/server/environments; chosen: health"
+  },
+  "route:GET /api/moduledoc": {
+   "target": "ckp/server/code",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/code); thin: it calls the core function and returns its Result"
+  },
+  "route:GET /api/projects": {
+   "target": "ckp/server/pages",
+   "basis": "DECISION: the project list is the registry (`ckp project list`): server module pages, or a thin call of the registry function; chosen: pages"
+  },
+  "route:GET /api/questions": {
+   "target": "ckp/server/state",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/state); thin: it calls the core function and returns its Result"
+  },
+  "route:GET /api/queue": {
+   "target": "ckp/server/queue",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/queue); thin: it calls the core function and returns its Result"
+  },
+  "route:GET /api/queueall": {
+   "target": "ckp/server/queue",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/queue); thin: it calls the core function and returns its Result"
+  },
+  "route:GET /api/queuepoll": {
+   "target": "ckp/server/queue",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/queue); thin: it calls the core function and returns its Result"
+  },
+  "route:GET /api/rules": {
+   "target": "ckp/server/code",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/code); thin: it calls the core function and returns its Result"
+  },
+  "route:GET /api/rulesprs": {
+   "target": "ckp/server/code",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/code); thin: it calls the core function and returns its Result"
+  },
+  "route:GET /api/settings": {
+   "target": "ckp/server/settings",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/settings); thin: it calls the core function and returns its Result"
+  },
+  "route:GET /api/state": {
+   "target": "ckp/server/state",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/state); thin: it calls the core function and returns its Result"
+  },
+  "route:GET /api/task": {
+   "target": "ckp/server/state",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/state); thin: it calls the core function and returns its Result"
+  },
+  "route:GET /api/timeline": {
+   "target": "ckp/server/state",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/state); thin: it calls the core function and returns its Result"
+  },
+  "route:GET /api/usage": {
+   "target": "ckp/server/usage",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/usage); thin: it calls the core function and returns its Result"
+  },
+  "route:GET /code/*": {
+   "target": "ckp/server/code",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/code); thin: it calls the core function and returns its Result"
+  },
+  "route:GET /compliance-report": {
+   "target": "ckp/server/health",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/health); thin: it calls the core function and returns its Result"
+  },
+  "route:GET /health": {
+   "target": "ckp/server/health",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/health); thin: it calls the core function and returns its Result"
+  },
+  "route:GET /index.html": {
+   "target": "ckp/server/pages",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/pages); thin: it calls the core function and returns its Result"
+  },
+  "route:GET /report/*": {
+   "target": "ckp/server/code",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/code); thin: it calls the core function and returns its Result"
+  },
+  "route:POST /api/act": {
+   "target": "ckp/server/actions",
+   "basis": "GET/POST handler grouped by what it serves (ckp/server/actions); thin: it calls the core function and returns its Result"
+  },
+  "route:POST /api/event": {
+   "target": "ckp/server/actions",
+   "basis": "DECISION: page failure reports: ckp/server/actions (with /api/act) or ckp/server/health; chosen: actions"
+  }
+ }
+}
