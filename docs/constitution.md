@@ -146,3 +146,8 @@ Every turn ends in a way that makes it abundantly clear whether the assistant is
 ## Labels are the owner's (standing rule, owner, 2026-11-25)
 
 Never apply a label that the owner has not proposed himself: not a new label, not an existing one the owner did not name for that purpose (owner, 2026-11-25, standing rule; applies to all projects at all times). Occasion: the assistant had applied the label `interactive-only` on its own initiative; it was removed and can no longer be set.
+
+
+## No underground scripts (standing rule, owner, 2026-11-27)
+
+Any helper script the assistant creates ad hoc becomes part of the git repository of the project it serves: no script lives only in a temporary or scratch folder (owner, 2026-11-27, standing rule; applies to all projects at all times). Occasion: the housekeeping scripts of a merge run existed only in /tmp, could not be reviewed or tested, and one of them closed three failed tasks as merged.
