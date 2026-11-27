@@ -150,4 +150,12 @@ Never apply a label that the owner has not proposed himself: not a new label, no
 
 ## No underground scripts (standing rule, owner, 2026-11-27)
 
-Any helper script the assistant creates ad hoc becomes part of the git repository of the project it serves: no script lives only in a temporary or scratch folder; there are no throw-away scripts either: every script is recorded in the repository before it runs, even a one-off, and the usual rules apply to it (tests where it decides something, the code checklist, the module map) (owner, 2026-11-27, standing rule; applies to all projects at all times). Occasion: the housekeeping scripts of a merge run existed only in /tmp, could not be reviewed or tested, and one of them closed three failed tasks as merged.
+Any helper script the assistant creates ad hoc becomes part of the git repository of the project it serves: no script lives only in a temporary or scratch folder, and there are no throw-away scripts (owner, 2026-11-27, standing rule; applies to all projects at all times). Occasion: the housekeeping scripts of a merge run existed only in /tmp, could not be reviewed or tested, and one of them closed three failed tasks as merged.
+
+**The boundary (owner, 2026-11-27; this is the one place it is written, the other instruction files carry a two-line core and point here):**
+
+- **Read-only inspection** (grep, `gh issue view`, `wc`, listing, reading a log) may be a one-line shell command.
+- **Anything that changes state** (issues, labels, comments, repository files, settings, services) **or decides something** (classifies, selects a worklist, judges "merged") is a committed, tested tool with the usual rules (tests where it decides something, the code checklist, the module map), and it runs as a dry run first. Bulk work shows its plan to the owner before it applies.
+- **Editor-tool edits** (the editor's Edit and Write tools) are exempt, but only for files in the repository that go through the merge gate; the diff is the review.
+- **Live configuration outside git** (for example the queue's `dispatcher-settings.json`) changes only through a tool or the Settings page, with the before and after values logged; never by a shell substitution or an inline program.
+- The boundary applies to every script and command the assistant runs, in the main session and in sub-agents; a sub-agent's brief carries it.
