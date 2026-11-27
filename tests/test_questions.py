@@ -3,6 +3,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 import datetime as dt
 import logic as L
 import cockpit as C
+from ckp.api import context as api_context, state as api_state
 
 NOW = dt.datetime(2026, 11, 20, 12, 0, tzinfo=dt.timezone.utc)
 
@@ -68,8 +69,8 @@ def test_build_questions_reports_unreadable_project(monkeypatch):
             raise RuntimeError("rate limit")
         return good
 
-    monkeypatch.setattr(C, "PROJECTS", {"alpha": dict(repo="o/alpha"), "beta": dict(repo="o/bad")})
-    monkeypatch.setattr(C, "get_state", fake)
+    monkeypatch.setattr(api_context, "PROJECTS", {"alpha": dict(repo="o/alpha"), "beta": dict(repo="o/bad")})
+    monkeypatch.setattr(api_state, "get_state", fake)
     out = C.build_questions(now=NOW)
     assert [q["number"] for q in out["questions"]] == [1]
     by = {p["name"]: p for p in out["projects"]}

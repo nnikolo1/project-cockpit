@@ -17,6 +17,7 @@ import pytest
 ROOT = pathlib.Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 import cockpit as C  # noqa: E402
+from ckp.api import actions as api_actions, context as api_context, gh as api_gh, state as api_state
 import logic as L  # noqa: E402
 
 PAGE = (ROOT / "web" / "index.html").read_text()
@@ -54,15 +55,15 @@ class FakeGh:
 @pytest.fixture
 def env(tmp_path, monkeypatch):
     """One project 'x' with a disk copy of its state older than the hour; data and cache in tmp; steering on; gh faked."""
-    monkeypatch.setattr(C, "PROJECTS", {})
-    monkeypatch.setattr(C, "DEFAULT", None)
+    monkeypatch.setattr(api_context, "PROJECTS", {})
+    monkeypatch.setattr(api_context, "DEFAULT", None)
     C.register([dict(name="x", repo=R, manager=M, project=None, git=None, modules=None, phases=None, code=None, code_collect=None, compliance=None)], "x")
-    monkeypatch.setattr(C, "DATA_DIR", tmp_path / "data")
-    monkeypatch.setattr(C, "CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(api_context, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(api_context, "CACHE_DIR", tmp_path / "cache")
     monkeypatch.setitem(C.CFG, "steer", True)
     monkeypatch.setitem(C.CFG, "simulate", False)
     gh = FakeGh()
-    monkeypatch.setattr(C, "run_gh", gh)
+    monkeypatch.setattr(api_gh, "run_gh", gh)
     C._cache.clear()
     C._refreshing.clear()
     C._disk_save(C.pk(C.proj("x"), "state"), a_state())
@@ -76,7 +77,7 @@ def env(tmp_path, monkeypatch):
 def server(env, monkeypatch):
     """The real server on a free port, its warm-up held until the test releases `gate`; GitHub hangs as long (a slow first fetch)."""
     gate = threading.Event()
-    monkeypatch.setattr(C, "build_state", lambda p: (gate.wait(10), a_state())[1])
+    monkeypatch.setattr(api_state, "build_state", lambda p: (gate.wait(10), a_state())[1])
     C.H.token = "tok"
     srv = C.serve("127.0.0.1", 0, lambda: gate.wait(10))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -151,7 +152,7 @@ def test_a_lost_answer_and_the_retry_apply_submit_once(server, monkeypatch):
 
 def test_the_pages_copy_of_the_state_is_not_kept_in_the_action_id_file(env, monkeypatch):
     """Merge of PC-131 and PC-135: an answer carries the served state for the page; the file of the last 200 action ids keeps the rest only."""
-    monkeypatch.setattr(C, "_do_act", lambda form, run, state, p: (200, dict(ok=True, msg="done", issues=[1], state=dict(tasks=[1] * 1000))))
+    monkeypatch.setattr(api_actions, "_do_act", lambda form, run, state, p: (200, dict(ok=True, msg="done", issues=[1], state=dict(tasks=[1] * 1000))))
     C.do_act(dict(action="release", n=1, aid="big-1"))
     kept = C._acts()["big-1"]["body"]
     assert kept == dict(ok=True, msg="done", issues=[1])
@@ -164,7 +165,7 @@ def test_a_repeat_while_the_first_still_runs_waits_for_it_and_applies_once(env, 
         n.append(1)
         gate.wait(5)
         return 200, dict(ok=True, msg="#1 released as P2")
-    monkeypatch.setattr(C, "_do_act", slow)
+    monkeypatch.setattr(api_actions, "_do_act", slow)
     form, out = dict(action="release", n=1, aid="sub-2"), []
     first = threading.Thread(target=lambda: out.append(C.do_act(dict(form))))
     first.start()
@@ -197,7 +198,7 @@ def test_an_interrupted_action_whose_effect_cannot_be_read_is_refused_not_repeat
 
 
 def test_the_action_ids_on_disk_are_bounded(env, monkeypatch):
-    monkeypatch.setattr(C, "ACTS_KEEP", 3)
+    monkeypatch.setattr(api_actions, "ACTS_KEEP", 3)
     for i in range(5):
         C._acts_put(f"a{i}", dict(state="done", code=200, body={}))
     assert sorted(C._acts()) == ["a2", "a3", "a4"]

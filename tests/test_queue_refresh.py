@@ -14,6 +14,7 @@ import pytest
 ROOT = pathlib.Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 import cockpit as C  # noqa: E402
+from ckp.api import context as api_context, health as api_health, state as api_state
 import logic as L  # noqa: E402
 
 PAGE = (ROOT / "web" / "index.html").read_text()
@@ -27,9 +28,9 @@ def clean(tmp_path, monkeypatch):
     C._failures.clear()
     C._gh_calls.clear()
     C._gh_pause.update(until=0.0)
-    monkeypatch.setattr(C, "CACHE_DIR", tmp_path / "cache")
-    monkeypatch.setattr(C, "DATA_DIR", tmp_path / "data")
-    monkeypatch.setattr(C, "get_ci", lambda p: dict(state="green"))  # its own hourly cache, tested elsewhere
+    monkeypatch.setattr(api_context, "CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(api_context, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(api_health, "get_ci", lambda p: dict(state="green"))  # its own hourly cache, tested elsewhere
     yield
     C._cache.clear()
 
@@ -52,7 +53,7 @@ def server(monkeypatch):
     clock = {"now": t0}
     s = FakeServer(lambda: clock["now"])
     s.t0, s.clock = t0, clock
-    monkeypatch.setattr(C, "build_state", s)
+    monkeypatch.setattr(api_state, "build_state", s)
     return s
 
 
@@ -150,7 +151,7 @@ def test_no_copy_at_all_answers_without_the_task_list(server):
 
 
 def test_endpoint_is_routed():
-    assert '"/api/queuepoll"' in (ROOT / "cockpit.py").read_text()
+    assert '"/api/queuepoll"' in (ROOT / "ckp" / "server" / "routes.py").read_text()
     assert C._since({"since": ["12.5"]}) == 12.5 and C._since({"since": ["x"]}) == 0 and C._since({}) == 0
 
 

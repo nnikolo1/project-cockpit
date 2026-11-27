@@ -2,6 +2,7 @@ import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 import pytest
 import cockpit as C
+from ckp.api import context as api_context
 
 
 def bad():
@@ -26,7 +27,7 @@ import time
 
 @pytest.fixture
 def disk(tmp_path, monkeypatch):
-    monkeypatch.setattr(C, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(api_context, "CACHE_DIR", tmp_path)
     C._cache.clear()
     C._refreshing.clear()
     yield tmp_path

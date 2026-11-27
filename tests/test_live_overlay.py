@@ -9,6 +9,7 @@ import threading
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 import pytest
 import cockpit as C
+from ckp.api import context as api_context, state as api_state
 import logic as L
 
 NOW = dt.datetime(2026, 11, 25, 7, 0, tzinfo=dt.timezone.utc)
@@ -81,8 +82,8 @@ def test_refresh_only_when_the_log_is_newer_and_not_more_often_than_every_two_mi
 def cockpit(tmp_path, monkeypatch):
     C._cache.clear(), C._failures.clear(), C._gh_calls.clear(), C._live_try.clear()
     C._gh_pause.update(until=0.0)
-    monkeypatch.setattr(C, "CACHE_DIR", tmp_path / "cache")
-    monkeypatch.setattr(C, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(api_context, "CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(api_context, "DATA_DIR", tmp_path / "data")
     d = tmp_path / "data" / "proj"
     (d / "processing").mkdir(parents=True)
     yield d
@@ -95,7 +96,7 @@ def test_served_state_refreshes_once_on_a_newer_event_and_respects_pause(cockpit
     old = dict(tasks=[task(1, "wip", ["wip"])], source=dict(fetchedAt=now - 1800))
     C._cache[C.pk(p, "state")] = (now - 1800, old)
     builds, done = [], threading.Event()
-    monkeypatch.setattr(C, "build_state", lambda q: (builds.append(1), done.set(), old)[2])
+    monkeypatch.setattr(api_state, "build_state", lambda q: (builds.append(1), done.set(), old)[2])
     (cockpit / "processing" / "processing.jsonl").write_text(plog((now - 60, "proj-1", "unmerged")))
     (cockpit / "dispatcher-state.json").write_text(json.dumps({"workers": {}}))
     C._gh_pause.update(until=now + 600)              # a rate-limit pause: no refresh

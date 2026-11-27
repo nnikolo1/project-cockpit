@@ -22,6 +22,7 @@ import urllib.request
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import cockpit as C  # noqa: E402
+from ckp.api import context as api_context  # noqa: E402
 import logic as L  # noqa: E402
 
 log = logging.getLogger("backup_restore")
@@ -32,12 +33,12 @@ def gaps(backup_root):
     """The gap checker over an unpacked backup: [{pane, api, missing}] for every pane whose data is not in it."""
     p, _ = C.open_backup(backup_root)
     root = pathlib.Path(backup_root).resolve()
-    saved = C.DATA_DIR, C.CACHE_DIR
-    C.DATA_DIR, C.CACHE_DIR = root / "data", root / "cache"
+    saved = api_context.DATA_DIR, api_context.CACHE_DIR
+    api_context.DATA_DIR, api_context.CACHE_DIR = root / "data", root / "cache"
     try:
         return L.backup_gaps(C.backup_inventory(p))
     finally:
-        C.DATA_DIR, C.CACHE_DIR = saved
+        api_context.DATA_DIR, api_context.CACHE_DIR = saved
 
 
 def _free_port():

@@ -11,6 +11,7 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 import cockpit as C
+from ckp.api import context as api_context
 import logic as L
 
 ROOT = pathlib.Path(__file__).parent.parent
@@ -58,7 +59,7 @@ def projects(tmp_path, pause="0"):
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
-    monkeypatch.setattr(C, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(api_context, "DATA_DIR", tmp_path / "data")
     monkeypatch.setitem(C.CFG, "steer", True)
     def setup(pause="0"):
         ps = projects(tmp_path, pause)

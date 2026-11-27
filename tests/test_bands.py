@@ -4,6 +4,7 @@ import json
 import pytest
 
 import cockpit as C
+from ckp.api import code as api_code, context as api_context
 import logic as L
 
 LOW, HIGH = dict(direction="low", ok=10, warn=20), dict(direction="high", ok=80, warn=50)
@@ -56,9 +57,9 @@ def test_code_payload_carries_bands_for_every_module(ids, tmp_path, monkeypatch)
     full = dict(files_total=2, loc={"python_source": dict(files=2, code=1000)}, lint=dict(total=5), dead_code=dict(candidates=1),
                 complexity=dict(max=12), test_coverage=dict(pct_statements_covered=0))
     (tmp_path / "metrics.json").write_text(json.dumps(_metrics({ids[0]: full, ids[1]: dict(files_total=0)})))
-    monkeypatch.setattr(C, "DATA_DIR", tmp_path / "data")
-    monkeypatch.setattr(C, "biggest_by_module", lambda p, ids_: {})
-    monkeypatch.setattr(C, "pk", lambda p, k: k)
+    monkeypatch.setattr(api_context, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(api_code, "biggest_by_module", lambda p, ids_: {})
+    monkeypatch.setattr(api_context, "pk", lambda p, k: k)
     snap = C.code_snapshot(dict(code=str(tmp_path), name="synthetic"))
     a, b = snap["modules"][ids[0]]["bands"], snap["modules"][ids[1]]["bands"]
     assert set(a) == set(b) == set(L.QUALITY_DEFAULTS)

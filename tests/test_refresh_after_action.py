@@ -9,6 +9,7 @@ import time
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 import pytest
 import cockpit as C
+from ckp.api import code as api_code, context as api_context, gh as api_gh
 import logic as L
 
 M = "mgr"
@@ -98,15 +99,15 @@ def hub(tmp_path, monkeypatch):
         d.clear()
     C._gh_calls.clear()
     C._gh_pause.update(until=0.0)
-    monkeypatch.setattr(C, "CACHE_DIR", tmp_path / "cache")
-    monkeypatch.setattr(C, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(api_context, "CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(api_context, "DATA_DIR", tmp_path / "data")
     monkeypatch.setitem(C.CFG, "steer", True)
     monkeypatch.setitem(C.CFG, "simulate", False)
-    monkeypatch.setattr(C, "ordered", lambda p, mods: mods)
+    monkeypatch.setattr(api_code, "ordered", lambda p, mods: mods)
     h = FakeHub()
     h.timers = Timers()
     monkeypatch.setattr(C.threading, "Timer", h.timers)
-    monkeypatch.setattr(C, "run_gh", lambda args: (C._gh_gate(), h.gh(args))[1])
+    monkeypatch.setattr(api_gh, "run_gh", lambda args: (C._gh_gate(), h.gh(args))[1])
     C._cache[K] = (time.time(), C.state_from_raw(P, h.raw(), {}, dict(name="proj", repo="o/r", user=M, manager=M, fetchedAt=time.time() - 60, fetched="10:00:00")))
     yield h
     C._cache.clear()
@@ -197,13 +198,13 @@ def test_a_burst_is_coalesced_into_one_re_read(hub):
 
 def test_the_re_read_counts_against_the_hourly_cap_and_a_pause_keeps_the_applied_change(hub, monkeypatch):
     C.do_act(dict(action="release", n=1, p="P2", d=""), run=hub.run, p=P)
-    monkeypatch.setattr(C, "GH_CALLS_PER_HOUR", 0)   # the cap is reached: no call is made
+    monkeypatch.setattr(api_gh, "GH_CALLS_PER_HOUR", 0)   # the cap is reached: no call is made
     acted = len(hub.calls)
     C.reread(P)
     S = C.get_state_served(P)
     assert len(hub.calls) == acted and task(S, 1)["stage"] == "released"
     assert "could not be asked" in S["source"]["rereadNote"] and "#1" in S["source"]["rereadNote"]
-    monkeypatch.setattr(C, "GH_CALLS_PER_HOUR", 600)
+    monkeypatch.setattr(api_gh, "GH_CALLS_PER_HOUR", 600)
     C.do_act(dict(action="cancel", n=3), run=hub.run, p=P)   # (PC-18: while a pause runs the write side refuses actions, so the pause starts after it)
     assert C.get_state_served(P)["source"]["rereadNote"] is None   # a new action: its note comes with its own re-read
     C._gh_pause.update(until=time.time() + 600)       # a rate-limit pause: the same
