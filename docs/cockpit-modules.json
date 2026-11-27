@@ -197,6 +197,8 @@
   {"path": "ckp/core/usage.py", "module": "githubclient", "basis": "refactoring slice 1: usage report, transcripts, quota, split out of logic.py (docs/contracts/ckp-architecture.md)"},
   {"path": "ckp/core/tasks_model.py", "module": "githubclient", "basis": "refactoring slice 1: task model: stage, derive, ranking, ops, proposals, questions, split out of logic.py (docs/contracts/ckp-architecture.md)"},
   {"path": "ckp/core/queue_view.py", "module": "githubclient", "basis": "refactoring slice 1: Task Queue view: queue state, capacity, log rows, live overlay, split out of logic.py (docs/contracts/ckp-architecture.md)"},
-  {"path": "ckp/core/health.py", "module": "githubclient", "basis": "refactoring slice 1: metadata gaps, backup, CI, compliance, action log, split out of logic.py (docs/contracts/ckp-architecture.md)"}
+  {"path": "ckp/core/health.py", "module": "githubclient", "basis": "refactoring slice 1: metadata gaps, backup, CI, compliance, action log, split out of logic.py (docs/contracts/ckp-architecture.md)"},
+  {"path": "tools/ckp_split/", "module": "githubclient", "basis": "refactoring slice 1: the one-shot tool that split logic.py into ckp/core modules, kept for the record"},
+  {"path": "tests/tools/test_ckp_split.py", "module": "githubclient", "basis": "test of tools/ckp_split/split_logic.py"}
  ]
 }
