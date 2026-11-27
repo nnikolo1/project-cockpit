@@ -188,6 +188,15 @@
   {"path": "tools/e2e_failure_paths.py", "module": "taskqueue/e2e", "basis": "failure-path test driver of the task queue; its test is tests/tools/test_e2e_failure_paths.py"},
   {"path": "tools/e2e/", "module": "taskqueue/e2e", "basis": "stub of the model and its derived image for the failure-path test; its test is tests/tools/e2e/test_stub_claude.py"},
   {"path": "tools/check_brief.py", "module": "internal/agents", "basis": "the check the agent-brief skill runs before a background agent is launched; its test tests/tools/test_check_brief.py follows it"},
-  {"path": "tests/tools/test_check_brief.py", "module": "internal/agents", "basis": "test of tools/check_brief.py"}
+  {"path": "tests/tools/test_check_brief.py", "module": "internal/agents", "basis": "test of tools/check_brief.py"},
+  {"path": "ckp/core/common.py", "module": "githubclient", "basis": "refactoring slice 1: shared constants and helpers, split out of logic.py (docs/contracts/ckp-architecture.md)"},
+  {"path": "ckp/core/settings.py", "module": "githubclient", "basis": "refactoring slice 1: settings validation, split out of logic.py (docs/contracts/ckp-architecture.md)"},
+  {"path": "ckp/core/modules.py", "module": "githubclient", "basis": "refactoring slice 1: module map, code snapshot, card metadata, bands, split out of logic.py (docs/contracts/ckp-architecture.md)"},
+  {"path": "ckp/core/rules.py", "module": "githubclient", "basis": "refactoring slice 1: rule files, rule feed, policy text, split out of logic.py (docs/contracts/ckp-architecture.md)"},
+  {"path": "ckp/core/commits.py", "module": "githubclient", "basis": "refactoring slice 1: git log parsing, lanes, timeline feed, split out of logic.py (docs/contracts/ckp-architecture.md)"},
+  {"path": "ckp/core/usage.py", "module": "githubclient", "basis": "refactoring slice 1: usage report, transcripts, quota, split out of logic.py (docs/contracts/ckp-architecture.md)"},
+  {"path": "ckp/core/tasks_model.py", "module": "githubclient", "basis": "refactoring slice 1: task model: stage, derive, ranking, ops, proposals, questions, split out of logic.py (docs/contracts/ckp-architecture.md)"},
+  {"path": "ckp/core/queue_view.py", "module": "githubclient", "basis": "refactoring slice 1: Task Queue view: queue state, capacity, log rows, live overlay, split out of logic.py (docs/contracts/ckp-architecture.md)"},
+  {"path": "ckp/core/health.py", "module": "githubclient", "basis": "refactoring slice 1: metadata gaps, backup, CI, compliance, action log, split out of logic.py (docs/contracts/ckp-architecture.md)"}
  ]
 }
