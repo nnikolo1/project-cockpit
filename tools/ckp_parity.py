@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Parity inventory of the port onto the `ckp` structure (refactoring slice 0; docs/contracts/ckp-architecture.md).
 
-    python3 tools/ckp_parity.py --check  [--root DIR] [--config FILE]     exit 1 while an old item has no mapping entry
+    python3 tools/ckp_parity.py --check  [--root DIR] [--config FILE]     exit 1: an old item without mapping, a stale entry, a moved item its target lacks
     python3 tools/ckp_parity.py --report [--root DIR] [--config FILE]     the items not yet ported, grouped by target, with counts
 
 The old surface is read from the code (ast, nothing is imported, no network): every public function and class of logic.py (`logic:NAME`),
@@ -9,21 +9,27 @@ every HTTP route of cockpit.py (`route:GET /path`), every UI action (`action:ser
 tools/ui_actions.py), every module of dispatcher/ (`dispatcher:NAME`) and every `ckp` subcommand (`command:ckp env set`).
 The hand-decided mapping docs/ckp-parity-map.json says where each item goes: {"items": {ITEM: {"target": T, "basis": "one line",
 "as": "new name, optional"}}}; T is a module under ckp/core, ckp/queue, ckp/server, ckp/adapters or ckp/store, or a `ckp ...` command.
-The status is computed here, never typed in the mapping. An item is ported when its target exists and the old name is only a shim:
-- logic:   the target module defines the name (def, class or assignment) and logic.py no longer defines it with def or class;
+The status is computed here, never typed in the mapping. An item named in the mapping is part of the inventory even when its old definition is
+gone (so the counts do not shrink as code moves). An item is ported when its target really provides it and the old name is only a shim:
+- logic:   the target module imports (importlib, in a subprocess with the root on the path) and exposes the name (`as` if given) as a callable
+           or class, and logic.py no longer defines it with def or class; placed is not ported;
 - dispatcher: the target module exists and the old module defines nothing (only imports) or is gone;
 - route, action:server: the target module names the path or action and the old server file no longer routes it;
 - action:page, action:form: the page stays in place; the target (an API function's module or a command) exists;
 - command: the command exists (it is already on the new structure).
 A DECISION marker at the start of a basis flags a placement that is a real design choice; --report counts those.
 Generated output goes to stdout. Config: a JSON file with the keys of CONFIG (paths relative to the root).
+--check violations: an old item without a mapping entry; a malformed entry; a mapped item gone from the old code whose target does not provide
+it (for a logic item: "defined elsewhere" or, when it exists nowhere in ckp/, "stale"); a page or form action that no longer exists.
 Exit code: 0 ok, 1 (--check) violations.
 """
 import argparse
 import ast
 import json
 import logging
+import os
 import pathlib
+import subprocess
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -35,6 +41,18 @@ CONFIG = dict(logic=["logic.py"], server="cockpit.py", handlers=["do_GET", "do_P
               cli_builder="build_parser", map="docs/ckp-parity-map.json", ui=ui_actions.CONFIG)
 TARGET_PREFIXES = ("ckp/core/", "ckp/queue/", "ckp/server/", "ckp/adapters/", "ckp/store/")
 DECISION = "DECISION"
+KINDS = {"logic": "logic", "route": "route", "action": "action", "dispatcher": "dispatcher", "command": "command"}
+PROBE = """
+import importlib, json, sys
+out = {}
+for m in sys.argv[1:]:
+    try:
+        mod = importlib.import_module(m)
+        out[m] = [n for n in dir(mod) if not n.startswith("_") and callable(getattr(mod, n, None))]
+    except Exception:
+        out[m] = None
+print(json.dumps(out))
+"""
 
 
 def _tree(path):
@@ -193,7 +211,24 @@ def _names(tree):
     return {n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)} if tree else set()
 
 
-def status(item, kind, entry, root, cfg, cmds):
+def exposed(root, targets):
+    """-> {target path: set of callable public names, or None when the module is absent or does not import}; one fresh interpreter, root first on its path."""
+    root = pathlib.Path(root)
+    mods = {t: t.replace("/", ".") for t in targets if _module_file(root, t)}
+    out = {t: None for t in targets}
+    if mods:
+        r = subprocess.run([sys.executable, "-c", PROBE, *mods.values()], cwd=root, capture_output=True, text=True,
+                           env={**os.environ, "PYTHONPATH": str(root)})
+        try:
+            got = json.loads(r.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            log.warning("module probe failed: %s", r.stderr.strip()[-300:])
+            got = {}
+        out |= {t: set(got[m]) if got.get(m) is not None else None for t, m in mods.items()}
+    return out
+
+
+def status(item, kind, entry, root, cfg, cmds, avail):
     """-> True when the item is ported: its target exists and the old name is only a shim (rules in the module docstring)."""
     t = entry["target"]
     name = item.split(":", 1)[1]
@@ -204,7 +239,7 @@ def status(item, kind, entry, root, cfg, cmds):
         return False
     tree = _tree(mod)
     if kind == "logic":
-        return entry.get("as", name) in defined_loosely(tree) and not any(name in defined(_tree(root / f)) for f in cfg["logic"])
+        return entry.get("as", name) in (avail.get(t) or ()) and not any(name in defined(_tree(root / f)) for f in cfg["logic"])
     if kind == "dispatcher":
         old = root / cfg["dispatcher"] / f"{name}.py"
         return not old.is_file() or not defined(_tree(old))
@@ -219,19 +254,45 @@ def status(item, kind, entry, root, cfg, cmds):
 
 
 def evaluate(root, cfg=CONFIG):
-    """-> (items {id: kind}, mapping, unmapped [ids], problems [str], ported {id})."""
+    """-> (items {id: kind}, mapping, unmapped [ids], problems [str], ported {id}); items = the old surface plus every mapped item."""
     root = pathlib.Path(root)
-    items, mapping = inventory(root, cfg), load_map(root, cfg)
+    old, mapping = inventory(root, cfg), load_map(root, cfg)
+    items = {**{i: KINDS.get(i.split(":", 1)[0], "logic") for i in mapping}, **old}
     cmds = {i.split(":", 1)[1] for i, k in items.items() if k == "command"}
-    unmapped = sorted(i for i in items if i not in mapping)
+    unmapped = sorted(i for i in old if i not in mapping)
     problems = [p for i, e in sorted(mapping.items()) for p in entry_problems(i, e)]
-    ported = {i for i, e in mapping.items() if not entry_problems(i, e) and status(i, items.get(i, i.split(":")[0]), e, root, cfg, cmds)}
-    log.info("%d old items, %d mapped, %d unmapped, %d ported", len(items), len(items) - len(unmapped), len(unmapped), len(ported))
+    good = {i: e for i, e in mapping.items() if not entry_problems(i, e)}
+    avail = exposed(root, {e["target"] for i, e in good.items() if items[i] == "logic" and e["target"].startswith(TARGET_PREFIXES)})
+    ported = {i for i, e in good.items() if status(i, items[i], e, root, cfg, cmds, avail)}
+    elsewhere = _defined_in_ckp(root) if any(i not in old and i not in ported and items[i] == "logic" for i in good) else {}
+    for i, e in sorted(good.items()):
+        name = e.get("as", i.split(":", 1)[1])
+        if items[i] == "action" and not i.startswith("action:server:") and i not in old:
+            problems.append(f"{i}: stale: the page or form action no longer exists")
+            ported.discard(i)
+        elif i in old or i in ported:
+            continue
+        elif items[i] == "logic" and not elsewhere.get(name):
+            problems.append(f"{i}: stale: {name} is defined nowhere in ckp/ and the old file no longer has it")
+        elif items[i] == "logic":
+            problems.append(f"{i}: target {e['target']} does not define or expose {name} (defined in {', '.join(sorted(elsewhere[name]))})")
+        else:
+            problems.append(f"{i}: gone from the old code and target {e['target']} does not provide it (stale or not yet ported)")
+    log.info("%d items, %d old, %d unmapped, %d ported", len(items), len(old), len(unmapped), len(ported))
     return items, mapping, unmapped, problems, ported
 
 
+def _defined_in_ckp(root):
+    """-> {name: {module path}} for every def, class or assignment at the top level of the modules under ckp/."""
+    out = {}
+    for f in sorted((root / "ckp").rglob("*.py")):
+        for n in defined_loosely(_tree(f)):
+            out.setdefault(n, set()).add(str(f.relative_to(root).with_suffix("")))
+    return out
+
+
 def check(root, cfg=CONFIG):
-    """-> list of violations: an old item without a mapping entry, a malformed entry."""
+    """-> list of violations: an old item without a mapping entry, a malformed or stale entry, a moved item its target lacks."""
     _, _, unmapped, problems, _ = evaluate(root, cfg)
     return [f"{i}: no mapping entry" for i in unmapped] + problems
 
@@ -239,11 +300,11 @@ def check(root, cfg=CONFIG):
 def report(root, cfg=CONFIG):
     items, mapping, unmapped, _, ported = evaluate(root, cfg)
     kinds = sorted(set(items.values()))
-    lines = ["kind        old items   placed   ported"]
+    lines = ["kind            items   placed   ported"]
     for k in kinds:
         ids = [i for i, kk in items.items() if kk == k]
         lines.append(f"{k:<11} {len(ids):>9} {sum(i in mapping for i in ids):>8} {sum(i in ported for i in ids):>8}")
-    lines.append(f"{'all':<11} {len(items):>9} {len(items) - len(unmapped):>8} {len(ported & set(items)):>8}")
+    lines.append(f"{'all':<11} {len(items):>9} {sum(i in mapping for i in items):>8} {len(ported & set(items)):>8}")
     open_ = {i: mapping[i] for i in items if i in mapping and i not in ported}
     groups = {}
     for i, e in open_.items():
@@ -263,7 +324,7 @@ def main(argv=None):
     ap.add_argument("--root", default=str(ROOT))
     ap.add_argument("--config", help="JSON file with the keys of CONFIG (default: this project's)")
     g = ap.add_mutually_exclusive_group(required=True)
-    g.add_argument("--check", action="store_true", help="exit 1 while an old item has no mapping entry")
+    g.add_argument("--check", action="store_true", help="exit 1: unmapped old item, stale entry, moved item missing from its target")
     g.add_argument("--report", action="store_true", help="the items not yet ported, grouped by target")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")

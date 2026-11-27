@@ -375,11 +375,11 @@
   },
   "logic:action_record": {
    "target": "ckp/core/health",
-   "basis": "DECISION: the action log has no theme in the contract: ckp/core/health or its own ckp/core/actionlog; chosen: health"
+   "basis": "settled by the split: the action log has no theme in the contract: ckp/core/health or its own ckp/core/actionlog; now defined in ckp/core/health"
   },
   "logic:activity_days": {
    "target": "ckp/core/commits",
-   "basis": "DECISION: task activity for the Timeline heatmap: ckp/core/commits (the feed) or ckp/core/tasks_model (it counts tasks); chosen: commits"
+   "basis": "settled by the split: task activity for the Timeline heatmap: ckp/core/commits (the feed) or ckp/core/tasks_model (it counts tasks); now defined in ckp/core/commits"
   },
   "logic:add_tree": {
    "target": "ckp/core/modules",
@@ -403,7 +403,7 @@
   },
   "logic:backup_gaps": {
    "target": "ckp/core/health",
-   "basis": "DECISION: offline-copy completeness: ckp/core/health or ckp/core/offline; chosen: health"
+   "basis": "settled by the split: offline-copy completeness: ckp/core/health or ckp/core/offline; now defined in ckp/core/health"
   },
   "logic:backup_status": {
    "target": "ckp/core/health",
@@ -459,7 +459,7 @@
   },
   "logic:collect_command": {
    "target": "ckp/core/modules",
-   "basis": "DECISION: the collector command of a project setting: ckp/core/modules (snapshot refresh) or ckp/core/health (compliance); chosen: modules"
+   "basis": "settled by the split: the collector command of a project setting: ckp/core/modules (snapshot refresh) or ckp/core/health (compliance); now defined in ckp/core/modules"
   },
   "logic:commit_lanes": {
    "target": "ckp/core/commits",
@@ -515,7 +515,7 @@
   },
   "logic:filter_events": {
    "target": "ckp/core/health",
-   "basis": "DECISION: the action log has no theme in the contract: ckp/core/health or its own ckp/core/actionlog; chosen: health"
+   "basis": "settled by the split: the action log has no theme in the contract: ckp/core/health or its own ckp/core/actionlog; now defined in ckp/core/health"
   },
   "logic:filter_feed": {
    "target": "ckp/core/commits",
@@ -551,7 +551,7 @@
   },
   "logic:hl_ids": {
    "target": "ckp/core/modules",
-   "basis": "DECISION: the Workflow highlight file reader: ckp/core/modules (module content files) or a separate theme; chosen: modules"
+   "basis": "settled by the split: the Workflow highlight file reader: ckp/core/modules (module content files) or a separate theme; now defined in ckp/core/modules"
   },
   "logic:import_edges": {
    "target": "ckp/core/modules",
@@ -575,15 +575,15 @@
   },
   "logic:is_manager": {
    "target": "ckp/core/rules",
-   "basis": "DECISION: rule-change authorship: ckp/core/rules or ckp/core/tasks_model (protected labels); chosen: rules"
+   "basis": "settled by the split: rule-change authorship: ckp/core/rules or ckp/core/tasks_model (protected labels); now defined in ckp/core/rules"
   },
   "logic:is_protected": {
    "target": "ckp/core/tasks_model",
    "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
   },
   "logic:is_rate_limited": {
-   "target": "ckp/core/offline",
-   "basis": "DECISION: offline behaviour has no theme in the contract: new ckp/core/offline, or ckp/store/cache; chosen: ckp/core/offline (pure rules)"
+   "target": "ckp/core/queue_view",
+   "basis": "settled by the split: offline behaviour has no theme in the contract: new ckp/core/offline, or ckp/store/cache; now defined in ckp/core/queue_view"
   },
   "logic:is_running": {
    "target": "ckp/core/tasks_model",
@@ -591,7 +591,7 @@
   },
   "logic:issue_entries": {
    "target": "ckp/core/commits",
-   "basis": "DECISION: issue entries of the Timeline feed: ckp/core/commits (the feed) or ckp/core/tasks_model; chosen: commits"
+   "basis": "settled by the split: issue entries of the Timeline feed: ckp/core/commits (the feed) or ckp/core/tasks_model; now defined in ckp/core/commits"
   },
   "logic:issues_needing_timeline": {
    "target": "ckp/core/tasks_model",
@@ -603,7 +603,7 @@
   },
   "logic:listed_projects": {
    "target": "ckp/core/queue_view",
-   "basis": "DECISION: the projects the one queue serves: ckp/core/queue_view or ckp/core/projects (PC-140); chosen: queue_view"
+   "basis": "settled by the split: the projects the one queue serves: ckp/core/queue_view or ckp/core/projects (PC-140); now defined in ckp/core/queue_view"
   },
   "logic:live_events": {
    "target": "ckp/core/queue_view",
@@ -614,7 +614,7 @@
    "basis": "theme queue_view: Task Queue state, capacity, processing-log rows and the live overlay (contract layout)"
   },
   "logic:local_modules": {
-   "target": "ckp/core/modules",
+   "target": "ckp/core/queue_view",
    "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
   },
   "logic:log_rows": {
@@ -623,14 +623,14 @@
   },
   "logic:map_entry": {
    "target": "ckp/core/modules",
-   "basis": "DECISION: a module-map lookup used by the gap checks: ckp/core/modules or ckp/core/health; chosen: modules"
+   "basis": "settled by the split: a module-map lookup used by the gap checks: ckp/core/modules or ckp/core/health; now defined in ckp/core/modules"
   },
   "logic:map_path": {
    "target": "ckp/core/modules",
    "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
   },
   "logic:may_start_new": {
-   "target": "ckp/core/tasks_model",
+   "target": "ckp/core/queue_view",
    "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
   },
   "logic:merge_questions": {
@@ -647,10 +647,10 @@
   },
   "logic:module_deadline": {
    "target": "ckp/core/modules",
-   "basis": "DECISION: a module's deadline from the task side: ckp/core/modules or ckp/core/tasks_model; chosen: modules"
+   "basis": "settled by the split: a module's deadline from the task side: ckp/core/modules or ckp/core/tasks_model; now defined in ckp/core/modules"
   },
   "logic:module_dir": {
-   "target": "ckp/core/modules",
+   "target": "ckp/core/commits",
    "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
   },
   "logic:module_docs": {
@@ -686,24 +686,24 @@
    "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
   },
   "logic:offline_kind": {
-   "target": "ckp/core/offline",
-   "basis": "DECISION: offline behaviour has no theme in the contract: new ckp/core/offline, or ckp/store/cache; chosen: ckp/core/offline (pure rules)"
+   "target": "ckp/core/queue_view",
+   "basis": "settled by the split: offline behaviour has no theme in the contract: new ckp/core/offline, or ckp/store/cache; now defined in ckp/core/queue_view"
   },
   "logic:offline_reason": {
-   "target": "ckp/core/offline",
-   "basis": "DECISION: offline behaviour has no theme in the contract: new ckp/core/offline, or ckp/store/cache; chosen: ckp/core/offline (pure rules)"
+   "target": "ckp/core/queue_view",
+   "basis": "settled by the split: offline behaviour has no theme in the contract: new ckp/core/offline, or ckp/store/cache; now defined in ckp/core/queue_view"
   },
   "logic:open_counts": {
-   "target": "ckp/core/tasks_model",
-   "basis": "DECISION: counts tasks per module for the chips: ckp/core/tasks_model or ckp/core/modules; chosen: tasks_model"
+   "target": "ckp/core/queue_view",
+   "basis": "settled by the split: counts tasks per module for the chips: ckp/core/tasks_model or ckp/core/modules; now defined in ckp/core/queue_view"
   },
   "logic:open_kind": {
-   "target": "ckp/core/tasks_model",
-   "basis": "DECISION: counts tasks per module for the chips: ckp/core/tasks_model or ckp/core/modules; chosen: tasks_model"
+   "target": "ckp/core/queue_view",
+   "basis": "settled by the split: counts tasks per module for the chips: ckp/core/tasks_model or ckp/core/modules; now defined in ckp/core/queue_view"
   },
   "logic:open_tip": {
-   "target": "ckp/core/tasks_model",
-   "basis": "DECISION: counts tasks per module for the chips: ckp/core/tasks_model or ckp/core/modules; chosen: tasks_model"
+   "target": "ckp/core/queue_view",
+   "basis": "settled by the split: counts tasks per module for the chips: ckp/core/tasks_model or ckp/core/modules; now defined in ckp/core/queue_view"
   },
   "logic:order_modules": {
    "target": "ckp/core/modules",
@@ -715,11 +715,11 @@
   },
   "logic:page_record": {
    "target": "ckp/core/health",
-   "basis": "DECISION: the action log has no theme in the contract: ckp/core/health or its own ckp/core/actionlog; chosen: health"
+   "basis": "settled by the split: the action log has no theme in the contract: ckp/core/health or its own ckp/core/actionlog; now defined in ckp/core/health"
   },
   "logic:pane_problem": {
    "target": "ckp/core/health",
-   "basis": "DECISION: why an offline copy has no data: ckp/core/health or ckp/core/offline; chosen: health"
+   "basis": "settled by the split: why an offline copy has no data: ckp/core/health or ckp/core/offline; now defined in ckp/core/health"
   },
   "logic:parent_id": {
    "target": "ckp/core/modules",
@@ -747,7 +747,7 @@
   },
   "logic:parse_heartbeat": {
    "target": "ckp/core/queue_view",
-   "basis": "DECISION: a Dispatcher heartbeat line: ckp/core/queue_view (the log rows) or ckp/queue/plog (the writer of the log); chosen: queue_view"
+   "basis": "settled by the split: a Dispatcher heartbeat line: ckp/core/queue_view (the log rows) or ckp/queue/plog (the writer of the log); now defined in ckp/core/queue_view"
   },
   "logic:parse_last_changes": {
    "target": "ckp/core/rules",
@@ -755,7 +755,7 @@
   },
   "logic:parse_module_deadlines": {
    "target": "ckp/core/tasks_model",
-   "basis": "DECISION: module deadlines belong to ckp/core/modules or tasks_model (parse_due); chosen: tasks_model with parse_due"
+   "basis": "settled by the split: module deadlines belong to ckp/core/modules or tasks_model (parse_due); now defined in ckp/core/tasks_model"
   },
   "logic:parse_numstat": {
    "target": "ckp/core/rules",
@@ -763,7 +763,7 @@
   },
   "logic:parse_project": {
    "target": "ckp/core/tasks_model",
-   "basis": "DECISION: the Project-board field parser: ckp/core/tasks_model or a GitHub-facing module in ckp/adapters; chosen: tasks_model (pure parsing)"
+   "basis": "settled by the split: the Project-board field parser: ckp/core/tasks_model or a GitHub-facing module in ckp/adapters; now defined in ckp/core/tasks_model"
   },
   "logic:parse_proposals": {
    "target": "ckp/core/tasks_model",
@@ -795,18 +795,18 @@
   },
   "logic:policy_text": {
    "target": "ckp/core/modules",
-   "basis": "DECISION: footprint backup policy text: ckp/core/modules (footprint) or ckp/core/health (backup); chosen: modules"
+   "basis": "settled by the split: footprint backup policy text: ckp/core/modules (footprint) or ckp/core/health (backup); now defined in ckp/core/modules"
   },
   "logic:project_key": {
    "target": "ckp/core/queue_view",
-   "basis": "DECISION: project of a Dispatcher task id: ckp/core/queue_view or ckp/core/projects (PC-140); chosen: queue_view"
+   "basis": "settled by the split: project of a Dispatcher task id: ckp/core/queue_view or ckp/core/projects (PC-140); now defined in ckp/core/queue_view"
   },
   "logic:queue_all": {
    "target": "ckp/core/queue_view",
    "basis": "theme queue_view: Task Queue state, capacity, processing-log rows and the live overlay (contract layout)"
   },
   "logic:queue_interval": {
-   "target": "ckp/core/settings",
+   "target": "ckp/core/queue_view",
    "basis": "theme settings: validation of the settings forms and the settings the page may narrow (contract layout)"
   },
   "logic:queue_local": {
@@ -822,8 +822,8 @@
    "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
   },
   "logic:rate_limit_reset": {
-   "target": "ckp/core/offline",
-   "basis": "DECISION: offline behaviour has no theme in the contract: new ckp/core/offline, or ckp/store/cache; chosen: ckp/core/offline (pure rules)"
+   "target": "ckp/core/queue_view",
+   "basis": "settled by the split: offline behaviour has no theme in the contract: new ckp/core/offline, or ckp/store/cache; now defined in ckp/core/queue_view"
   },
   "logic:record_kind": {
    "target": "ckp/core/usage",
@@ -838,8 +838,8 @@
    "basis": "theme commits: git log parsing, lanes and the timeline feed (contract layout)"
   },
   "logic:refresh_due": {
-   "target": "ckp/core/offline",
-   "basis": "DECISION: the refresh schedule of GitHub resources: ckp/core/offline or ckp/store/cache; chosen: ckp/core/offline"
+   "target": "ckp/core/queue_view",
+   "basis": "settled by the split: the refresh schedule of GitHub resources: ckp/core/offline or ckp/store/cache; now defined in ckp/core/queue_view"
   },
   "logic:refresh_outcome": {
    "target": "ckp/core/modules",
@@ -850,7 +850,7 @@
    "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
   },
   "logic:report_file": {
-   "target": "ckp/core/modules",
+   "target": "ckp/core/rules",
    "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
   },
   "logic:resolve_module": {
@@ -858,8 +858,8 @@
    "basis": "theme modules: module map, files, snapshot, code view, relations, card metadata, churn, bands and footprint (contract layout)"
   },
   "logic:rule_feed": {
-   "target": "ckp/core/commits",
-   "basis": "DECISION: builds timeline entries from rule changes: ckp/core/commits (the feed) or ckp/core/rules (the rule data); chosen: commits, as the feed"
+   "target": "ckp/core/rules",
+   "basis": "settled by the split: builds timeline entries from rule changes: ckp/core/commits (the feed) or ckp/core/rules (the rule data); now defined in ckp/core/rules"
   },
   "logic:rule_files": {
    "target": "ckp/core/rules",
@@ -879,11 +879,11 @@
   },
   "logic:sanitise_svg": {
    "target": "ckp/core/modules",
-   "basis": "DECISION: sanitises the Workflow drawing: ckp/core/modules (module content files) or a separate theme; chosen: modules"
+   "basis": "settled by the split: sanitises the Workflow drawing: ckp/core/modules (module content files) or a separate theme; now defined in ckp/core/modules"
   },
   "logic:scrub": {
    "target": "ckp/core/health",
-   "basis": "DECISION: the action log's secret scrubbing: ckp/core/health or a security theme; chosen: health with the action log"
+   "basis": "settled by the split: the action log's secret scrubbing: ckp/core/health or a security theme; now defined in ckp/core/health"
   },
   "logic:shade_level": {
    "target": "ckp/core/commits",
@@ -918,8 +918,8 @@
    "basis": "theme tasks_model: task states, derivation, release and blocking rules, proposals, questions and the issue copy (contract layout)"
   },
   "logic:stagger_plan": {
-   "target": "ckp/core/offline",
-   "basis": "DECISION: the refresh schedule of GitHub resources: ckp/core/offline or ckp/store/cache; chosen: ckp/core/offline"
+   "target": "ckp/core/queue_view",
+   "basis": "settled by the split: the refresh schedule of GitHub resources: ckp/core/offline or ckp/store/cache; now defined in ckp/core/queue_view"
   },
   "logic:static_entries": {
    "target": "ckp/core/commits",
@@ -939,11 +939,11 @@
   },
   "logic:task_module": {
    "target": "ckp/core/modules",
-   "basis": "DECISION: joins a task to a module: ckp/core/modules or ckp/core/tasks_model; chosen: modules"
+   "basis": "settled by the split: joins a task to a module: ckp/core/modules or ckp/core/tasks_model; now defined in ckp/core/modules"
   },
   "logic:task_number": {
    "target": "ckp/core/queue_view",
-   "basis": "DECISION: Dispatcher task id to issue number: ckp/core/queue_view or ckp/core/tasks_model; chosen: queue_view"
+   "basis": "settled by the split: Dispatcher task id to issue number: ckp/core/queue_view or ckp/core/tasks_model; now defined in ckp/core/queue_view"
   },
   "logic:top_id": {
    "target": "ckp/core/modules",

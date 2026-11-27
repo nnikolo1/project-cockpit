@@ -129,8 +129,46 @@ def test_logic_not_ported_when_target_missing_or_lacks_the_name(tmp_path):
 
 def test_logic_renamed_target_uses_as(tmp_path):
     ported = _ported(tmp_path, "from ckp.core.t import foo2 as foo\n", {"logic:foo": {**ent("ckp/core/t"), "as": "foo2"}},
-                     {"ckp/core/t.py": "foo2 = 1\n"})
+                     {"ckp/core/t.py": "def foo2():\n    pass\n"})
     assert "logic:foo" in ported
+
+
+def test_logic_not_ported_when_target_has_the_name_but_not_as_a_callable_or_does_not_import(tmp_path):
+    shim = "from ckp.core.t import foo\n"
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    assert "logic:foo" not in _ported(tmp_path / "a", shim, {"logic:foo": ent("ckp/core/t")}, {"ckp/core/t.py": "foo = 1\n"})
+    assert "logic:foo" not in _ported(tmp_path / "b", shim, {"logic:foo": ent("ckp/core/t")},
+                                      {"ckp/core/t.py": "import no_such_module_anywhere\ndef foo():\n    pass\n"})
+
+
+def test_moved_item_stays_in_the_inventory_and_report_when_its_old_definition_is_gone(tmp_path):
+    r = tree(tmp_path, logic="from ckp.core.t import foo\n", mapping={"logic:foo": ent("ckp/core/t")},
+             files={"ckp/core/t.py": "def foo():\n    pass\n"})
+    items, _, _, _, ported = P.evaluate(r, CFG)
+    assert items["logic:foo"] == "logic" and "logic:foo" in ported
+    assert any(line.startswith("logic") and " 1 " in line for line in P.report(r, CFG).splitlines())
+
+
+def test_check_flags_a_moved_item_missing_from_its_target(tmp_path):
+    r = tree(tmp_path, logic="", mapping={"logic:foo": ent("ckp/core/t")},
+             files={"ckp/core/t.py": "x = 1\n", "ckp/core/u.py": "def foo():\n    pass\n"})
+    bad = [b for b in P.check(r, CFG) if b.startswith("logic:foo")]
+    assert len(bad) == 1 and "does not define" in bad[0] and "ckp/core/u" in bad[0]
+
+
+def test_check_flags_a_stale_entry_that_exists_nowhere(tmp_path):
+    r = tree(tmp_path, logic="", mapping={"logic:gone": ent("ckp/core/t"), "action:page:vanished": ent("ckp/server/pages")},
+             files={"ckp/core/t.py": "def other():\n    pass\n", "ckp/server/pages.py": "x = 1\n"})
+    bad = P.check(r, CFG)
+    assert any(b.startswith("logic:gone: stale") for b in bad) and any(b.startswith("action:page:vanished: stale") for b in bad)
+
+
+def test_check_flags_an_old_item_without_mapping_even_when_others_are_moved(tmp_path):
+    r = tree(tmp_path, logic="def foo():\n    pass\n", mapping={"logic:moved": ent("ckp/core/t")},
+             files={"ckp/core/t.py": "def moved():\n    pass\n"})
+    bad = P.check(r, CFG)
+    assert "logic:foo: no mapping entry" in bad and not any(b.startswith("logic:moved") for b in bad)
 
 
 def test_dispatcher_shim_is_ported_a_real_module_is_not(tmp_path):
