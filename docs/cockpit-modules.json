@@ -213,6 +213,8 @@
   {"path": "tools/ckp_split/", "module": "githubclient", "basis": "refactoring slice 1: the one-shot tool that split logic.py into ckp/core modules, kept for the record"},
   {"path": "tests/tools/test_ckp_split.py", "module": "githubclient", "basis": "test of tools/ckp_split/split_logic.py"},
   {"path": "ckp/api/", "module": "githubclient", "basis": "refactoring slice 3: the API layer, one module per group of what the viewer offers (state, queue, code, usage, settings, health, pages, actions) plus the shared context, gh gateway, cache and fetch services; moved out of cockpit.py (docs/contracts/ckp-architecture.md)"},
-  {"path": "ckp/server/", "module": "githubclient", "basis": "refactoring slice 3: the HTTP plumbing of the viewer (handler, routing table, startup and warm-up); moved out of cockpit.py (docs/contracts/ckp-architecture.md)"}
+  {"path": "ckp/server/", "module": "githubclient", "basis": "refactoring slice 3: the HTTP plumbing of the viewer (handler, routing table, startup and warm-up); moved out of cockpit.py (docs/contracts/ckp-architecture.md)"},
+  {"path": "tools/ckp_split/split_cockpit.py", "module": "githubclient", "basis": "refactoring slice 3: the one-shot tool that split cockpit.py into ckp/api and ckp/server modules, kept for the record"},
+  {"path": "tests/tools/test_ckp_split_cockpit.py", "module": "githubclient", "basis": "test of tools/ckp_split/split_cockpit.py"}
  ]
 }
