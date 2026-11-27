@@ -103,7 +103,7 @@ def _launch_cmd():
 
 
 def test_containerfile_wires_the_hook():
-    text = (pathlib.Path(rt.__file__).parent / "image" / "Containerfile").read_text()
+    text = (pathlib.Path(__file__).resolve().parents[2] / "dispatcher" / "image" / "Containerfile").read_text()
     s = json.loads(re.search(r"^ARG WORKER_SETTINGS='(.*)'$", text, re.M).group(1))
     cmd = s["hooks"]["Stop"][0]["hooks"][0]["command"]
     assert cmd == "python3 /opt/hook/stop_hook.py"
