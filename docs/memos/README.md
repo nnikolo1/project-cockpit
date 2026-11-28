@@ -9,3 +9,4 @@ Short, dated notes that are not decisions: background, known shortcuts, open ite
 | 2026-11-17 | [Roadmap (open items)](2026.11.17-roadmap.md) |
 | 2026-11-24 | [Refactoring for independence from the agent and the OS](2026.11.24-refactoring-for-agent-and-os-independence.md) |
 | 2026-11-27 | [Paused: where things stand and how to resume](2026.11.27-pause-and-how-to-resume.md) |
+| 2026-11-28 | [Roles and privileges for the Worker and the Merger (PC-38)](2026.11.28-roles-and-privileges-for-worker-and-merger.md) |
